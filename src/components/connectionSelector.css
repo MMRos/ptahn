@@ -1,0 +1,155 @@
+.connection-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  width: 100%;
+}
+
+.cs-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.cs-selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.cs-empty-text {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
+}
+
+.cs-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 211, 107, 0.08);
+  border: 1px solid rgba(255, 211, 107, 0.25);
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: #eaeaea;
+}
+
+.cs-badge-icon {
+  color: #ffd36b;
+  font-size: 0.85rem;
+}
+
+.cs-badge-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.cs-badge-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.cs-badge-connection {
+  font-size: 0.72rem;
+  color: rgba(255, 211, 107, 0.85);
+}
+
+.cs-badge-remove {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 2px 4px;
+  margin-left: 4px;
+  transition: color 0.15s ease;
+}
+
+.cs-badge-remove:hover {
+  color: #ff6b6b;
+}
+
+.cs-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.cs-search-icon {
+  position: absolute;
+  left: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.85rem;
+}
+
+.cs-input {
+  width: 100%;
+  padding: 10px 12px 10px 36px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.cs-input:focus {
+  border-color: rgba(255, 211, 107, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.cs-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 6px;
+  background: #1a1a24;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.cs-no-results {
+  padding: 12px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+}
+
+.cs-dropdown-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s ease;
+}
+
+.cs-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.cs-dropdown-item:hover {
+  background: rgba(255, 211, 107, 0.1);
+}
+
+.cs-item-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.cs-item-meta {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 2px;
+}
+
+.cs-item-type {
+  color: #ffd36b;
+}

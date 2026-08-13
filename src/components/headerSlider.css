@@ -1,0 +1,274 @@
+.isekai-spotlight-slider {
+  position: relative;
+  background: rgba(13, 14, 22, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  overflow: hidden;
+  margin-bottom: 24px;
+  cursor: pointer;
+  transition: border-color 0.25s ease;
+}
+
+.isekai-spotlight-slider:hover {
+  border-color: rgba(255, 211, 107, 0.25);
+}
+
+.spotlight-content-container {
+  display: flex;
+  min-height: 380px;
+}
+
+/* Lado Izquierdo: Tráiler / Video */
+.spotlight-media-side {
+  width: 50%;
+  position: relative;
+  background: #000;
+  overflow: hidden;
+}
+
+.spotlight-video-sim {
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+
+.spotlight-video-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.1) 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.play-trailer-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.isekai-spotlight-slider:hover .play-trailer-btn {
+  transform: scale(1.1);
+  background-color: rgba(255, 211, 107, 0.95);
+  color: #000000;
+  border-color: transparent;
+}
+
+.trailer-play-icon {
+  margin-left: 4px;
+  font-size: 1.4rem;
+}
+
+.mute-trailer-btn {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.15s ease;
+}
+
+.mute-trailer-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Lado Derecho: Información del Escenario */
+.spotlight-info-side {
+  width: 50%;
+  padding: 24px;
+  background: linear-gradient(90deg, rgba(13,14,22,0.95) 0%, rgba(20,20,30,0.9) 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.spotlight-author {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #ff9f6b;
+  margin-bottom: 6px;
+}
+
+.spotlight-title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 10px 0;
+  line-height: 1.25;
+}
+
+.spotlight-desc {
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0 0 14px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.spotlight-stats-bar {
+  display: flex;
+  gap: 16px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 12px;
+}
+
+.spotlight-stats-bar span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.novela-visual-badge {
+  background: rgba(138, 43, 226, 0.2);
+  border: 1px solid rgba(138, 43, 226, 0.5);
+  color: #c994ff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Elenco / Reparto */
+.spotlight-cast-section {
+  margin-top: 4px;
+}
+
+.cast-header {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.cast-list {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.cast-member-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 60px;
+}
+
+.cast-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+}
+
+.cast-name {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  max-width: 60px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Categorías e Hilos de Etiquetas */
+.spotlight-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.spotlight-tags-row .tag-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.spotlight-tags-row .category-pill {
+  background: rgba(255, 211, 107, 0.12);
+  border-color: rgba(255, 211, 107, 0.25);
+  color: #ffd36b;
+  font-weight: 600;
+}
+
+/* Botones de navegación laterales del Slider */
+.spotlight-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.2s ease;
+}
+
+.spotlight-arrow:hover {
+  background: rgba(255, 211, 107, 0.95);
+  color: #000000;
+  border-color: transparent;
+}
+
+.spotlight-arrow.left {
+  left: 12px;
+}
+
+.spotlight-arrow.right {
+  right: 12px;
+}
+
+@media (max-width: 900px) {
+  .spotlight-content-container {
+    flex-direction: column;
+  }
+  .spotlight-media-side, .spotlight-info-side {
+    width: 100%;
+  }
+  .spotlight-media-side {
+    height: 200px;
+  }
+  .spotlight-arrow {
+    display: none;
+  }
+}

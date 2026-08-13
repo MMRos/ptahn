@@ -1,0 +1,50 @@
+/* Shared styles for ScenarioPopup and CharacterModal */
+.scenario-backdrop, .char-backdrop {
+  position: fixed; inset: 0; display:flex; align-items:center; justify-content:center; background: rgba(2,4,10,0.6); z-index:120;
+}
+.scenario-popup {
+  width: min(920px, 96%); background: #0d0e16; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); color: #eaeaea; display:flex; flex-direction:column;
+}
+.scenario-popup { position: relative; }
+.scenario-cover { height: 240px; background-size: cover; background-position: center; border-radius: 14px 14px 0 0; }
+.scenario-body { padding: 18px 22px; }
+.scenario-header { display:flex; justify-content:space-between; align-items:center; }
+.scenario-title { margin:0; }
+.scenario-intro { color: rgba(255,255,255,0.8); }
+.scenario-buttons { margin-top: 14px; display:flex; gap:10px; }
+.primary { background: linear-gradient(90deg,#ffd36b,#ff9f6b); border:none; padding:10px 14px; border-radius:10px; cursor:pointer; }
+.secondary { background:transparent; color:rgba(255,255,255,0.85); border:1px solid rgba(255,255,255,0.06); padding:8px 12px; border-radius:10px; }
+.scenario-close, .char-close { position:absolute; right:18px; top:12px; background:transparent; border:none; color:#fff; font-size:20px; cursor:pointer; }
+
+.scenario-actions { position:absolute; top:12px; right:64px; display:flex; gap:8px; z-index:30; }
+.scenario-actions .icon { background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.04); color:#fff; padding:6px 8px; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.scenario-actions .icon:hover { background: rgba(255,255,255,0.06); }
+
+.char-modal { width: 440px; background:#14141f; padding:20px; border-radius:14px; box-shadow: 0 16px 50px rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.12); position: relative; }
+.char-modal h4 { margin: 0 0 6px 0; color: #ffffff; font-size: 1.1rem; }
+.char-select-btn { 
+  width: 100%; 
+  padding: 10px 14px; 
+  border-radius: 8px; 
+  border: 1px solid rgba(255,255,255,0.08); 
+  background: rgba(255,255,255,0.03); 
+  color: #eaeaea; 
+  cursor: pointer; 
+  display: flex; 
+  align-items: center; 
+  gap: 12px;
+  transition: all 0.15s ease;
+}
+.char-select-btn:hover {
+  background: rgba(255, 211, 107, 0.12);
+  border-color: rgba(255, 211, 107, 0.3);
+  color: #ffd36b;
+}
+.char-select-btn.user-char {
+  background: rgba(138, 43, 226, 0.12);
+  border-color: rgba(138, 43, 226, 0.3);
+}
+.char-select-btn.custom {
+  background: rgba(255, 255, 255, 0.05);
+  border-style: dashed;
+}

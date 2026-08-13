@@ -1,0 +1,78 @@
+# current-dev.yaml
+# Archivo activo de desarrollo gestionado por el agente Leader.
+# Estados válidos: Waiting | In Progress | Testing Pending | Completed
+# Al completarse, cada función se mueve a story-dev.yaml.
+
+project:
+  meta:
+    name: "" # Nombre del proyecto
+    language: "JavaScript/TypeScript"
+    loop_mode: "" # true | false
+    created: "" # ISO 8601
+    updated: "" # ISO 8601
+
+  functions:
+    F001:
+      name: "nombre_explicativo_de_la_funcion"
+      priority: 1 # 1 = más alta
+      status: "Waiting"
+
+      specifications:
+        description: "Qué hace esta función"
+        inputs:
+          - name: ""
+            type: ""
+            required: true
+            description: ""
+        outputs:
+          - name: ""
+            type: ""
+            description: ""
+        constraints: []
+          # - Límites, reglas de negocio, condiciones de borde
+        assumptions: []
+          # - Asunciones del Specifier aprobadas por el usuario
+        ui_spec: # Opcional, si aplica UI
+          components: []
+          states: []
+          interactions: []
+          mockup_approved: false
+
+      dependencies: []
+        # - IDs de funciones que deben completarse antes
+
+      skills_required: []
+        # - Nombres de skills pertinentes que cada subagente debe revisar
+
+      implementation:
+        module: ""
+        file: ""
+        notes: "Decisiones tomadas, desviaciones del flujo del Planner si las hay"
+
+      tests:
+        T001-U:
+          type: "unit"
+          status: "Pending" # Pass | Fail | Blocked | Pending
+          result: ""
+          name: "Nombre descriptivo"
+          scenario: "Dado X, cuando Y, entonces Z"
+          setup: "Precondiciones"
+          expected: "Resultado esperado"
+          log_integration: true
+        T001-F:
+          type: "functional"
+          status: "Pending"
+          result: ""
+          name: "Nombre descriptivo"
+          scenario: ""
+          setup: ""
+          expected: ""
+          log_integration: true
+
+      error_log: []
+        # Entradas automáticas del try-catch del Implementer
+
+      timestamps:
+        started: ""
+        testing_started: ""
+        completed: ""

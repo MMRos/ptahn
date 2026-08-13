@@ -1,0 +1,21 @@
+# story-dev.yaml
+# Registro histórico de funciones completadas.
+# El Leader mueve aquí cada función una vez que pasa todos los tests.
+# NO se modifica manualmente; solo el Leader escribe en este archivo.
+
+story:
+  meta:
+    project: "" # Nombre del proyecto
+    language: "JavaScript/TypeScript"
+
+  completed_functions:
+    # F001:
+    #   name: "nombre_de_la_funcion"
+    #   priority: 1
+    #   specifications: ...
+    #   implementation: ...
+    #   tests: ...
+    #   timestamps:
+    #     started: "2024-01-01T10:00:00Z"
+    #     completed: "2024-01-01T12:15:00Z"
+    #   notes: "Observaciones del equipo de agentes"
