@@ -162,6 +162,28 @@ export default function TopBar({
               </select>
             </div>
 
+            {/* URL del Servidor LM Studio */}
+            <div className="settings-group">
+              <label>🌐 URL del Servidor LM Studio</label>
+              <input 
+                type="text" 
+                value={chatSettings.lmStudioUrl || 'http://localhost:1234'}
+                onChange={(e) => onUpdateChatSettings({ ...chatSettings, lmStudioUrl: e.target.value })}
+                placeholder="http://localhost:1234"
+                style={{
+                  width: '100%',
+                  padding: '6px 10px',
+                  background: '#1e1e2c',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  fontSize: '0.8rem',
+                  boxSizing: 'border-box',
+                  marginTop: '4px'
+                }}
+              />
+            </div>
+
             {/* Idioma Favorito */}
             <div className="settings-group">
               <label><FontAwesomeIcon icon={faLanguage} /> Idioma Favorito</label>

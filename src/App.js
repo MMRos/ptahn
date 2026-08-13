@@ -215,11 +215,41 @@ function App() {
     openCreateModal('Escenario', scenario);
   };
 
-  const [chatSettings, setChatSettings] = useState({
-    preferredModel: 'deepseek-r1-distill-qwen-7b',
-    preferredLanguage: 'Español',
-    responseLength: 1000
+  // Carga inicial segura de la configuración del usuario desde localStorage.
+  // Utiliza try-catch para protegerse ante fallos de lectura o JSON corrupto.
+  const [chatSettings, setChatSettings] = useState(() => {
+    try {
+      const stored = localStorage.getItem('ptah-chat-settings');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return {
+          preferredModel: parsed.preferredModel || 'deepseek-r1-distill-qwen-7b',
+          preferredLanguage: parsed.preferredLanguage || 'Español',
+          responseLength: parsed.responseLength || 1000,
+          lmStudioUrl: parsed.lmStudioUrl || 'http://localhost:1234'
+        };
+      }
+    } catch (e) {
+      console.warn('[App Init]: Failed to load chatSettings from localStorage:', e);
+    }
+    return {
+      preferredModel: 'deepseek-r1-distill-qwen-7b',
+      preferredLanguage: 'Español',
+      responseLength: 1000,
+      lmStudioUrl: 'http://localhost:1234'
+    };
   });
+
+  // Función para guardar y actualizar la configuración de chat del usuario.
+  // Protege la escritura en localStorage usando try-catch.
+  const handleUpdateChatSettings = (nextSettings) => {
+    setChatSettings(nextSettings);
+    try {
+      localStorage.setItem('ptah-chat-settings', JSON.stringify(nextSettings));
+    } catch (e) {
+      console.warn('[App Update]: Failed to save chatSettings to localStorage:', e);
+    }
+  };
 
   return (
     <div className="App">
@@ -242,7 +272,7 @@ function App() {
           onChooseFolder={chooseFolder} 
           storageStatus={storageStatus}
           chatSettings={chatSettings}
-          onUpdateChatSettings={setChatSettings}
+          onUpdateChatSettings={handleUpdateChatSettings}
           activeChat={selectedChat}
           dmName={
             selectedChat 

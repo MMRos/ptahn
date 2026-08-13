@@ -15,7 +15,7 @@ import {
   faQuoteRight,
   faVolumeUp
 } from '@fortawesome/free-solid-svg-icons';
-import { sendChatMessage, generateImageLocal, generateAudioLocal } from '../utils/lmstudio';
+import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask } from '../utils/lmstudio';
 import { saveChatToFolder } from '../utils/storage';
 import { addChat } from '../utils/db';
 import StagingModal from './StagingModal';
@@ -162,6 +162,108 @@ export default function ChatView({ chat, folderHandle, onBranchChat, appData, on
     window.speechSynthesis.speak(utterance);
   };
 
+  // Construcción unificada y estructurada del systemPrompt (arnés de contexto).
+  // Consolida los detalles del escenario, narrador, jugador y las reglas críticas del arnés.
+  const buildSystemPrompt = () => {
+    // 1. Obtener escenario y narrador vinculados
+    const scenario = appData?.scenarios?.find(s => s.id === chat.scenarioId);
+    const narrator = (appData?.narrators || []).find(n => n.id === scenario?.narrator);
+
+    // 2. Obtener ficha del personaje interpretado por el usuario
+    const userChar = (appData?.cards || []).find(c => c.id === chat.characterId);
+
+    // 3. Formatear los detalles del perfil del narrador (Bio, Estilo, Tono, Reglas)
+    let narratorDetails = '';
+    if (narrator) {
+      narratorDetails = `
+[NARRADOR / DM ACTIVO]:
+- Nombre: ${narrator.name}
+${narrator.bio ? `- Perfil/Bio: ${narrator.bio}` : ''}
+${narrator.style ? `- Estilo Narrativo: ${narrator.style}` : ''}
+${narrator.tone ? `- Tono: ${narrator.tone}` : ''}
+${narrator.rules ? `- Reglas del Narrador: ${narrator.rules}` : ''}
+${narrator.randomization ? `- Azar/Mecánicas: ${narrator.randomization}` : ''}
+`.trim();
+    }
+
+    // 4. Formatear la descripción del personaje del usuario
+    let userCharDetails = '';
+    if (userChar) {
+      userCharDetails = `
+[PERSONAJE DEL JUGADOR ({{user}})]:
+- Nombre: ${userChar.title || userChar.name}
+${userChar.intro ? `- Descripción corta: ${userChar.intro}` : ''}
+${userChar.text ? `- Detalles/Historia: ${userChar.text}` : ''}
+${userChar.traits && userChar.traits.length > 0 ? `- Rasgos: ${userChar.traits.join(', ')}` : ''}
+`.trim();
+    }
+
+    // 5. Formatear los detalles del escenario y reglas adicionales del formulario (Contexto Extra)
+    let scenarioDetails = `Escenario: ${chat.scenario}.`;
+    if (scenario) {
+      scenarioDetails = `
+[ESCENARIO JUGABLE]:
+- Título: ${scenario.title}
+${scenario.intro ? `- Introducción: ${scenario.intro}` : ''}
+${scenario.baseContext ? `- Lore / Contexto base: ${scenario.baseContext}` : ''}
+${scenario.aiInstructions ? `- Instrucciones adicionales del GM (Contexto Extra): ${scenario.aiInstructions}` : ''}
+`.trim();
+    }
+
+    const memoryContext = (chat.memoryCards || []).map(m => `[Memoria]: ${m}`).join('\n');
+    
+    return `
+${scenarioDetails}
+
+${narratorDetails}
+
+${userCharDetails}
+
+[ÓRDENES CONSTANTES DE LA IA]:
+${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva.'}
+
+[REGLAS CRÍTICAS DEL ARNÉS (OBLIGATORIO)]:
+- NUNCA respondas, hables, actúes, describas pensamientos o tomes decisiones en nombre del personaje del usuario ({{user}} o ${userChar ? userChar.title || userChar.name : 'el jugador'}). Limítate a describir lo que hacen otros personajes y el entorno en respuesta a lo que él hace.
+- Diálogos de personajes EXCLUSIVAMENTE entre comillas dobles: "Hola".
+- Acciones, narrativa y pensamientos de la IA/PNJs EXCLUSIVAMENTE entre asteriscos: *Miró hacia la puerta*.
+- Escribe en un estilo literario, detallado e inmersivo.
+
+[MEMORIAS Y HECHOS DE LA HISTORIA]:
+${memoryContext || 'No hay memorias previas.'}
+`.trim();
+  };
+
+  // Función asíncrona en segundo plano para realizar el resumen de contexto y generar memorias.
+  // Protegida ante fallos por try-catch y persistida en almacenamiento local e IndexedDB.
+  const runBackgroundSummarization = (finalMsgs) => {
+    setTimeout(async () => {
+      try {
+        const newSummary = await sendContextSummarizationTask({
+          messages: finalMsgs,
+          currentMemory: chat.memoryCards || []
+        });
+        if (newSummary && typeof newSummary === 'string' && newSummary.trim()) {
+          console.log('[Context Summary Task]: Nueva memoria generada:', newSummary);
+          const nextMemory = [...(chat.memoryCards || []), newSummary.trim()];
+          
+          // Mutación segura en el objeto para sincronizar la vista del TopBar y persistencia
+          chat.memoryCards = nextMemory;
+          
+          const updatedChat = { ...chat, messages: finalMsgs, memoryCards: nextMemory };
+          const { addChat } = await import('../utils/db');
+          await addChat(updatedChat);
+          if (folderHandle) {
+            try { await saveChatToFolder(updatedChat, folderHandle); } catch (e) {}
+          }
+          
+          setMessages(finalMsgs);
+        }
+      } catch (sumErr) {
+        console.warn('[Context Summary Task]: Fallo en la tarea de resumen:', sumErr);
+      }
+    }, 1000);
+  };
+
   const handleSend = async (overrideText = null) => {
     const textToSend = overrideText !== null ? overrideText : inputMsg;
     if ((!textToSend.trim() && overrideText === null) || isSending) return;
@@ -179,13 +281,7 @@ export default function ChatView({ chat, folderHandle, onBranchChat, appData, on
     setIsSending(true);
 
     try {
-      const memoryContext = (chat.memoryCards || []).map(m => `[Memoria]: ${m}`).join('\n');
-      const systemPrompt = `Escenario: ${chat.scenario}. ${chat.constantPrompt ? `ÓRDENES CONSTANTES: ${chat.constantPrompt}.` : ''} 
-INSTRUCCIONES DE FORMATO:
-- Diálogos de personajes EXCLUSIVAMENTE entre comillas dobles: "Hola".
-- Acciones, narrativa y pensamientos EXCLUSIVAMENTE entre asteriscos: *Miró hacia la puerta*.
-- Escribe en un estilo literario e inmersivo.
-${memoryContext}`.trim();
+      const systemPrompt = buildSystemPrompt();
 
       const res = await sendChatMessage({
         messages: nextMsgs,
@@ -196,6 +292,9 @@ ${memoryContext}`.trim();
       const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };
       const finalMsgs = [...nextMsgs, aiMsg];
       await persistMessages(finalMsgs);
+
+      // Lanzar el resumen de contexto automático en segundo plano
+      runBackgroundSummarization(finalMsgs);
 
     } catch (err) {
       console.error("Error al enviar chat:", err);
@@ -212,13 +311,8 @@ ${memoryContext}`.trim();
     setIsSending(true);
 
     try {
-      const memoryContext = (chat.memoryCards || []).map(m => `[Memoria]: ${m}`).join('\n');
-      const systemPrompt = `Escenario: ${chat.scenario}. Continúa la narración desde el punto exacto donde quedó. ${chat.constantPrompt ? `ÓRDENES CONSTANTES: ${chat.constantPrompt}.` : ''}
-INSTRUCCIONES DE FORMATO:
-- Diálogos de personajes EXCLUSIVAMENTE entre comillas dobles: "Hola".
-- Acciones, narrativa y pensamientos EXCLUSIVAMENTE entre asteriscos: *Miró hacia la puerta*.
-- Escribe en un estilo literario e inmersivo.
-${memoryContext}`.trim();
+      const basePrompt = buildSystemPrompt();
+      const systemPrompt = `${basePrompt}\n\n[ÓRDENE EXTRA DE INMEDIATA]: Continúa la narración desde el punto exacto donde quedó.`;
 
       const res = await sendChatMessage({
         messages: messages,
@@ -229,6 +323,9 @@ ${memoryContext}`.trim();
       const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };
       const finalMsgs = [...messages, aiMsg];
       await persistMessages(finalMsgs);
+
+      // Lanzar el resumen de contexto automático en segundo plano
+      runBackgroundSummarization(finalMsgs);
 
     } catch (err) {
       console.error("Error al continuar chat:", err);

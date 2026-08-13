@@ -4,7 +4,40 @@
  * Configured for low CPU consumption and dynamic on-demand resource management.
  */
 
-const DEFAULT_LM_STUDIO_URL = '';
+/**
+ * Resolves the active base URL for the LM Studio API server.
+ * 
+ * Flow of resolution:
+ * 1. If an explicit `baseUrl` argument is provided to the function, that URL is preferred (with trailing slashes removed).
+ * 2. If no explicit URL is passed, it attempts to load global user settings from `localStorage` 
+ *    under the key 'ptah-chat-settings'.
+ * 3. If settings are found, it parses the JSON and looks for the custom `lmStudioUrl` field.
+ * 4. The resolved URL has any trailing slash stripped to prevent malformed endpoint paths.
+ * 5. If any step fails (e.g. localStorage is blocked or contains invalid JSON), it catches 
+ *    the exception and falls back to the default 'http://localhost:1234'.
+ * 
+ * @param {string} [baseUrl] - Optional explicit base URL.
+ * @returns {string} The resolved base URL without a trailing slash.
+ */
+export function getBaseUrl(baseUrl) {
+  if (baseUrl) {
+    return baseUrl.replace(/\/$/, '');
+  }
+  
+  try {
+    const storedSettings = localStorage.getItem('ptah-chat-settings');
+    if (storedSettings) {
+      const parsedSettings = JSON.parse(storedSettings);
+      if (parsedSettings && parsedSettings.lmStudioUrl) {
+        return parsedSettings.lmStudioUrl.replace(/\/$/, '');
+      }
+    }
+  } catch (error) {
+    console.warn('[LM Studio URL Resolution]: Failed to read settings from localStorage, falling back to default.', error);
+  }
+  
+  return 'http://localhost:1234';
+}
 
 // Mapeo de los mejores modelos del usuario por tarea
 export const RECOMMENDED_MODELS = {
@@ -43,9 +76,10 @@ export const RECOMMENDED_MODELS = {
 /**
  * Obtiene la lista de modelos actualmente disponibles/descargados en LM Studio.
  */
-export async function getAvailableModels(baseUrl = DEFAULT_LM_STUDIO_URL) {
+export async function getAvailableModels(baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    const response = await fetch(`${baseUrl}/v1/models`);
+    const response = await fetch(`${finalBaseUrl}/v1/models`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
     return data.data || [];
@@ -58,9 +92,10 @@ export async function getAvailableModels(baseUrl = DEFAULT_LM_STUDIO_URL) {
 /**
  * Resuelve el ID exacto del modelo disponible en LM Studio a partir de una palabra clave.
  */
-export async function resolveModelId(searchTerm, baseUrl = DEFAULT_LM_STUDIO_URL) {
+export async function resolveModelId(searchTerm, baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    const models = await getAvailableModels(baseUrl);
+    const models = await getAvailableModels(finalBaseUrl);
     const found = models.find(m => m.id.toLowerCase().includes(searchTerm.toLowerCase()));
     return found ? found.id : null;
   } catch (e) {
@@ -71,10 +106,11 @@ export async function resolveModelId(searchTerm, baseUrl = DEFAULT_LM_STUDIO_URL
 /**
  * Solicita a LM Studio cargar un modelo específico en memoria de GPU/RAM.
  */
-export async function loadModel(modelId, baseUrl = DEFAULT_LM_STUDIO_URL) {
+export async function loadModel(modelId, baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
   try {
     console.log(`[LM Studio] Cargando modelo: ${modelId}`);
-    const response = await fetch(`${baseUrl}/api/v0/models/load`, {
+    const response = await fetch(`${finalBaseUrl}/api/v0/models/load`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: modelId })
@@ -92,10 +128,11 @@ export async function loadModel(modelId, baseUrl = DEFAULT_LM_STUDIO_URL) {
 /**
  * Solicita a LM Studio descargar/liberar un modelo de memoria.
  */
-export async function unloadModel(modelId, baseUrl = DEFAULT_LM_STUDIO_URL) {
+export async function unloadModel(modelId, baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
   try {
     console.log(`[LM Studio] Descargando modelo: ${modelId}`);
-    await fetch(`${baseUrl}/api/v0/models/unload`, {
+    await fetch(`${finalBaseUrl}/api/v0/models/unload`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: modelId })
@@ -175,15 +212,16 @@ export async function generateVideoLocal(prompt, aspect = '16:9', videoServerUrl
 /**
  * Sintetiza voz (TTS) utilizando el modelo audio.cpp de forma dinámica.
  */
-export async function generateAudioLocal(text, voice = 'default', description = '', pitch = 1.0, speed = 1.0, baseUrl = DEFAULT_LM_STUDIO_URL) {
+export async function generateAudioLocal(text, voice = 'default', description = '', pitch = 1.0, speed = 1.0, baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
   const defaultId = 'audio-cpp/audio.cpp';
-  const resolvedId = await resolveModelId('audio.cpp', baseUrl) || defaultId;
+  const resolvedId = await resolveModelId('audio.cpp', finalBaseUrl) || defaultId;
 
   console.log(`[Dynamic Load] Iniciando síntesis de voz. Cargando: ${resolvedId}`);
-  await loadModel(resolvedId, baseUrl);
+  await loadModel(resolvedId, finalBaseUrl);
 
   try {
-    const response = await fetch(`${baseUrl}/v1/audio/speech`, {
+    const response = await fetch(`${finalBaseUrl}/v1/audio/speech`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -214,7 +252,7 @@ export async function generateAudioLocal(text, voice = 'default', description = 
     throw error;
   } finally {
     console.log(`[Dynamic Unload] Finalizada síntesis de voz. Descargando: ${resolvedId}`);
-    await unloadModel(resolvedId, baseUrl);
+    await unloadModel(resolvedId, finalBaseUrl);
   }
 }
 
@@ -228,8 +266,9 @@ export async function sendChatMessage({
   contextDocuments = [],
   modelId = 'qwen3.5-4b-nsfw-ara',
   temperature = 0.7,
-  baseUrl = DEFAULT_LM_STUDIO_URL
+  baseUrl
 }) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
   try {
     // 1. Filtrado dinámico de contexto por tags y relevancia en los últimos mensajes
     const recentText = messages.slice(-3).map(m => m.text).join(' ').toLowerCase();
@@ -269,10 +308,10 @@ export async function sendChatMessage({
     }
 
     // Resolviendo el ID real del modelo de narración
-    const narrationId = await resolveModelId('qwen3.5-4b-nsfw', baseUrl) || await resolveModelId('Sinbad-The-Sailor', baseUrl) || modelId;
+    const narrationId = await resolveModelId('qwen3.5-4b-nsfw', finalBaseUrl) || await resolveModelId('Sinbad-The-Sailor', finalBaseUrl) || modelId;
     
     // Asegurar que el modelo de narración esté cargado
-    await loadModel(narrationId, baseUrl);
+    await loadModel(narrationId, finalBaseUrl);
 
     const requestBody = JSON.stringify({
       model: narrationId,
@@ -281,7 +320,7 @@ export async function sendChatMessage({
       stream: false
     });
 
-    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    const response = await fetch(`${finalBaseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: requestBody
@@ -301,7 +340,7 @@ export async function sendChatMessage({
   } catch (error) {
     console.error('LM Studio Send Error:', error);
     return {
-      text: `[Modo Simulación / LM Studio no detectado en localhost:1234]: Asegúrate de tener el modelo de narración cargado y el servidor encendido.\n\n*El narrador observa en silencio la sala...*`,
+      text: `[Modo Simulación / LM Studio no detectado en ${finalBaseUrl}]: Asegúrate de tener el modelo de narración cargado y el servidor encendido.\n\n*El narrador observa en silencio la sala...*`,
       usedContextDocs: []
     };
   }
@@ -314,21 +353,25 @@ export async function sendChatMessage({
 export async function sendContextSummarizationTask({
   messages,
   currentMemory = [],
-  modelId = 'qwen3.5-4b-nsfw-ara',
-  baseUrl = DEFAULT_LM_STUDIO_URL
+  modelId = 'qwen2.5-coder-14b',
+  baseUrl
 }) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
   try {
     const recentMessages = messages.slice(-5).map(m => `${m.from}: ${m.text}`).join('\n');
     const existingMem = currentMemory.length ? currentMemory.join('; ') : 'Ninguna.';
 
     const systemInstruction = `Eres un asistente de rol silencioso. Tu única tarea es leer los recientes mensajes y decidir si hay un nuevo evento clave o descubrimiento que deba recordarse.
-Memorias actuales: ${existingMem}.
-Responde SOLO con una frase corta para añadir a la memoria, o con la palabra NADA si no es relevante.`;
+    Memorias actuales: ${existingMem}.
+    Responde SOLO con una frase corta para añadir a la memoria, o con la palabra NADA si no es relevante.`;
 
-    const narrationId = await resolveModelId('qwen3.5-4b-nsfw', baseUrl) || await resolveModelId('Sinbad-The-Sailor', baseUrl) || modelId;
+    const summarizerId = await resolveModelId('qwen2.5-coder', finalBaseUrl) || await resolveModelId('qwen2.5', finalBaseUrl) || modelId;
+
+    // Asegurar que el modelo de resumen esté cargado
+    await loadModel(summarizerId, finalBaseUrl);
 
     const requestBody = JSON.stringify({
-      model: narrationId,
+      model: summarizerId,
       messages: [
         { role: 'system', content: systemInstruction },
         { role: 'user', content: recentMessages || 'Nada.' }
@@ -337,7 +380,7 @@ Responde SOLO con una frase corta para añadir a la memoria, o con la palabra NA
       stream: false
     });
 
-    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    const response = await fetch(`${finalBaseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: requestBody
