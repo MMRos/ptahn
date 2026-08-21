@@ -1470,7 +1470,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
             </svg>
           </div>
           <div className="card-title">Crear tarjeta</div>
-          <div className="card-copy">Define ideas, personajes y reglas clave.</div>
+          <div className="card-copy">Define ideas, personajes, memorias y reglas.</div>
         </button>
 
         <button className="action-card" onClick={() => onOpenCreateModal && onOpenCreateModal('Narrador')}>
@@ -1486,6 +1486,18 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
           </div>
           <div className="card-title">Crear narrador</div>
           <div className="card-copy">Crea el hilo que guía tu historia.</div>
+        </button>
+
+        <button className="action-card" onClick={() => onOpenCreateModal && onOpenCreateModal('Herramienta')}>
+          <div className="icon icon-workshop" aria-hidden="true" style={{ color: '#ffd36b' }}>
+            <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M40 10l14 14-8 8-14-14 8-8z" />
+              <path d="M32 18L12 38v14h14l20-20" />
+              <circle cx="20" cy="44" r="3" fill="currentColor" />
+            </svg>
+          </div>
+          <div className="card-title">Taller de funciones</div>
+          <div className="card-copy">Crea atributos, dados, progresión y tablas de eventos.</div>
         </button>
       </section>
 
@@ -1537,16 +1549,24 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                 ) : (
                   data.cards.map(c => {
                     const isChar = (c.type || '').toLowerCase() === 'personaje';
+                    const isMemory = (c.type || '').toLowerCase() === 'memoria';
+                    const isInv = (c.type || '').toLowerCase() === 'inventario';
                     return (
                       <div 
                         key={c.id} 
-                        style={{ flex: isChar ? '0 1 150px' : '1 1 180px', maxWidth: isChar ? '180px' : '280px', minWidth: '140px', background: 'rgba(20,18,30,0.8)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', overflow: 'hidden', cursor: 'pointer' }}
+                        style={{ flex: isChar ? '0 1 150px' : '1 1 180px', maxWidth: isChar ? '180px' : '280px', minWidth: '140px', background: 'rgba(20,18,30,0.8)', border: `1px solid ${isMemory ? 'rgba(180, 100, 255, 0.3)' : isInv ? 'rgba(255, 211, 107, 0.3)' : 'rgba(255,255,255,0.08)'}`, borderRadius: '10px', overflow: 'hidden', cursor: 'pointer' }}
                         onClick={() => setSelectedCard(c)}
                       >
-                        <div style={{ backgroundImage: `url(${c.cover || 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80'})`, height: isChar ? '160px' : '100px', backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                        <div style={{ backgroundImage: `url(${c.cover || (isMemory ? 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=400&q=80' : isInv ? 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80' : 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80')})`, height: isChar ? '160px' : '100px', backgroundSize: 'cover', backgroundPosition: 'center' }} />
                         <div style={{ padding: '8px' }}>
-                          <h4 style={{ margin: 0, fontSize: '0.82rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title}</h4>
-                          <small style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.72rem' }}>{c.type}</small>
+                          <h4 style={{ margin: 0, fontSize: '0.82rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {isMemory && '🧠 '}
+                            {isInv && '🎒 '}
+                            {c.title}
+                          </h4>
+                          <small style={{ color: isMemory ? '#c084fc' : isInv ? '#ffd36b' : 'rgba(255,255,255,0.5)', fontSize: '0.72rem' }}>
+                            {c.type}
+                          </small>
                         </div>
                       </div>
                     );
@@ -1572,8 +1592,71 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                     >
                       <h4 style={{ margin: '0 0 4px 0', fontSize: '0.88rem', color: '#fff' }}>{n.name}</h4>
                       <p style={{ margin: 0, fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{n.bio}</p>
+                      {n.tools && n.tools.length > 0 && (
+                        <div style={{ marginTop: '6px', fontSize: '0.68rem', color: '#ffd36b' }}>
+                          🛠️ {n.tools.length} herramienta(s)
+                        </div>
+                      )}
                     </div>
                   ))
+                )}
+              </div>
+            </details>
+
+            {/* Categoría 4: Herramientas y Funciones del Taller (Colapsable) */}
+            <details className="created-details" open style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px' }}>
+              <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer' }}>
+                Herramientas y Funciones del Taller ({data.tools?.length || 0})
+              </summary>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', padding: '12px 0 6px 0' }}>
+                {(!data.tools || data.tools.length === 0) ? (
+                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>No hay herramientas creadas en el taller aún.</span>
+                ) : (
+                  data.tools.map(tool => {
+                    const toolIcons = {
+                      attributes: '📊',
+                      progression: '📈',
+                      dice: '🎲',
+                      events: '📜',
+                      custom: '⚙️'
+                    };
+                    return (
+                      <div
+                        key={tool.id}
+                        style={{
+                          flex: '1 1 200px',
+                          maxWidth: '280px',
+                          minWidth: '180px',
+                          background: 'rgba(20,18,30,0.85)',
+                          border: '1px solid rgba(255,211,107,0.2)',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: '8px'
+                        }}
+                        onClick={() => onOpenCreateModal && onOpenCreateModal('Herramienta', tool)}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                            <span style={{ fontSize: '1.2rem' }}>{toolIcons[tool.toolType] || '🛠️'}</span>
+                            <h4 style={{ margin: 0, fontSize: '0.88rem', color: '#ffd36b', fontWeight: '700' }}>{tool.name}</h4>
+                          </div>
+                          <p style={{ margin: 0, fontSize: '0.74rem', color: 'rgba(255,255,255,0.6)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {tool.description || 'Herramienta de juego modular para el Narrador.'}
+                          </p>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '6px' }}>
+                          <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>
+                            {tool.toolType}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: '#ffd36b' }}>Editar →</span>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </details>
@@ -1632,8 +1715,9 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                   handleConvertToScenario(selectedCard);
                 }}
                 style={{ fontWeight: '600', padding: '10px', background: 'rgba(255, 211, 107, 0.1)', borderColor: 'rgba(255, 211, 107, 0.2)', color: '#ffd36b' }}
+                title="Genera un escenario jugable a partir de esta tarjeta"
               >
-                Convertir en Escenario
+                Escenificar
               </button>
               <button 
                 onClick={() => {

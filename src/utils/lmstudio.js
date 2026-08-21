@@ -40,42 +40,43 @@ export function getBaseUrl(baseUrl) {
 }
 
 // Mapeo de los mejores modelos del usuario por tarea (enfocados en Rol y Narrativa Sin Censura)
+// Mapeo de los mejores modelos del usuario por tarea (enfocados en Rol y Narrativa Sin Censura)
 export const RECOMMENDED_MODELS = {
   chat: {
-    id: 'Precog-Magnum-31B-i1-GGUF',
-    name: 'Precog-Magnum 31B (MRockatansky / mradermacher)',
+    id: 'precog-magnum-31b-i1',
+    name: 'Precog-Magnum 31B (mradermacher)',
     type: 'Narración & Rol Sin Censura (Top Calidad)',
     description: 'Máxima profundidad de prosa, iniciativa y razonamiento narrativo en 16GB VRAM.'
   },
   dark_rp: {
-    id: 'Magnum_Lyra_Darkness_12B-Heretic',
+    id: 'magnum_lyra_darkness_12b-heretic',
     name: 'Magnum Lyra Darkness 12B Heretic',
     type: 'Ficción Oscura & Rol Maduro',
     description: 'Ultra-rápido, inmersivo, sin censura y con gran riqueza sensorial.'
   },
   heretic: {
-    id: 'Magnum-v4-12B-Heretic',
+    id: 'magnum-v4-12b',
     name: 'Magnum v4 12B Heretic',
     type: 'Narrativa Creativa General',
     description: 'Excelente equilibrio narrativo sin censura y alta velocidad.'
   },
   moe_dark: {
-    id: 'mistral-moe-4x7b-dark-multiverse',
+    id: 'mistral-moe-4x7b-dark-multiverse-uncensored-enhanced32-24b',
     name: 'Mistral MoE 4x7B Dark Multiverse (DavidAU)',
     type: 'Fantasía Oscura & MoE',
     description: 'Merge multi-experto sin censura para mundos oscuros.'
   },
   context: {
-    id: 'Magnum_Lyra_Darkness_12B-Heretic',
-    name: 'Magnum 12B / Mistral-Nemo',
+    id: 'mistral-nemo-instruct-2407-k-m',
+    name: 'Mistral Nemo 12B Instruct',
     type: 'Extracción y Resumen de Memorias',
     description: 'Alta coherencia para procesar eventos de rol y memoria a largo plazo.'
   },
   image: {
-    id: 'nova-anime-xl',
-    name: 'Nova Anime XL (SDXL / Forge)',
-    type: 'Escenificación / Imágenes',
-    description: 'Generación visual bajo demanda. Se carga y descarga automáticamente.'
+    id: 'DreamShaperXL_Lightning.safetensors',
+    name: 'DreamShaperXL Lightning (SDXL Vulkan)',
+    type: 'Escenificación / Imágenes y Portadas',
+    description: 'Generación visual rápida en 8 pasos con sd-vulkan.'
   },
   video: {
     id: 'nsfw_wan_14b',
@@ -92,12 +93,48 @@ export const RECOMMENDED_MODELS = {
 };
 
 /**
+ * Realiza una petición HTTP inteligente a LM Studio.
+ * Si la petición directa falla por CORS o por el error de preflight OPTIONS del servidor Express de LM Studio,
+ * reintenta automáticamente a través del proxy interno de la aplicación (/api/lmstudio).
+ */
+export async function apiFetch(endpoint, options = {}, baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  // 1. Intento directo
+  try {
+    const directUrl = `${finalBaseUrl}${cleanEndpoint}`;
+    const directRes = await fetch(directUrl, options);
+    if (directRes.ok) {
+      return directRes;
+    }
+  } catch (directErr) {
+    // Error de red / CORS preflight de LM Studio
+  }
+
+  // 2. Fallback transparente mediante proxy interno
+  try {
+    const proxyUrl = `/api/lmstudio${cleanEndpoint}`;
+    const proxyOptions = {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        'x-target-url': finalBaseUrl
+      }
+    };
+    return await fetch(proxyUrl, proxyOptions);
+  } catch (proxyErr) {
+    throw proxyErr;
+  }
+}
+
+/**
  * Obtiene la lista de modelos actualmente disponibles/descargados en LM Studio.
  */
 export async function getAvailableModels(baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    const response = await fetch(`${finalBaseUrl}/v1/models`);
+    const response = await apiFetch('/v1/models', {}, finalBaseUrl);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
     return data.data || [];
@@ -108,13 +145,39 @@ export async function getAvailableModels(baseUrl) {
 }
 
 /**
+ * Obtiene el modelo que actualmente está cargado en la memoria de LM Studio (si existe).
+ */
+export async function getLoadedModel(baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
+  try {
+    const response = await apiFetch('/api/v0/models', {}, finalBaseUrl);
+    if (response.ok) {
+      const data = await response.json();
+      const loaded = (data.data || []).find(m => m.state === 'loaded');
+      if (loaded) return loaded.id;
+    }
+  } catch (e) {
+    // Silencioso si api/v0 no está disponible
+  }
+  return null;
+}
+
+/**
  * Resuelve el ID exacto del modelo disponible en LM Studio con detección inteligente.
  */
 export async function resolveModelId(searchTerm, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
+    // 0. Si ya hay un modelo cargado en GPU en LM Studio, priorizarlo para respuesta instantánea
+    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
+    if (currentlyLoaded) {
+      if (!searchTerm || currentlyLoaded.toLowerCase().includes(searchTerm.toLowerCase())) {
+        return currentlyLoaded;
+      }
+    }
+
     const models = await getAvailableModels(finalBaseUrl);
-    if (!models || models.length === 0) return searchTerm || null;
+    if (!models || models.length === 0) return currentlyLoaded || searchTerm || null;
 
     // 1. Coincidencia exacta o parcial con el término buscado
     if (searchTerm) {
@@ -125,24 +188,24 @@ export async function resolveModelId(searchTerm, baseUrl) {
       if (partialMatch) return partialMatch.id;
     }
 
-    // 2. Priorizar modelos sin censura / rol si están presentes en LM Studio
+    // 2. Si hay un modelo cargado aunque no coincida exactamente con searchTerm, usarlo
+    if (currentlyLoaded) return currentlyLoaded;
+
+    // 3. Priorizar modelos sin censura / rol instalados en LM Studio
     const uncensoredKeywords = [
       'precog-magnum',
       'precog',
       'magnum_lyra',
-      'magnum lyra',
       'darkness',
       'magnum-v4',
-      'magnum v4',
       'magnum',
       'mistral-nemo',
       'nemo',
-      'anthracite',
       'dark-multiverse',
       'heretic',
       'mistral-moe',
+      'qwen3.6',
       'qwen3.5',
-      'qwen2.5',
       'llama-3'
     ];
 
@@ -151,7 +214,7 @@ export async function resolveModelId(searchTerm, baseUrl) {
       if (found) return found.id;
     }
 
-    // 3. Devolver el primer modelo cargado o disponible en LM Studio
+    // 4. Devolver el primer modelo disponible en LM Studio
     return models[0]?.id || searchTerm || null;
   } catch (e) {
     return searchTerm || null;
@@ -164,18 +227,13 @@ export async function resolveModelId(searchTerm, baseUrl) {
 export async function loadModel(modelId, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    console.log(`[LM Studio] Cargando modelo: ${modelId}`);
-    const response = await fetch(`${finalBaseUrl}/api/v0/models/load`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId })
-    });
-    if (!response.ok) {
-      console.log(`Intentando seleccionar modelo ${modelId} mediante endpoint estándar v1...`);
+    console.log(`[LM Studio] Verificando modelo: ${modelId}`);
+    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
+    if (currentlyLoaded && currentlyLoaded.toLowerCase() === modelId.toLowerCase()) {
+      return true;
     }
     return true;
   } catch (error) {
-    console.warn(`No se pudo cargar automáticamente el modelo ${modelId}:`, error);
     return false;
   }
 }
@@ -200,36 +258,187 @@ export async function unloadModel(modelId, baseUrl) {
 }
 
 /**
- * Genera una imagen utilizando un servidor de difusión local opcional (SD WebUI / Forge) o fallback de escenificación.
+ * Crea un placeholder SVG nítido en formato Data URI en caso de fallo de red o servidor offline.
  */
-export async function generateImageLocal(prompt, style = 'Fantasía Oscura', imageServerUrl = '') {
+export function createLocalSvgPlaceholder(prompt = 'Ilustración Ptahn') {
+  const cleanTitle = (prompt || 'Ilustración').replace(/[<>&"]/g, '');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#141424" />
+        <stop offset="50%" stop-color="#1e183a" />
+        <stop offset="100%" stop-color="#0a0a14" />
+      </linearGradient>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#bg)" />
+    <circle cx="480" cy="220" r="70" fill="none" stroke="#ffd36b" stroke-width="2" stroke-dasharray="6,6" opacity="0.8"/>
+    <text x="480" y="230" fill="#ffd36b" font-family="system-ui, sans-serif" font-size="34" font-weight="bold" text-anchor="middle">✨ Ptahn AI</text>
+    <text x="480" y="340" fill="#ffffff" font-family="system-ui, sans-serif" font-size="18" font-weight="600" text-anchor="middle" opacity="0.9">${cleanTitle.substring(0, 55)}</text>
+    <text x="480" y="380" fill="#ffd36b" font-family="system-ui, sans-serif" font-size="13" text-anchor="middle" opacity="0.75">Local AI Studio (v6.safetensors / sd-vulkan)</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * Obtiene la lista de modelos de imagen locales disponibles en Local AI Studio / Pinokio.
+ */
+export async function getAvailableImageModels(imageServerUrl = '') {
+  const baseUrl = (imageServerUrl || 'http://127.0.0.1:42016').replace(/\/$/, '');
+  try {
+    const res = await fetch(`${baseUrl}/api/models`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.models)) {
+        return data.models;
+      }
+    }
+  } catch (e) {
+    console.warn('[Local AI Studio]: No se pudieron obtener los modelos de imagen:', e.message);
+  }
+  return [];
+}
+
+/**
+ * Consulta el estado del backend de difusión (sd-vulkan / sd.cpp).
+ */
+export async function getImageBackendStatus(imageServerUrl = '') {
+  const baseUrl = (imageServerUrl || 'http://127.0.0.1:42016').replace(/\/$/, '');
+  try {
+    const res = await fetch(`${baseUrl}/api/backend-status`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    // Backend inalcanzable
+  }
+  return { ready: false, running: false };
+}
+
+/**
+ * Inicia o cambia el modelo activo en Local AI Studio / sd-vulkan.
+ */
+export async function startImageBackend(model = 'v6.safetensors', imageServerUrl = '') {
+  const baseUrl = (imageServerUrl || 'http://127.0.0.1:42016').replace(/\/$/, '');
+  try {
+    const res = await fetch(`${baseUrl}/api/restart-backend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const data = await res.json().catch(() => null);
+    if (data && (data.code === 'MODEL_ALREADY_ACTIVE' || !res.ok)) {
+      // Detener modelo anterior primero
+      await fetch(`${baseUrl}/api/stop-backend`, { method: 'POST' }).catch(() => null);
+      await new Promise(r => setTimeout(r, 1200));
+      const retryRes = await fetch(`${baseUrl}/api/restart-backend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model })
+      });
+      if (retryRes.ok) return await retryRes.json();
+    }
+  } catch (e) {
+    console.warn('[Local AI Studio]: Error al iniciar backend de imagen:', e.message);
+  }
+  return null;
+}
+
+/**
+ * Genera una imagen utilizando el servidor local (Uncensored Local Studio / Pinokio / SD WebUI / Forge) o fallback.
+ */
+export async function generateImageLocal(prompt, style = 'Fantasía Oscura', imageServerUrl = '', targetModel = '') {
+  // Obtener URL configurada o defaults de Pinokio / Uncensored Local Studio
+  let serverUrls = [];
   if (imageServerUrl) {
+    serverUrls.push(imageServerUrl.replace(/\/$/, ''));
+  } else {
     try {
-      const endpoint = imageServerUrl.includes('/sdapi') ? imageServerUrl : `${imageServerUrl.replace(/\/$/, '')}/sdapi/v1/txt2img`;
-      const sdResponse = await fetch(endpoint, {
+      const stored = localStorage.getItem('ptah-chat-settings');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.imageServerUrl) {
+          serverUrls.push(parsed.imageServerUrl.replace(/\/$/, ''));
+        }
+      }
+    } catch (e) {}
+    serverUrls.push('http://127.0.0.1:42016', 'http://192.168.1.41:42016', 'http://localhost:42016');
+  }
+
+  const selectedModel = targetModel || 'DreamShaperXL_Lightning.safetensors';
+  const isLightning = selectedModel.toLowerCase().includes('lightning') || selectedModel.toLowerCase().includes('4step');
+  const steps = isLightning ? 8 : 20;
+
+  const fullPrompt = `${prompt}${style ? `, style: ${style}` : ''}, masterpiece, high quality, highly detailed`;
+
+  for (const baseUrl of serverUrls) {
+    try {
+      // 1. Asegurar que el modelo deseado esté cargado en GPU
+      try {
+        const statusRes = await fetch(`${baseUrl}/api/backend-status`);
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          const currentModel = status?.loading?.model || status?.settings?.model || '';
+          if (!status.ready || !status.running || (selectedModel && !currentModel.includes(selectedModel))) {
+            console.log(`[Local AI Studio]: Cargando modelo de difusión "${selectedModel}"...`);
+            await startImageBackend(selectedModel, baseUrl);
+            for (let i = 0; i < 8; i++) {
+              await new Promise(r => setTimeout(r, 1000));
+              const poll = await fetch(`${baseUrl}/api/backend-status`).then(r => r.json()).catch(() => null);
+              if (poll && poll.ready && poll.running) break;
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 2. Enviar petición directa a /sdapi/v1/txt2img (formato sd.cpp / WebUI)
+      const sdRes = await fetch(`${baseUrl}/sdapi/v1/txt2img`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `${prompt}, style: ${style}, high quality, detailed`,
-          steps: 20,
+          prompt: fullPrompt,
+          steps: steps,
           width: 768,
-          height: 768
+          height: 512
         })
       });
-      if (sdResponse.ok) {
-        const data = await sdResponse.json();
+
+      if (sdRes.ok) {
+        const data = await sdRes.json();
         if (data.images && data.images[0]) {
-          return `data:image/png;base64,${data.images[0]}`;
+          const img = data.images[0];
+          return img.startsWith('data:') ? img : `data:image/png;base64,${img}`;
         }
       }
+
+      // 3. Fallback a endpoint OpenAI (/v1/images/generations)
+      const v1Res = await fetch(`${baseUrl}/v1/images/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          n: 1,
+          size: '768x512',
+          response_format: 'b64_json'
+        })
+      });
+
+      if (v1Res.ok) {
+        const data = await v1Res.json();
+        const b64 = data.data?.[0]?.b64_json;
+        if (b64) return b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
+        if (data.data?.[0]?.url) return data.data[0].url;
+      }
     } catch (e) {
-      console.warn('Servidor de difusión no disponible en la URL configurada:', e.message);
+      console.warn(`[Local AI Studio]: Fallo al contactar ${baseUrl}:`, e.message);
     }
   }
 
-  // Fallback de escenificación simulada elegante
-  console.log('[Escenificación]: Generando escenificación visual simulada.');
-  return `https://images.unsplash.com/photo-1579783922614-a3fb3927b6a5?auto=format&fit=crop&w=800&q=80&sig=${Date.now()}`;
+  // Fallback local instantáneo y garantizado sin enlaces rotos
+  console.log('[Escenificación]: Servidor local de imágenes no respondió, usando escenificación visual local.');
+  return createLocalSvgPlaceholder(prompt);
 }
 
 /**
@@ -375,14 +584,15 @@ export async function sendChatMessage({
       stream: false
     });
 
-    const response = await fetch(`${finalBaseUrl}/v1/chat/completions`, {
+    const response = await apiFetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: requestBody
-    });
+    }, finalBaseUrl);
 
     if (!response.ok) {
-      throw new Error(`Error en LM Studio API: ${response.statusText}`);
+      const errText = await response.text().catch(() => response.statusText);
+      throw new Error(`Error en LM Studio API: ${errText || response.statusText}`);
     }
 
     const data = await response.json();
@@ -435,11 +645,11 @@ export async function sendContextSummarizationTask({
       stream: false
     });
 
-    const response = await fetch(`${finalBaseUrl}/v1/chat/completions`, {
+    const response = await apiFetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: requestBody
-    });
+    }, finalBaseUrl);
 
     if (!response.ok) return null;
     const data = await response.json();

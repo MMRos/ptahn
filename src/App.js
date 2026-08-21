@@ -42,6 +42,15 @@ function App() {
   const closeChar = () => setCharOpen(false);
   const handleSelectChar = async (id) => {
     console.log('Selected character:', id);
+    const initialMsgText = (popupScenario?.presentation || popupScenario?.intro || '').trim();
+    const initialMessages = initialMsgText ? [
+      {
+        from: 'narrator',
+        text: initialMsgText,
+        createdAt: new Date().toISOString()
+      }
+    ] : [];
+
     // create a new chat record and persist to IndexedDB
     const chat = {
       id: `chat-${Date.now()}`,
@@ -49,7 +58,7 @@ function App() {
       scenarioId: popupScenario ? popupScenario.id : 'demo-1',
       characterId: id,
       createdAt: new Date().toISOString(),
-      messages: []
+      messages: initialMessages
     };
     try {
       const { addChat } = await import('./utils/db');
@@ -226,7 +235,8 @@ function App() {
           preferredModel: parsed.preferredModel || 'Precog-Magnum-31B-i1-GGUF',
           preferredLanguage: parsed.preferredLanguage || 'Español',
           responseLength: parsed.responseLength || 1000,
-          lmStudioUrl: parsed.lmStudioUrl || 'http://localhost:1234'
+          lmStudioUrl: parsed.lmStudioUrl || 'http://localhost:1234',
+          imageServerUrl: parsed.imageServerUrl || 'http://127.0.0.1:42016'
         };
       }
     } catch (e) {
@@ -236,7 +246,8 @@ function App() {
       preferredModel: 'Precog-Magnum-31B-i1-GGUF',
       preferredLanguage: 'Español',
       responseLength: 1000,
-      lmStudioUrl: 'http://localhost:1234'
+      lmStudioUrl: 'http://localhost:1234',
+      imageServerUrl: 'http://127.0.0.1:42016'
     };
   });
 
@@ -340,6 +351,10 @@ function App() {
               setSelectedChat(null);
               setView('chats');
             }} 
+            onUpdateChat={(updated) => {
+              setSelectedChat(updated);
+              refreshChats();
+            }}
             folderHandle={folderHandle}
             appData={appData}
             onUpdateAppData={updateAppData}
@@ -418,6 +433,11 @@ function App() {
             nextData.narrators = exists
               ? appData.narrators.map(n => n.id === newItem.id ? newItem : n)
               : [newItem, ...(appData.narrators || [])];
+          } else if (type === 'tool' || type === 'Herramienta') {
+            const exists = (appData.tools || []).some(t => t.id === newItem.id);
+            nextData.tools = exists
+              ? appData.tools.map(t => t.id === newItem.id ? newItem : t)
+              : [newItem, ...(appData.tools || [])];
           } else {
             // Tarjeta
             const exists = (appData.cards || []).some(c => c.id === newItem.id);

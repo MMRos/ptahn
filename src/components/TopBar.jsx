@@ -198,7 +198,7 @@ export default function TopBar({
                 type="text" 
                 value={chatSettings.lmStudioUrl || 'http://localhost:1234'}
                 onChange={(e) => onUpdateChatSettings({ ...chatSettings, lmStudioUrl: e.target.value })}
-                placeholder="http://localhost:1234"
+                placeholder="http://localhost:1234 o http://192.168.1.41:42005"
                 style={{
                   width: '100%',
                   padding: '6px 10px',
@@ -206,6 +206,28 @@ export default function TopBar({
                   border: '1px solid rgba(255,255,255,0.12)',
                   borderRadius: '6px',
                   color: '#fff',
+                  fontSize: '0.8rem',
+                  boxSizing: 'border-box',
+                  marginTop: '4px'
+                }}
+              />
+            </div>
+
+            {/* URL del Servidor de Imágenes (Local AI Studio / Pinokio) */}
+            <div className="settings-group">
+              <label>🎨 URL Generador de Imágenes (Pinokio / Local Studio)</label>
+              <input 
+                type="text" 
+                value={chatSettings.imageServerUrl || 'http://127.0.0.1:42016'}
+                onChange={(e) => onUpdateChatSettings({ ...chatSettings, imageServerUrl: e.target.value })}
+                placeholder="http://127.0.0.1:42016 o http://192.168.1.41:42016"
+                style={{
+                  width: '100%',
+                  padding: '6px 10px',
+                  background: '#1e1e2c',
+                  border: '1px solid rgba(255,211,107,0.3)',
+                  borderRadius: '6px',
+                  color: '#ffd36b',
                   fontSize: '0.8rem',
                   boxSizing: 'border-box',
                   marginTop: '4px'

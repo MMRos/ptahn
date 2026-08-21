@@ -5,6 +5,7 @@ const defaultAppData = {
   scenarios: [],
   cards: [],
   narrators: [],
+  tools: [],
 };
 
 // ----------------------------------------------------
@@ -184,11 +185,23 @@ export async function loadAppDataFromFolder(rootDirHandle) {
       }
     } catch (e) {}
 
-    if (scannedScenarios.length || scannedCards.length || scannedNarrators.length) {
+    let scannedTools = [];
+    try {
+      const toolsDir = await baseDir.getDirectoryHandle('tools', { create: false });
+      for await (const entry of toolsDir.values()) {
+        if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+          const item = await readJsonFile(toolsDir, entry.name);
+          if (item) scannedTools.push(item);
+        }
+      }
+    } catch (e) {}
+
+    if (scannedScenarios.length || scannedCards.length || scannedNarrators.length || scannedTools.length) {
       const loadedFolderData = {
         scenarios: scannedScenarios,
         cards: scannedCards,
-        narrators: scannedNarrators
+        narrators: scannedNarrators,
+        tools: scannedTools
       };
       saveAppData(loadedFolderData);
       return loadedFolderData;
@@ -200,7 +213,7 @@ export async function loadAppDataFromFolder(rootDirHandle) {
 }
 
 /**
- * Guarda 100% el estado completo de la aplicación (escenarios, tarjetas, narradores) en archivos JSON independientes.
+ * Guarda 100% el estado completo de la aplicación (escenarios, tarjetas, narradores, herramientas) en archivos JSON independientes.
  */
 export async function saveAppDataToFolder(data, rootDirHandle) {
   if (!rootDirHandle) return;
@@ -214,10 +227,12 @@ export async function saveAppDataToFolder(data, rootDirHandle) {
   const scenariosDir = await getDirectoryHandleFromPath(baseDir, 'scenarios', true);
   const cardsDir = await getDirectoryHandleFromPath(baseDir, 'cards', true);
   const narratorsDir = await getDirectoryHandleFromPath(baseDir, 'narrators', true);
+  const toolsDir = await getDirectoryHandleFromPath(baseDir, 'tools', true);
 
   await Promise.all((data.scenarios || []).map(s => writeJsonFile(scenariosDir, `${s.id}.json`, s)));
   await Promise.all((data.cards || []).map(c => writeJsonFile(cardsDir, `${c.id}.json`, c)));
   await Promise.all((data.narrators || []).map(n => writeJsonFile(narratorsDir, `${n.id}.json`, n)));
+  await Promise.all((data.tools || []).map(t => writeJsonFile(toolsDir, `${t.id}.json`, t)));
 }
 
 /**
@@ -260,6 +275,7 @@ export function loadAppData() {
       scenarios: Array.isArray(parsed.scenarios) ? parsed.scenarios : [],
       cards: Array.isArray(parsed.cards) ? parsed.cards : [],
       narrators: Array.isArray(parsed.narrators) ? parsed.narrators : [],
+      tools: Array.isArray(parsed.tools) ? parsed.tools : [],
     };
   } catch (error) {
     return defaultAppData;

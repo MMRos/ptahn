@@ -8,35 +8,104 @@ import {
   faImage, 
   faPaperPlane, 
   faCheck, 
-  faTimes,
-  faPlay,
-  faBold,
-  faItalic,
-  faQuoteRight,
-  faVolumeUp
+  faTimes, 
+  faPlay, 
+  faVolumeUp, 
+  faCommentDots, 
+  faRunning, 
+  faBrain, 
+  faHighlighter,
+  faTrashAlt
 } from '@fortawesome/free-solid-svg-icons';
 import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask } from '../utils/lmstudio';
 import { saveChatToFolder } from '../utils/storage';
 import { addChat } from '../utils/db';
 import StagingModal from './StagingModal';
+import CharacterPopup from './CharacterPopup';
 import './chats.css';
 
 function FormattedMessageText({ text }) {
   if (!text) return null;
-  const parts = text.split(/(".*?"|\*\*.*?\*\*|\*.*?\*)/g);
+
+  // Extraer bloque de razonamiento / pensamiento <think>...</think> si el modelo lo incluye
+  let thinkingContent = null;
+  let cleanText = text;
+
+  const thinkMatch = text.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+  if (thinkMatch) {
+    thinkingContent = thinkMatch[1].trim();
+    cleanText = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
+    if (!cleanText && thinkingContent) {
+      cleanText = thinkingContent;
+      thinkingContent = null;
+    }
+  }
+
+  const regex = /(".*?"|\*\*.*?\*\*|\*.*?\*|~.*?~|==.*?==)/g;
+  const parts = cleanText.split(regex);
   return (
     <span>
+      {thinkingContent && (
+        <div className="msg-think-box" style={{
+          background: 'rgba(192, 132, 252, 0.08)',
+          borderLeft: '3px solid #c084fc',
+          padding: '6px 10px',
+          borderRadius: '4px',
+          marginBottom: '8px',
+          fontSize: '0.8rem',
+          color: 'rgba(255,255,255,0.7)',
+          fontStyle: 'italic'
+        }}>
+          <div style={{ fontWeight: 'bold', color: '#c084fc', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <FontAwesomeIcon icon={faBrain} /> Pensamiento del Narrador
+          </div>
+          <div>{thinkingContent}</div>
+        </div>
+      )}
       {parts.map((part, i) => {
-        if (part.startsWith('"') && part.endsWith('"')) return <span key={i} className="msg-dialogue">{part}</span>;
-        if (part.startsWith('**') && part.endsWith('**')) return <strong key={i}>{part.slice(2, -2)}</strong>;
-        if (part.startsWith('*') && part.endsWith('*')) return <em key={i} className="msg-action">{part.slice(1, -1)}</em>;
+        if (!part) return null;
+        if (part.startsWith('"') && part.endsWith('"')) {
+          return (
+            <span key={i} className="msg-dialogue">
+              <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
+              {part}
+            </span>
+          );
+        }
+        if (part.startsWith('==') && part.endsWith('==')) {
+          return (
+            <mark key={i} className="msg-highlight">
+              <FontAwesomeIcon icon={faHighlighter} className="msg-type-icon highlight-icon" />
+              {part.slice(2, -2)}
+            </mark>
+          );
+        }
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={i} className="msg-bold">{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('~') && part.endsWith('~')) {
+          return (
+            <span key={i} className="msg-thought">
+              <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />
+              {part.slice(1, -1)}
+            </span>
+          );
+        }
+        if (part.startsWith('*') && part.endsWith('*')) {
+          return (
+            <em key={i} className="msg-action">
+              <FontAwesomeIcon icon={faRunning} className="msg-type-icon action-icon" />
+              {part.slice(1, -1)}
+            </em>
+          );
+        }
         return part;
       })}
     </span>
   );
 }
 
-export default function ChatView({ chat, folderHandle, onBranchChat, appData, onUpdateAppData, chatSettings = {} }) {
+export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {} }) {
   const [messages, setMessages] = useState(chat?.messages || []);
   const [inputMsg, setInputMsg] = useState('');
   const [editingIndex, setEditingIndex] = useState(null);
@@ -44,6 +113,8 @@ export default function ChatView({ chat, folderHandle, onBranchChat, appData, on
   const [isStagingOpen, setIsStagingOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState(null);
+  const [popupCharacter, setPopupCharacter] = useState(null);
+  const inputRef = useRef(null);
 
   // States para generación manual y automática de tarjetas
   const [autoGenCards, setAutoGenCards] = useState(false);
@@ -54,8 +125,76 @@ export default function ChatView({ chat, folderHandle, onBranchChat, appData, on
   const [newCardText, setNewCardText] = useState('');
 
   useEffect(() => {
-    setMessages(chat?.messages || []);
-  }, [chat]);
+    let currentMsgs = chat?.messages || [];
+    if (currentMsgs.length === 0 && chat?.scenarioId) {
+      const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId) || 
+                       (appData?.cards || []).find(c => c.id === chat.scenarioId);
+      const firstText = (scenario?.presentation || scenario?.intro || '').trim();
+      if (firstText) {
+        currentMsgs = [
+          {
+            from: 'narrator',
+            text: firstText,
+            createdAt: new Date().toISOString()
+          }
+        ];
+        persistMessages(currentMsgs);
+      }
+    }
+    setMessages(currentMsgs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat, appData]);
+
+  const insertFormatting = (type) => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    const currentText = inputMsg;
+    const selectedText = currentText.substring(start, end);
+
+    let prefix = '';
+    let suffix = '';
+    let placeholder = '';
+
+    switch (type) {
+      case 'dialogue':
+        prefix = '"';
+        suffix = '"';
+        placeholder = 'diálogo';
+        break;
+      case 'action':
+        prefix = '*';
+        suffix = '*';
+        placeholder = 'acción';
+        break;
+      case 'thought':
+        prefix = '~';
+        suffix = '~';
+        placeholder = 'pensamiento';
+        break;
+      case 'highlight':
+        prefix = '==';
+        suffix = '==';
+        placeholder = 'texto resaltado';
+        break;
+      default:
+        break;
+    }
+
+    const insertedContent = selectedText ? `${prefix}${selectedText}${suffix}` : `${prefix}${placeholder}${suffix}`;
+    const newText = currentText.substring(0, start) + insertedContent + currentText.substring(end);
+    setInputMsg(newText);
+
+    setTimeout(() => {
+      textarea.focus();
+      if (selectedText) {
+        textarea.setSelectionRange(start, start + insertedContent.length);
+      } else {
+        textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
+      }
+    }, 10);
+  };
 
   useEffect(() => {
     if (isSelectingForCard) {
@@ -78,6 +217,9 @@ export default function ChatView({ chat, folderHandle, onBranchChat, appData, on
     try { await addChat(updatedChat); } catch(err) { console.warn('IndexedDB save err:', err); }
     if (folderHandle) {
       try { await saveChatToFolder(updatedChat, folderHandle); } catch (err) {}
+    }
+    if (onUpdateChat) {
+      onUpdateChat(updatedChat);
     }
   };
 
@@ -163,7 +305,7 @@ export default function ChatView({ chat, folderHandle, onBranchChat, appData, on
   };
 
   // Construcción unificada y estructurada del systemPrompt (arnés de contexto).
-  // Consolida los detalles del escenario, narrador, jugador y las reglas críticas del arnés.
+  // Consolida los detalles del escenario, narrador, herramientas del taller, jugador, inventario y memorias.
   const buildSystemPrompt = () => {
     // 1. Obtener escenario y narrador vinculados
     const scenario = appData?.scenarios?.find(s => s.id === chat.scenarioId);
@@ -172,13 +314,13 @@ export default function ChatView({ chat, folderHandle, onBranchChat, appData, on
     // 2. Obtener ficha del personaje interpretado por el usuario
     const userChar = (appData?.cards || []).find(c => c.id === chat.characterId);
 
-    // 3. Formatear los detalles del perfil del narrador (Bio, Estilo, Tono, Reglas)
+    // 3. Formatear los detalles del perfil del narrador (Instrucciones narrativas, Estilo, Tono, Reglas)
     let narratorDetails = '';
     if (narrator) {
       narratorDetails = `
 [NARRADOR / DM ACTIVO]:
 - Nombre: ${narrator.name}
-${narrator.bio ? `- Perfil/Bio: ${narrator.bio}` : ''}
+${narrator.bio ? `- Instrucciones narrativas: ${narrator.bio}` : ''}
 ${narrator.style ? `- Estilo Narrativo: ${narrator.style}` : ''}
 ${narrator.tone ? `- Tono: ${narrator.tone}` : ''}
 ${narrator.rules ? `- Reglas del Narrador: ${narrator.rules}` : ''}
@@ -186,7 +328,41 @@ ${narrator.randomization ? `- Azar/Mecánicas: ${narrator.randomization}` : ''}
 `.trim();
     }
 
-    // 4. Formatear la descripción del personaje del usuario
+    // 4. Formatear herramientas del taller asignadas al narrador
+    let narratorToolsDetails = '';
+    if (narrator && narrator.tools && narrator.tools.length > 0) {
+      const assignedTools = (appData?.tools || []).filter(t => narrator.tools.includes(t.id));
+      if (assignedTools.length > 0) {
+        const toolsText = assignedTools.map(tool => {
+          let mechanics = '';
+          if (tool.toolType === 'attributes') {
+            const attrs = tool.config?.attributes || [];
+            mechanics = `Barras de Atributos del Sistema:\n` + attrs.map(a => `  * ${a.name} [${a.current ?? a.max}/${a.max}] (Color: ${a.color || 'auto'}) - ${a.desc || 'Recurso/Métrica'}`).join('\n');
+          } else if (tool.toolType === 'progression') {
+            const levels = tool.config?.levels || [];
+            mechanics = `Tabla de Progresión (${tool.config?.scaleName || 'Nivel'}):\n` + levels.map(l => `  * Nivel ${l.level} (${l.title}): ${l.perks || 'Requisitos/Ventajas'}`).join('\n');
+          } else if (tool.toolType === 'dice') {
+            const dice = tool.config?.diceType || '1d20';
+            const dc = tool.config?.defaultDC || '12';
+            mechanics = `Sistema de Resolución y Azar: Dados ${dice} (DC base: ${dc}). Críticos: Éxito en ${tool.config?.critSuccess || 20}, Pifia en ${tool.config?.critFail || 1}. Modificadores: ${tool.config?.statModifier || 'Atributo relevante'}.`;
+          } else if (tool.toolType === 'events') {
+            const evts = tool.config?.events || [];
+            mechanics = `Tabla de Encuentros y Eventos (${tool.config?.diceType || '1d20'}):\n` + evts.map(e => `  * Rango [${e.min}-${e.max}]: ${e.event} (${e.severity || 'Normal'})`).join('\n');
+          } else {
+            mechanics = `Reglas / Mecánica Personalizada:\n${tool.config?.customRules || tool.description || 'Sin reglas especificadas.'}`;
+          }
+          return `--- [HERRAMIENTA: ${tool.name} (${(tool.toolType || 'custom').toUpperCase()})] ---\nDescripción: ${tool.description || 'Herramienta de juego'}\n${mechanics}`;
+        }).join('\n\n');
+
+        narratorToolsDetails = `
+[HERRAMIENTAS Y MECÁNICAS MODULARES (TALLER DE FUNCIONES)]:
+El narrador tiene acceso a las siguientes herramientas y presets para modularizar la partida. Úsalos como referencia para resolver acciones, calcular daño/éxitos o detonar eventos cuando la situación lo amerite:
+${toolsText}
+`.trim();
+      }
+    }
+
+    // 5. Formatear la descripción del personaje del usuario
     let userCharDetails = '';
     if (userChar) {
       userCharDetails = `
@@ -198,7 +374,24 @@ ${userChar.traits && userChar.traits.length > 0 ? `- Rasgos: ${userChar.traits.j
 `.trim();
     }
 
-    // 5. Formatear los detalles del escenario y reglas adicionales del formulario (Contexto Extra)
+    // 6. Formatear inventario del personaje
+    let userInventoryDetails = '';
+    if (userChar) {
+      const userInventories = (appData?.cards || []).filter(c => c.type === 'Inventario' && (c.linkedCharacterId === userChar.id || c.linkedCharacterId === userChar.title));
+      if (userInventories.length > 0) {
+        const invText = userInventories.map(inv => {
+          const itemsList = (inv.items || []).map(it => `  * [${it.equipped ? 'EQUIPADO' : 'EN BOLSA'}] ${it.name} (x${it.qty || 1}, ${it.rarity || 'Común'}) - ${it.desc || ''}`).join('\n');
+          return `Mochila/Inventario "${inv.title}" (Capacidad: ${inv.capacity || 'Estándar'}):\n${itemsList || '  (Vacío)'}`;
+        }).join('\n\n');
+
+        userInventoryDetails = `
+[INVENTARIO Y EQUIPAMIENTO DE {{user}}]:
+${invText}
+`.trim();
+      }
+    }
+
+    // 7. Formatear los detalles del escenario y reglas adicionales del formulario (Contexto Extra)
     let scenarioDetails = `Escenario: ${chat.scenario}.`;
     if (scenario) {
       scenarioDetails = `
@@ -210,16 +403,24 @@ ${scenario.aiInstructions ? `- Instrucciones adicionales del GM (Contexto Extra)
 `.trim();
     }
 
-    const memoryContext = (chat.memoryCards || []).map(m => `[Memoria]: ${m}`).join('\n');
-    
+    // 8. Formatear memorias e hitos (tanto del chat como tarjetas de memoria enlazadas)
+    const inChatMemories = (chat.memoryCards || []).map(m => `* ${m}`);
+    const cardMemories = (appData?.cards || []).filter(c => c.type === 'Memoria' && (
+      c.linkedScenario === chat.scenarioId || 
+      (Array.isArray(c.linkedCharacters) && userChar && (c.linkedCharacters.includes(userChar.id) || c.linkedCharacters.includes(userChar.title)))
+    )).map(m => `* [Impacto: ${m.impact || 'Medio'}] (${m.timeline || 'Hito'}) ${m.title}: ${m.summary || m.text}`);
+
+    const allMemories = [...inChatMemories, ...cardMemories];
+    const memoryContext = allMemories.length > 0 ? allMemories.join('\n') : 'No hay memorias previas registradas.';
+
     return `
 ${scenarioDetails}
 
 ${narratorDetails}
 
-${userCharDetails}
+${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
 
-[ÓRDENES CONSTANTES DE LA IA]:
+${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}[ÓRDENES CONSTANTES DE LA IA]:
 ${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva.'}
 
 [REGLAS CRÍTICAS DEL ARNÉS (OBLIGATORIO)]:
@@ -229,7 +430,7 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva.'}
 - Escribe en un estilo literario, detallado e inmersivo.
 
 [MEMORIAS Y HECHOS DE LA HISTORIA]:
-${memoryContext || 'No hay memorias previas.'}
+${memoryContext}
 `.trim();
   };
 
@@ -264,6 +465,81 @@ ${memoryContext || 'No hay memorias previas.'}
         console.warn('[Context Summary Task]: Fallo en la tarea de resumen:', sumErr);
       }
     }, 1000);
+  };
+
+  const handleDeleteMessage = async (idxToDelete) => {
+    if (window.confirm('¿Eliminar este mensaje del historial?')) {
+      const nextMsgs = messages.filter((_, i) => i !== idxToDelete);
+      await persistMessages(nextMsgs);
+    }
+  };
+
+  const handleRewindToMessage = async (idx) => {
+    if (window.confirm(`¿Rebobinar chat hasta este mensaje (#${idx + 1})? Los mensajes posteriores se eliminarán.`)) {
+      const nextMsgs = messages.slice(0, idx + 1);
+      await persistMessages(nextMsgs);
+    }
+  };
+
+  const handleRedo = async (specificIdx = null) => {
+    if (isSending || messages.length === 0) return;
+
+    let targetIdx = specificIdx;
+    if (targetIdx === null) {
+      // Buscar el último mensaje de la IA / Narrador
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].from !== 'user') {
+          targetIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (targetIdx === null || targetIdx < 0) {
+      return;
+    }
+
+    // Contexto previo: todos los mensajes anteriores a esta respuesta
+    const historyBefore = messages.slice(0, targetIdx);
+    if (historyBefore.length === 0) {
+      alert('No hay prompt previo para regenerar esta respuesta.');
+      return;
+    }
+
+    // Truncar historial para eliminar la respuesta a regenerar
+    await persistMessages(historyBefore);
+    setIsSending(true);
+
+    try {
+      const systemPrompt = buildSystemPrompt();
+      const res = await sendChatMessage({
+        messages: historyBefore,
+        systemInstruction: systemPrompt,
+        contextDocuments: chat.contextDocuments || [],
+        modelId: chatSettings?.preferredModel,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+
+      const newAiMsg = {
+        from: messages[targetIdx]?.from || 'narrator',
+        text: res.text || 'Sin respuesta.',
+        timestamp: new Date().toISOString()
+      };
+      const finalMsgs = [...historyBefore, newAiMsg];
+      await persistMessages(finalMsgs);
+      runBackgroundSummarization(finalMsgs);
+
+    } catch (err) {
+      console.error("Error al rehacer respuesta:", err);
+      const errorMsg = {
+        from: 'ai',
+        text: `[Error al rehacer]: ${err.message || 'LM Studio no accesible.'}`,
+        timestamp: new Date().toISOString()
+      };
+      await persistMessages([...historyBefore, errorMsg]);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleSend = async (overrideText = null) => {
@@ -342,8 +618,6 @@ ${memoryContext || 'No hay memorias previas.'}
     }
   };
 
-  // Insertar formateadores rápido ("...", *...*, **...**) en el textarea
-  const inputRef = useRef(null);
   const chatRef = useRef(null);
 
   useEffect(() => {
@@ -351,35 +625,6 @@ ${memoryContext || 'No hay memorias previas.'}
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   }, [messages, isSending]);
-
-  const insertFormatting = (symbol) => {
-    let wrap = '';
-    if (symbol === 'quote') wrap = '"';
-    if (symbol === 'italic') wrap = '*';
-    if (symbol === 'bold') wrap = '**';
-
-    if (inputRef.current) {
-      const start = inputRef.current.selectionStart;
-      const end = inputRef.current.selectionEnd;
-      const text = inputMsg;
-      const before = text.substring(0, start);
-      const selected = text.substring(start, end);
-      const after = text.substring(end);
-      
-      const newText = before + wrap + selected + wrap + after;
-      setInputMsg(newText);
-      
-      setTimeout(() => {
-        inputRef.current.focus();
-        const newPos = start + wrap.length + selected.length;
-        if (selected.length === 0) {
-           inputRef.current.setSelectionRange(newPos, newPos);
-        } else {
-           inputRef.current.setSelectionRange(start + wrap.length, newPos);
-        }
-      }, 0);
-    }
-  };
 
   return (
     <div className="chat-container">
@@ -423,6 +668,15 @@ ${memoryContext || 'No hay memorias previas.'}
                   }
                 </span>
                 <div className="msg-toolbar">
+                  {m.from !== 'user' && (
+                    <button 
+                      title="Rehacer esta respuesta de la IA" 
+                      onClick={() => handleRedo(idx)}
+                      disabled={isSending}
+                    >
+                      <FontAwesomeIcon icon={faUndo} />
+                    </button>
+                  )}
                   <button 
                     title={speakingMessageId === `${m.from}-${idx}` ? "Detener voz" : "Escuchar mensaje"} 
                     onClick={() => handleSpeakMessage(m, idx)}
@@ -432,9 +686,8 @@ ${memoryContext || 'No hay memorias previas.'}
                   </button>
                   <button title="Editar mensaje" onClick={() => { setEditingIndex(idx); setEditText(m.text); }}><FontAwesomeIcon icon={faEdit} /></button>
                   <button title="Bifurcar chat aquí (Branch)" onClick={() => onBranchChat && onBranchChat(chat, messages.slice(0, idx + 1))}><FontAwesomeIcon icon={faCodeBranch} /></button>
-                  <button title="Rebobinar hasta aquí (Rewind)" onClick={() => {
-                    if (window.confirm('¿Rebobinar chat?')) persistMessages(messages.slice(0, idx + 1));
-                  }}><FontAwesomeIcon icon={faHistory} /></button>
+                  <button title="Rebobinar hasta aquí (Rewind)" onClick={() => handleRewindToMessage(idx)}><FontAwesomeIcon icon={faHistory} /></button>
+                  <button title="Eliminar mensaje" onClick={() => handleDeleteMessage(idx)} style={{ color: '#eb5757' }}><FontAwesomeIcon icon={faTrashAlt} /></button>
                 </div>
               </div>
 
@@ -562,6 +815,10 @@ ${memoryContext || 'No hay memorias previas.'}
                       cards: [newCardObj, ...(appData.cards || [])]
                     };
                     onUpdateAppData(nextData);
+                  }
+                  if (newCardType === 'Personaje') {
+                    setPopupCharacter(newCardObj);
+                  } else {
                     alert(`Tarjeta "${n}" creada de forma manual.`);
                   }
                   setIsSelectingForCard(false);
@@ -579,15 +836,18 @@ ${memoryContext || 'No hay memorias previas.'}
 
         {/* Barra de Acciones y Formateadores Rápidos justo encima del Textarea */}
         <div className="chat-tools-bar">
-          <div className="tools-left" style={{ display: 'flex', alignItems: 'center' }}>
-            <button type="button" className="tool-btn" title="Insertar Diálogo comillas" onClick={() => insertFormatting('quote')}>
-              <FontAwesomeIcon icon={faQuoteRight} /> <span>"..."</span>
+          <div className="tools-left" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <button type="button" className="tool-btn format-dialogue" title="Insertar Diálogo ('...')" onClick={() => insertFormatting('dialogue')}>
+              <FontAwesomeIcon icon={faCommentDots} style={{ color: '#ffd36b' }} /> <span>Diálogo</span>
             </button>
-            <button type="button" className="tool-btn" title="Insertar Acción cursiva" onClick={() => insertFormatting('italic')}>
-              <FontAwesomeIcon icon={faItalic} /> <span>*...*</span>
+            <button type="button" className="tool-btn format-action" title="Insertar Acción (*...*)" onClick={() => insertFormatting('action')}>
+              <FontAwesomeIcon icon={faRunning} style={{ color: '#6ee7b7' }} /> <span>Acción</span>
             </button>
-            <button type="button" className="tool-btn" title="Insertar Negrita" onClick={() => insertFormatting('bold')}>
-              <FontAwesomeIcon icon={faBold} /> <span>**...**</span>
+            <button type="button" className="tool-btn format-thought" title="Insertar Pensamiento (~...~)" onClick={() => insertFormatting('thought')}>
+              <FontAwesomeIcon icon={faBrain} style={{ color: '#c084fc' }} /> <span>Pensamiento</span>
+            </button>
+            <button type="button" className="tool-btn format-highlight" title="Insertar Resaltado (==...==)" onClick={() => insertFormatting('highlight')}>
+              <FontAwesomeIcon icon={faHighlighter} style={{ color: '#fbbf24' }} /> <span>Resaltar</span>
             </button>
             
             {/* Toggle de Generación Automática */}
@@ -626,7 +886,7 @@ ${memoryContext || 'No hay memorias previas.'}
                   borderRadius: '4px', 
                   padding: '3px 10px', 
                   fontSize: '0.75rem', 
-                  fontWeight: 'bold',
+                  fontWeight: 'bold', 
                   cursor: 'pointer' 
                 }}
               >
@@ -639,7 +899,7 @@ ${memoryContext || 'No hay memorias previas.'}
             <button type="button" className="tool-btn action" title="Pedir a la IA que continúe" onClick={handleContinue} disabled={isSending}>
               <FontAwesomeIcon icon={faPlay} /> <span>Continuar</span>
             </button>
-            <button type="button" className="tool-btn action" title="Rehacer última respuesta" onClick={() => handleSend('')} disabled={isSending}>
+            <button type="button" className="tool-btn action" title="Rehacer última respuesta de la IA" onClick={() => handleRedo()} disabled={isSending}>
               <FontAwesomeIcon icon={faUndo} /> <span>Rehacer</span>
             </button>
             <button type="button" className="tool-btn action" title="Escenificar (Generar Imagen)" onClick={() => setIsStagingOpen(true)}>
@@ -691,6 +951,12 @@ ${memoryContext || 'No hay memorias previas.'}
           };
           persistMessages([...messages, imageMsg]);
         }}
+      />
+
+      <CharacterPopup 
+        scenario={popupCharacter}
+        isOpen={!!popupCharacter}
+        onClose={() => setPopupCharacter(null)}
       />
     </div>
   );

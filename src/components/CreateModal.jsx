@@ -1,13 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTimes, faSave, faStar, faPlus, faCrop, faImage, faImages } from '@fortawesome/free-solid-svg-icons';
+import { 
+  faTimes, 
+  faSave, 
+  faStar, 
+  faPlus, 
+  faCrop, 
+  faImage, 
+  faImages, 
+  faBrain, 
+  faBoxes, 
+  faTrashAlt, 
+  faCheck,
+  faMagic
+} from '@fortawesome/free-solid-svg-icons';
 import ConnectionSelector from './ConnectionSelector';
 import ImageCropperModal from './ImageCropperModal';
 import BatchCropperModal from './BatchCropperModal';
 import NarratorForm from './NarratorForm';
+import ToolWorkshopForm from './ToolWorkshopForm';
+import { generateImageLocal } from '../utils/lmstudio';
 import '../pages/create.css';
 
-const CARD_TYPES = ['Historia', 'Personaje', 'Raza', 'Facción', 'Regla', 'Criatura', 'Objeto', 'Lugar', 'Otros'];
+const CARD_TYPES = ['Historia', 'Personaje', 'Inventario', 'Memoria', 'Raza', 'Facción', 'Regla', 'Criatura', 'Objeto', 'Lugar', 'Otros'];
 const CATEGORIES = [
   'Acción',
   'Anime',
@@ -145,12 +160,36 @@ export default function CreateModal({
   const [aiInstructions, setAiInstructions] = useState('');
   const [scenarioNarrator, setScenarioNarrator] = useState('');
 
-  // States para Narrador
+  // States para Narrador y Taller de Funciones
   const [bio, setBio] = useState('');
   const [style, setStyle] = useState('');
   const [tone, setTone] = useState('');
   const [rules, setRules] = useState('');
   const [randomization, setRandomization] = useState('');
+  const [narratorTools, setNarratorTools] = useState([]); // IDs de herramientas asignadas
+
+  // States para Herramienta (Taller de Funciones)
+  const [toolWorkshopType, setToolWorkshopType] = useState('attributes'); // 'attributes' | 'progression' | 'dice' | 'events' | 'custom'
+  const [toolWorkshopDesc, setToolWorkshopDesc] = useState('');
+  const [toolWorkshopConfig, setToolWorkshopConfig] = useState({});
+
+  // States para Tarjeta de Memoria
+  const [memorySummary, setMemorySummary] = useState('');
+  const [memoryImpact, setMemoryImpact] = useState('Medio'); // 'Crítico', 'Alto', 'Medio', 'Leve'
+  const [memoryCharacters, setMemoryCharacters] = useState([]); // IDs de personajes vinculados
+  const [memoryScenario, setMemoryScenario] = useState('');
+  const [memoryTimeline, setMemoryTimeline] = useState('');
+
+  // States para Tarjeta de Inventario
+  const [inventoryOwnerCharId, setInventoryOwnerCharId] = useState('');
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [inventoryCapacity, setInventoryCapacity] = useState('20 kg / 10 slots');
+
+  // Estado para generación de imágenes con IA local (Uncensored Local Studio / Pinokio)
+  const [isGeneratingAiImage, setIsGeneratingAiImage] = useState(false);
+  const [coverAiPrompt, setCoverAiPrompt] = useState('');
+  const [coverAiStyle, setCoverAiStyle] = useState('Fantasía Oscura / Entornos');
+  const [charAiPrompt, setCharAiPrompt] = useState('');
 
   // Crop state inside modal
   const [cropSrc, setCropSrc] = useState('');
@@ -193,7 +232,13 @@ export default function CreateModal({
     if (isOpen) {
       if (editItem) {
         // Determinamos el modo a partir del tipo del item o la estructura
-        if (initialType === 'Narrador' || editItem.bio !== undefined) {
+        if (initialType === 'Herramienta' || editItem.toolType !== undefined) {
+          setItemType('Herramienta');
+          setTitle(editItem.name || editItem.title || '');
+          setToolWorkshopType(editItem.toolType || 'attributes');
+          setToolWorkshopDesc(editItem.description || '');
+          setToolWorkshopConfig(editItem.config || {});
+        } else if (initialType === 'Narrador' || editItem.bio !== undefined) {
           setItemType('Narrador');
           setTitle(editItem.name || '');
           setBio(editItem.bio || '');
@@ -201,6 +246,7 @@ export default function CreateModal({
           setTone(editItem.tone || '');
           setRules(editItem.rules || '');
           setRandomization(editItem.randomization || '');
+          setNarratorTools(Array.isArray(editItem.tools) ? editItem.tools : []);
         } else if (initialType === 'Escenario' || editItem.id?.startsWith('scenario-')) {
           setItemType('Escenario');
           setTitle(editItem.title || '');
@@ -230,6 +276,32 @@ export default function CreateModal({
           setSelectedTraits(editItem.traits || []);
           setIsPublic(!!editItem.public);
           setIsScenario(false);
+
+          // Campos especializados de Memoria
+          if (editItem.type === 'Memoria') {
+            setMemorySummary(editItem.summary || editItem.text || '');
+            setMemoryImpact(editItem.impact || 'Medio');
+            setMemoryCharacters(editItem.linkedCharacters || []);
+            setMemoryScenario(editItem.linkedScenario || '');
+            setMemoryTimeline(editItem.timeline || '');
+          } else {
+            setMemorySummary('');
+            setMemoryImpact('Medio');
+            setMemoryCharacters([]);
+            setMemoryScenario('');
+            setMemoryTimeline('');
+          }
+
+          // Campos especializados de Inventario
+          if (editItem.type === 'Inventario') {
+            setInventoryOwnerCharId(editItem.linkedCharacterId || '');
+            setInventoryItems(Array.isArray(editItem.items) ? editItem.items : []);
+            setInventoryCapacity(editItem.capacity || '20 kg / 10 slots');
+          } else {
+            setInventoryOwnerCharId('');
+            setInventoryItems([]);
+            setInventoryCapacity('20 kg / 10 slots');
+          }
 
           // Cargar galería de imágenes / expresiones
           if (Array.isArray(editItem.images) && editItem.images.length > 0) {
@@ -267,6 +339,27 @@ export default function CreateModal({
         setTone('');
         setRules('');
         setRandomization('');
+        setNarratorTools([]);
+
+        // Herramienta / Taller
+        setToolWorkshopType('attributes');
+        setToolWorkshopDesc('');
+        setToolWorkshopConfig({});
+
+        // Memoria vacía
+        setMemorySummary('');
+        setMemoryImpact('Medio');
+        setMemoryCharacters([]);
+        setMemoryScenario('');
+        setMemoryTimeline('');
+
+        // Inventario vacío
+        setInventoryOwnerCharId('');
+        setInventoryItems([
+          { id: `item-${Date.now()}-1`, name: 'Espada corta de acero', qty: 1, rarity: 'Común', equipped: true, weight: '1.5 kg', desc: 'Arma básica de filo equilibrado.' },
+          { id: `item-${Date.now()}-2`, name: 'Poción de curación menor', qty: 3, rarity: 'Común', equipped: false, weight: '0.5 kg', desc: 'Restaura una pequeña cantidad de salud.' }
+        ]);
+        setInventoryCapacity('20 kg / 10 slots');
 
         // Galería vacía
         setCharacterImages([]);
@@ -285,7 +378,7 @@ export default function CreateModal({
 
   if (!isOpen) return null;
 
-  const isWide = itemType === 'Escenario' || itemType === 'Narrador';
+  const isWide = itemType === 'Escenario' || itemType === 'Narrador' || itemType === 'Herramienta' || itemType === 'Inventario';
 
   const handleSave = () => {
     const trimmedTitle = title.trim();
@@ -294,7 +387,17 @@ export default function CreateModal({
       return;
     }
 
-    if (itemType === 'Narrador') {
+    if (itemType === 'Herramienta') {
+      const toolData = {
+        id: editItem ? editItem.id : `tool-${Date.now()}`,
+        name: trimmedTitle,
+        toolType: toolWorkshopType,
+        description: toolWorkshopDesc.trim(),
+        config: toolWorkshopConfig,
+        createdAt: editItem ? editItem.createdAt : new Date().toISOString()
+      };
+      onSaveItem({ type: 'tool', data: toolData, isEdit: !!editItem });
+    } else if (itemType === 'Narrador') {
       const narratorData = {
         id: editItem ? editItem.id : `narrator-${Date.now()}`,
         name: trimmedTitle,
@@ -303,6 +406,7 @@ export default function CreateModal({
         tone: tone.trim(),
         rules: rules.trim(),
         randomization: randomization.trim(),
+        tools: narratorTools,
         createdAt: editItem ? editItem.createdAt : new Date().toISOString()
       };
       onSaveItem({ type: 'narrator', data: narratorData, isEdit: !!editItem });
@@ -333,8 +437,12 @@ export default function CreateModal({
         id: editItem ? editItem.id : `card-${Date.now()}`,
         type: itemType,
         title: trimmedTitle,
-        intro: intro.trim(),
-        text: text.trim(),
+        intro: intro.trim() || (itemType === 'Memoria' ? memorySummary.trim().substring(0, 120) : itemType === 'Inventario' ? `Inventario (${inventoryItems.length} objetos)` : ''),
+        text: itemType === 'Memoria' 
+          ? (memorySummary.trim() || text.trim()) 
+          : itemType === 'Inventario' 
+          ? (inventoryItems.map(i => `${i.name} (x${i.qty || 1}) - ${i.equipped ? '[Equipado]' : '[En mochila]'}: ${i.desc || ''}`).join('\n') || text.trim()) 
+          : text.trim(),
         cover: finalCover,
         images: itemType === 'Personaje' ? characterImages : (finalCover ? [{ id: 'img-1', url: finalCover, label: 'Principal', isDefault: true }] : []),
         nsfw: nsfw,
@@ -342,6 +450,20 @@ export default function CreateModal({
         connectedCards: selectedCards,
         traits: itemType === 'Personaje' ? selectedTraits : [],
         public: isPublic,
+        // Propiedades de Memoria
+        ...(itemType === 'Memoria' ? {
+          summary: memorySummary.trim() || intro.trim(),
+          impact: memoryImpact,
+          linkedCharacters: memoryCharacters,
+          linkedScenario: memoryScenario,
+          timeline: memoryTimeline.trim()
+        } : {}),
+        // Propiedades de Inventario
+        ...(itemType === 'Inventario' ? {
+          linkedCharacterId: inventoryOwnerCharId,
+          items: inventoryItems,
+          capacity: inventoryCapacity.trim()
+        } : {}),
         createdAt: editItem ? editItem.createdAt : new Date().toISOString()
       };
 
@@ -354,7 +476,7 @@ export default function CreateModal({
           intro: intro.trim() || text.trim().substring(0, 80) + '...',
           cover: finalCover,
           presentation: '',
-          baseContext: `[${itemType}]: ${text.trim()}`,
+          baseContext: `[${itemType}]: ${cardData.text}`,
           aiInstructions: '',
           tags: selectedTags,
           nsfw: nsfw,
@@ -505,31 +627,60 @@ export default function CreateModal({
   const handleSaveNestedCard = () => {
     const trimmedTitle = nestedCardTitle.trim();
     if (!trimmedTitle) {
-      alert('El nombre de la tarjeta es obligatorio.');
+      alert('El nombre o título es obligatorio.');
       return;
     }
-    const primaryImg = nestedCharacterImages.find(img => img.isDefault) || nestedCharacterImages[0];
-    const finalCover = (nestedCardType === 'Personaje' && primaryImg ? primaryImg.url : nestedCardCover).trim();
 
-    const newCard = {
-      id: `card-${Date.now()}`,
-      type: nestedCardType,
-      title: trimmedTitle,
-      intro: nestedCardIntro.trim(),
-      text: nestedCardText.trim(),
-      cover: finalCover,
-      images: nestedCardType === 'Personaje' ? nestedCharacterImages : (finalCover ? [{ id: 'img-1', url: finalCover, label: 'Principal', isDefault: true }] : []),
-      nsfw: false,
-      public: false,
-      tags: [],
-      connectedCards: [],
-      traits: nestedCardType === 'Personaje' ? nestedCardTraits : [],
-      createdAt: new Date().toISOString()
-    };
-    // Guardar globalmente
-    onSaveItem({ type: 'card', data: newCard, isEdit: false });
-    // Conectar al escenario actual
-    setSelectedCards(prev => [...prev, newCard.id]);
+    if (nestedCardType === 'Herramienta') {
+      const newTool = {
+        id: `tool-${Date.now()}`,
+        name: trimmedTitle,
+        toolType: 'attributes',
+        description: nestedCardIntro.trim() || nestedCardText.trim(),
+        config: {},
+        createdAt: new Date().toISOString()
+      };
+      onSaveItem({ type: 'tool', data: newTool, isEdit: false });
+      setNarratorTools(prev => [...prev, newTool.id]);
+    } else {
+      const primaryImg = nestedCharacterImages.find(img => img.isDefault) || nestedCharacterImages[0];
+      const finalCover = (nestedCardType === 'Personaje' && primaryImg ? primaryImg.url : nestedCardCover).trim();
+
+      const newCard = {
+        id: `card-${Date.now()}`,
+        type: nestedCardType,
+        title: trimmedTitle,
+        intro: nestedCardIntro.trim(),
+        text: nestedCardText.trim(),
+        cover: finalCover,
+        images: nestedCardType === 'Personaje' ? nestedCharacterImages : (finalCover ? [{ id: 'img-1', url: finalCover, label: 'Principal', isDefault: true }] : []),
+        nsfw: false,
+        public: false,
+        tags: [],
+        connectedCards: [],
+        traits: nestedCardType === 'Personaje' ? nestedCardTraits : [],
+        // Campos de Memoria
+        summary: nestedCardType === 'Memoria' ? (nestedCardIntro.trim() || nestedCardText.trim()) : undefined,
+        impact: nestedCardType === 'Memoria' ? 'Medio' : undefined,
+        linkedCharacters: nestedCardType === 'Memoria' && itemType === 'Personaje' ? [(editItem?.id || title)] : [],
+        linkedScenario: nestedCardType === 'Memoria' && itemType === 'Escenario' ? (editItem?.id || title) : '',
+        timeline: nestedCardType === 'Memoria' ? 'Hito inicial' : undefined,
+        // Campos de Inventario
+        linkedCharacterId: nestedCardType === 'Inventario' && itemType === 'Personaje' ? (editItem?.id || title) : '',
+        items: nestedCardType === 'Inventario' ? [
+          { id: `item-${Date.now()}-1`, name: 'Pertenencias iniciales', qty: 1, rarity: 'Común', equipped: true, desc: 'Equipo personal del personaje.' }
+        ] : undefined,
+        capacity: nestedCardType === 'Inventario' ? '20 kg / 10 slots' : undefined,
+        createdAt: new Date().toISOString()
+      };
+      // Guardar globalmente
+      onSaveItem({ type: 'card', data: newCard, isEdit: false });
+      // Conectar al escenario actual si estamos en escenario
+      if (itemType === 'Escenario') {
+        setSelectedCards(prev => [...prev, newCard.id]);
+      }
+    }
+
     setIsDirty(true);
     // Limpiar estados y cerrar sub-modal
     setNestedCardType(null);
@@ -832,8 +983,22 @@ export default function CreateModal({
         </div>
 
         <h3 style={{ margin: '0 0 24px 0', color: '#ffffff', fontSize: '1.4rem' }}>
-          {editItem ? 'Editar' : 'Crear'} {itemType === 'Escenario' ? 'Escenario' : itemType === 'Narrador' ? 'Narrador' : 'Tarjeta'}
+          {editItem ? 'Editar' : 'Crear'} {itemType === 'Escenario' ? 'Escenario' : itemType === 'Narrador' ? 'Narrador' : itemType === 'Herramienta' ? 'Herramienta (Taller de Funciones)' : `Tarjeta (${itemType})`}
         </h3>
+
+        {/* Formulario de Herramienta / Taller de Funciones */}
+        {itemType === 'Herramienta' && (
+          <ToolWorkshopForm
+            name={title}
+            setName={(v) => handleFieldChange(setTitle, v)}
+            toolType={toolWorkshopType}
+            setToolType={(v) => handleFieldChange(setToolWorkshopType, v)}
+            description={toolWorkshopDesc}
+            setDescription={(v) => handleFieldChange(setToolWorkshopDesc, v)}
+            config={toolWorkshopConfig}
+            setConfig={(v) => handleFieldChange(setToolWorkshopConfig, v)}
+          />
+        )}
 
         {/* Formulario de Narrador */}
         {itemType === 'Narrador' && (
@@ -850,11 +1015,17 @@ export default function CreateModal({
             setRules={(v) => handleFieldChange(setRules, v)}
             randomization={randomization}
             setRandomization={(v) => handleFieldChange(setRandomization, v)}
+            tools={narratorTools}
+            setTools={(v) => handleFieldChange(setNarratorTools, v)}
+            availableTools={appData.tools || []}
+            onOpenToolCreator={() => {
+              setNestedCardType('Herramienta');
+            }}
           />
         )}
 
         {/* Formularios de Tarjeta y Escenario */}
-        {itemType !== 'Narrador' && (
+        {itemType !== 'Narrador' && itemType !== 'Herramienta' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             
             {/* 1. Imagen de portada / Galería de Expresiones AL INICIO */}
@@ -1071,29 +1242,90 @@ export default function CreateModal({
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+                  {/* Campo de prompt para detalles del retrato de personaje */}
+                  <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.6)' }}>Prompt opcional para Retrato IA (v6.safetensors)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const autoCharPrompt = `${title || 'Personaje'}, ${newImageLabel ? `expresión ${newImageLabel}` : 'retrato'}, ${selectedTraits.join(', ')}, ${intro || ''}`;
+                          setCharAiPrompt(autoCharPrompt);
+                        }}
+                        style={{ background: 'transparent', border: 'none', color: '#ffd36b', fontSize: '0.68rem', cursor: 'pointer', fontWeight: 'bold' }}
+                      >
+                        🪄 Rellenar con rasgos
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={charAiPrompt}
+                      onChange={(e) => setCharAiPrompt(e.target.value)}
+                      placeholder="Detalles visuales específicos (ej: ojos dorados, pelo plateado, armadura arcana, pose de combate...)"
+                      style={{ width: '100%', padding: '6px 8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '5px', color: '#fff', fontSize: '0.78rem', boxSizing: 'border-box' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px', flexWrap: 'wrap', gap: '8px' }}>
                     <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)' }}>
-                      O sube archivo(s) desde tu ordenador con recorte 3:4:
+                      O genera con tu modelo local / sube archivo(s) 3:4:
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => document.getElementById('char-new-image-file-input')?.click()}
-                      style={{
-                        background: 'rgba(255, 211, 107, 0.15)',
-                        border: '1px solid rgba(255, 211, 107, 0.3)',
-                        color: '#ffd36b',
-                        padding: '5px 12px',
-                        borderRadius: '5px',
-                        cursor: 'pointer',
-                        fontSize: '0.75rem',
-                        fontWeight: '600',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <FontAwesomeIcon icon={faImages} /> Subir archivo(s) del PC
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        disabled={isGeneratingAiImage}
+                        onClick={async () => {
+                          setIsGeneratingAiImage(true);
+                          try {
+                            const effectivePrompt = charAiPrompt.trim() || `${title || 'Personaje de rol'}, ${newImageLabel || 'retrato'}, ${selectedTraits.join(', ')}, ${intro || ''}`;
+                            const generated = await generateImageLocal(effectivePrompt, 'Anime / Fantasía', '', 'v6.safetensors');
+                            if (generated) {
+                              setCropSrc(generated);
+                              setCropTarget('character_new');
+                              setIsCropperOpen(true);
+                            }
+                          } catch (err) {
+                            console.warn('Error al generar con IA Local:', err);
+                          } finally {
+                            setIsGeneratingAiImage(false);
+                          }
+                        }}
+                        style={{
+                          background: isGeneratingAiImage ? 'rgba(255,255,255,0.05)' : 'linear-gradient(90deg, #b464ff, #ff6bb5)',
+                          border: 'none',
+                          color: '#fff',
+                          padding: '5px 12px',
+                          borderRadius: '5px',
+                          cursor: isGeneratingAiImage ? 'not-allowed' : 'pointer',
+                          fontSize: '0.75rem',
+                          fontWeight: '700',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <FontAwesomeIcon icon={faMagic} /> {isGeneratingAiImage ? 'Generando...' : 'Generar con IA (v6)'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('char-new-image-file-input')?.click()}
+                        style={{
+                          background: 'rgba(255, 211, 107, 0.15)',
+                          border: '1px solid rgba(255, 211, 107, 0.3)',
+                          color: '#ffd36b',
+                          padding: '5px 12px',
+                          borderRadius: '5px',
+                          cursor: 'pointer',
+                          fontSize: '0.75rem',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <FontAwesomeIcon icon={faImages} /> Subir archivo(s)
+                      </button>
+                    </div>
                     <input
                       id="char-new-image-file-input"
                       type="file"
@@ -1114,7 +1346,7 @@ export default function CreateModal({
               /* Portada estándar para Escenarios y otras Tarjetas */
               <div className="field-group" style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
                 <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)', display: 'block', marginBottom: '6px' }}>Imagen de portada</label>
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                   {/* Caja de previsualización */}
                   <div style={{
                     width: '150px',
@@ -1128,13 +1360,15 @@ export default function CreateModal({
                     color: 'rgba(255,255,255,0.4)',
                     fontSize: '0.72rem',
                     overflow: 'hidden',
-                    flexShrink: 0
+                    flexShrink: 0,
+                    marginTop: '2px'
                   }}>
                     {!cover && <span>Sin portada</span>}
                   </div>
                   
                   {/* Inputs de carga */}
-                  <div style={{ flex: 1, minWidth: '200px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ flex: 1, minWidth: '220px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* Fila 1: URL manual o selección de archivo */}
                     <div style={{ display: 'flex', position: 'relative' }}>
                       <input
                         value={cover}
@@ -1193,9 +1427,125 @@ export default function CreateModal({
                         }}
                       />
                     </div>
-                    <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)' }}>
-                      Introduce la URL de una imagen o sube un archivo local.
-                    </span>
+
+                    {/* Fila 2: Generador de Portadas con Prompt Personalizado (DreamShaperXL) */}
+                    <div style={{
+                      background: 'rgba(180, 100, 255, 0.05)',
+                      border: '1px solid rgba(180, 100, 255, 0.22)',
+                      borderRadius: '8px',
+                      padding: '10px 12px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <div style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <FontAwesomeIcon icon={faMagic} /> Generar Portada con IA (DreamShaperXL)
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const autoPrompt = `${title || itemType}, ${intro || presentation || text || 'entorno de fantasía, arquitectura mística y paisaje épico'}, ${selectedTags.join(', ')}`;
+                            setCoverAiPrompt(autoPrompt);
+                          }}
+                          style={{
+                            background: 'rgba(255,255,255,0.06)',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            color: '#ffd36b',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '0.68rem',
+                            cursor: 'pointer',
+                            fontWeight: '600'
+                          }}
+                          title="Rellenar automáticamente el prompt con el título, descripción y etiquetas actuales"
+                        >
+                          🪄 Autocompletar con contexto
+                        </button>
+                      </div>
+
+                      {/* Textarea para el prompt */}
+                      <textarea
+                        rows={2}
+                        value={coverAiPrompt}
+                        onChange={(e) => setCoverAiPrompt(e.target.value)}
+                        placeholder={title ? `Prompt personalizado (ej: ${title}, ruinas antiguas bajo una tormenta, templo en un acantilado...)` : "Describe el paisaje, entorno, atmósfera o elementos que deseas en la portada..."}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          background: '#151522',
+                          border: '1px solid rgba(255,255,255,0.14)',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          fontSize: '0.78rem',
+                          resize: 'vertical',
+                          boxSizing: 'border-box',
+                          marginBottom: '8px'
+                        }}
+                      />
+
+                      {/* Selector de Estilo y Botón de Generar */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '180px' }}>
+                          <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>Estilo:</span>
+                          <select
+                            value={coverAiStyle}
+                            onChange={(e) => setCoverAiStyle(e.target.value)}
+                            style={{
+                              flex: 1,
+                              padding: '4px 8px',
+                              background: '#151522',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              borderRadius: '5px',
+                              color: '#eaeaea',
+                              fontSize: '0.72rem'
+                            }}
+                          >
+                            <option value="Fantasía Oscura / Entornos">Fantasía Oscura / Entornos</option>
+                            <option value="Paisaje Épico / Naturaleza">Paisaje Épico / Naturaleza</option>
+                            <option value="Cyberpunk / Sci-Fi Futurista">Cyberpunk / Sci-Fi Futurista</option>
+                            <option value="Grimdark / Gótico y Niebla">Grimdark / Gótico y Niebla</option>
+                            <option value="Anime / Ilustración Estilizada 2.5D">Anime / Ilustración Estilizada 2.5D</option>
+                            <option value="Pintura al Óleo / Arte Conceptual">Pintura al Óleo / Arte Conceptual</option>
+                            <option value="Terror Cósmico / Lovecraftiano">Terror Cósmico / Lovecraftiano</option>
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={isGeneratingAiImage}
+                          onClick={async () => {
+                            setIsGeneratingAiImage(true);
+                            try {
+                              const effectivePrompt = coverAiPrompt.trim() || `${title || itemType}, ${intro || presentation || text || 'ilustración épica de fantasía y paisajes'}`;
+                              const generated = await generateImageLocal(effectivePrompt, coverAiStyle, '', 'DreamShaperXL_Lightning.safetensors');
+                              if (generated) {
+                                setCropSrc(generated);
+                                setCropTarget('main');
+                                setIsCropperOpen(true);
+                              }
+                            } catch (err) {
+                              console.warn('Error al generar con IA Local:', err);
+                            } finally {
+                              setIsGeneratingAiImage(false);
+                            }
+                          }}
+                          style={{
+                            background: isGeneratingAiImage ? 'rgba(255,255,255,0.05)' : 'linear-gradient(90deg, #b464ff, #ff6bb5)',
+                            border: 'none',
+                            color: '#fff',
+                            padding: '6px 14px',
+                            borderRadius: '6px',
+                            cursor: isGeneratingAiImage ? 'not-allowed' : 'pointer',
+                            fontSize: '0.75rem',
+                            fontWeight: 'bold',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: isGeneratingAiImage ? 'none' : '0 2px 10px rgba(180, 100, 255, 0.3)'
+                          }}
+                        >
+                          <FontAwesomeIcon icon={faMagic} /> {isGeneratingAiImage ? 'Generando en RTX...' : 'Generar Portada (DreamShaperXL)'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1224,8 +1574,8 @@ export default function CreateModal({
                   checked={isScenario}
                   onChange={e => handleFieldChange(setIsScenario, e.target.checked)}
                 />
-                <label htmlFor="modalCardScenarioCheck" style={{ cursor: 'pointer', color: '#ffd36b', fontWeight: '600', fontSize: '0.85rem' }}>
-                  Convertir y crear como Escenario jugable también
+                <label htmlFor="modalCardScenarioCheck" style={{ cursor: 'pointer', color: '#ffd36b', fontWeight: '600', fontSize: '0.85rem' }} title="Crea simultáneamente un escenario jugable a partir de esta tarjeta">
+                  Escenificar
                 </label>
               </div>
             )}
@@ -1384,179 +1734,494 @@ export default function CreateModal({
               </>
             )}
 
-            {/* Si es Personaje, hilera de Traits */}
-            {itemType === 'Personaje' && (
-              <div className="field-group" style={{ position: 'relative' }}>
-                <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>Rasgos de Personalidad (Traits - Máx. 10)</label>
-                
-                {/* Listado de traits agregados */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px', marginTop: '4px' }}>
-                  {selectedTraits.length === 0 ? (
-                    <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>Sin rasgos agregados aún.</span>
-                  ) : (
-                    selectedTraits.map(t => (
-                      <span
-                        key={t}
-                        style={{
-                          background: 'rgba(255, 211, 107, 0.12)',
-                          border: '1px solid rgba(255, 211, 107, 0.3)',
-                          borderRadius: '12px',
-                          padding: '3px 10px',
-                          fontSize: '0.78rem',
-                          color: '#ffd36b',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        {t}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedTraits(prev => prev.filter(x => x !== t));
-                            setIsDirty(true);
-                          }}
-                          style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', padding: 0, fontSize: '0.8rem', fontWeight: 'bold' }}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))
-                  )}
+            {/* SECCIÓN ESPECIALIZADA: Tarjeta de Memoria */}
+            {itemType === 'Memoria' && (
+              <div style={{ background: 'rgba(255, 211, 107, 0.04)', border: '1px solid rgba(255, 211, 107, 0.25)', borderRadius: '10px', padding: '14px', marginBottom: '8px' }}>
+                <label style={{ fontSize: '0.84rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <FontAwesomeIcon icon={faBrain} /> Resumen del Contexto / Hito de Memoria <span style={{ color: '#ffd36b' }}>*</span>
+                </label>
+                <p style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.6)', margin: '0 0 8px 0' }}>
+                  Escribe el acontecimiento clave, descubrimiento o cambio de estado que el Narrador debe recordar siempre.
+                </p>
+                <textarea
+                  value={memorySummary}
+                  onChange={(e) => {
+                    handleFieldChange(setMemorySummary, e.target.value);
+                    handleFieldChange(setText, e.target.value);
+                  }}
+                  placeholder="Ej. Tras derrotar al capitán en el muelle, el grupo obtuvo el mapa cifrado del tesoro real. Ahora la guardia de la ciudad los busca..."
+                  rows={3}
+                  style={{ width: '100%', padding: '10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', marginBottom: '12px' }}
+                />
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Nivel de Importancia / Impacto</label>
+                    <select
+                      value={memoryImpact}
+                      onChange={(e) => handleFieldChange(setMemoryImpact, e.target.value)}
+                      style={{ width: '100%', padding: '8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#ffd36b', fontWeight: '700' }}
+                    >
+                      <option value="Crítico">🔴 Crítico (Punto de inflexión / Giro)</option>
+                      <option value="Alto">🟠 Alto (Hecho mayor / Revelación)</option>
+                      <option value="Medio">🟡 Medio (Progreso / Acuerdo)</option>
+                      <option value="Leve">🟢 Leve (Detalle curioso / Anécdota)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Escenario Asociado</label>
+                    <select
+                      value={memoryScenario}
+                      onChange={(e) => handleFieldChange(setMemoryScenario, e.target.value)}
+                      style={{ width: '100%', padding: '8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff' }}
+                    >
+                      <option value="">(Global / Todos los escenarios)</option>
+                      {(appData.scenarios || []).map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Momento en la Historia (Timeline)</label>
+                    <input
+                      value={memoryTimeline}
+                      onChange={(e) => handleFieldChange(setMemoryTimeline, e.target.value)}
+                      placeholder="Ej. Día 4 de viaje, Noche tras la batalla..."
+                      style={{ width: '100%', padding: '8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
+                    />
+                  </div>
                 </div>
 
-                {/* Input con dropdown autocomplete para Traits */}
-                {selectedTraits.length < 10 && (() => {
-                  const filteredTraits = CHARACTER_TRAITS.filter(tr => 
-                    tr.toLowerCase().includes(traitQuery.toLowerCase()) && !selectedTraits.includes(tr)
-                  );
-                  const customTrait = (traitQuery.trim() && !selectedTraits.includes(traitQuery.trim()) && !filteredTraits.some(t => t.toLowerCase() === traitQuery.trim().toLowerCase()))
-                    ? traitQuery.trim()
-                    : null;
-                  const allTraitOptions = customTrait 
-                    ? [{ isCustom: true, label: customTrait }, ...filteredTraits.map(t => ({ isCustom: false, label: t }))] 
-                    : filteredTraits.map(t => ({ isCustom: false, label: t }));
-
-                  const handleSelectTrait = (traitText) => {
-                    if (traitText && !selectedTraits.includes(traitText) && selectedTraits.length < 10) {
-                      setSelectedTraits(prev => [...prev, traitText]);
-                      setTraitQuery('');
-                      setHighlightedTraitIndex(-1);
-                      setShowTraitDropdown(false);
-                      setIsDirty(true);
-                    }
-                  };
-
-                  return (
-                    <div style={{ position: 'relative' }}>
-                      <input
-                        value={traitQuery}
-                        onChange={(e) => {
-                          setTraitQuery(e.target.value);
-                          setShowTraitDropdown(true);
-                          setHighlightedTraitIndex(-1);
-                        }}
-                        onFocus={() => {
-                          setShowTraitDropdown(true);
-                          setHighlightedTraitIndex(-1);
-                        }}
-                        onBlur={() => {
-                          setTimeout(() => setShowTraitDropdown(false), 200);
-                        }}
-                        onKeyDown={(e) => {
-                          if (!showTraitDropdown && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-                            setShowTraitDropdown(true);
-                            setHighlightedTraitIndex(0);
-                            e.preventDefault();
-                            return;
-                          }
-                          if (e.key === 'ArrowDown') {
-                            e.preventDefault();
-                            if (allTraitOptions.length > 0) {
-                              setHighlightedTraitIndex(prev => (prev + 1) % allTraitOptions.length);
-                            }
-                          } else if (e.key === 'ArrowUp') {
-                            e.preventDefault();
-                            if (allTraitOptions.length > 0) {
-                              setHighlightedTraitIndex(prev => (prev - 1 + allTraitOptions.length) % allTraitOptions.length);
-                            }
-                          } else if (e.key === 'Enter') {
-                            e.preventDefault();
-                            if (showTraitDropdown && highlightedTraitIndex >= 0 && highlightedTraitIndex < allTraitOptions.length) {
-                              handleSelectTrait(allTraitOptions[highlightedTraitIndex].label);
-                            } else if (traitQuery.trim()) {
-                              handleSelectTrait(traitQuery.trim());
-                            }
-                          } else if (e.key === 'Escape') {
-                            setShowTraitDropdown(false);
-                          }
-                        }}
-                        placeholder="Escribe o selecciona un rasgo..."
-                        style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
-                      />
-                      {showTraitDropdown && allTraitOptions.length > 0 && (
-                        <div style={{
-                          position: 'absolute',
-                          top: '100%',
-                          left: 0,
-                          right: 0,
-                          background: '#14141f',
-                          border: '1px solid rgba(255,255,255,0.12)',
-                          borderRadius: '6px',
-                          zIndex: 100,
-                          maxHeight: '160px',
-                          overflowY: 'auto',
-                          marginTop: '4px',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-                        }}>
-                          {allTraitOptions.map((opt, idx) => (
-                            <div
-                              key={opt.label}
-                              onMouseDown={() => handleSelectTrait(opt.label)}
-                              onMouseEnter={() => setHighlightedTraitIndex(idx)}
-                              style={{
-                                padding: '8px 10px',
-                                color: idx === highlightedTraitIndex ? '#ffd36b' : '#fff',
-                                background: idx === highlightedTraitIndex ? 'rgba(255, 211, 107, 0.15)' : 'transparent',
-                                cursor: 'pointer',
-                                fontSize: '0.85rem',
-                                borderBottom: '1px solid rgba(255,255,255,0.04)',
-                                transition: 'background 0.15s',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between'
-                              }}
-                            >
-                              <span>{opt.label}</span>
-                              {opt.isCustom && (
-                                <span style={{ fontSize: '0.7rem', color: '#ffd36b', background: 'rgba(255,211,107,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
-                                  + Personalizado
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
+                {/* Selector de Personajes Vinculados */}
+                <div>
+                  <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '6px' }}>
+                    Personajes Involucrados ({memoryCharacters.length})
+                  </label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {(appData.cards || []).filter(c => c.type === 'Personaje').length === 0 ? (
+                      <span style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>No hay tarjetas de Personaje creadas aún.</span>
+                    ) : (
+                      (appData.cards || []).filter(c => c.type === 'Personaje').map(char => {
+                        const isLinked = memoryCharacters.includes(char.id);
+                        return (
+                          <button
+                            key={char.id}
+                            type="button"
+                            onClick={() => {
+                              if (isLinked) {
+                                handleFieldChange(setMemoryCharacters, memoryCharacters.filter(id => id !== char.id));
+                              } else {
+                                handleFieldChange(setMemoryCharacters, [...memoryCharacters, char.id]);
+                              }
+                            }}
+                            style={{
+                              background: isLinked ? 'rgba(255, 211, 107, 0.2)' : 'rgba(255,255,255,0.05)',
+                              border: `1px solid ${isLinked ? '#ffd36b' : 'rgba(255,255,255,0.1)'}`,
+                              color: isLinked ? '#ffd36b' : '#eaeaea',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <span>{char.title || char.name}</span>
+                            {isLinked && <FontAwesomeIcon icon={faCheck} style={{ fontSize: '0.7rem' }} />}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* Introducción */}
-            <div className="field-group">
-              <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>
-                Introducción (Resumen de máx. 200 caracteres)
-              </label>
-              <textarea
-                value={intro}
-                onChange={(e) => handleFieldChange(setIntro, e.target.value)}
-                rows={2}
-                maxLength={200}
-                placeholder="Breve sumario descriptivo..."
-                style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
-              />
-            </div>
+            {/* SECCIÓN ESPECIALIZADA: Tarjeta de Inventario */}
+            {itemType === 'Inventario' && (
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px', padding: '14px', marginBottom: '8px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
+                      Personaje Propietario <span style={{ color: '#ffd36b' }}>*</span>
+                    </label>
+                    <select
+                      value={inventoryOwnerCharId}
+                      onChange={(e) => handleFieldChange(setInventoryOwnerCharId, e.target.value)}
+                      style={{ width: '100%', padding: '8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff' }}
+                    >
+                      <option value="">(Inventario General / Sin Asignar)</option>
+                      {(appData.cards || []).filter(c => c.type === 'Personaje').map(char => (
+                        <option key={char.id} value={char.id}>{char.title || char.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
+                      Capacidad / Límite de Carga
+                    </label>
+                    <input
+                      value={inventoryCapacity}
+                      onChange={(e) => handleFieldChange(setInventoryCapacity, e.target.value)}
+                      placeholder="Ej. 25 kg / 12 slots"
+                      style={{ width: '100%', padding: '8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Gestor interactivo de ítems */}
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <FontAwesomeIcon icon={faBoxes} /> Objetos en el Inventario ({inventoryItems.length})
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newItem = {
+                          id: `item-${Date.now()}`,
+                          name: 'Nuevo Objeto',
+                          qty: 1,
+                          rarity: 'Común',
+                          equipped: false,
+                          weight: '1 kg',
+                          desc: 'Descripción del objeto...'
+                        };
+                        handleFieldChange(setInventoryItems, [...inventoryItems, newItem]);
+                      }}
+                      style={{ background: '#ffd36b', color: '#000', border: 'none', padding: '4px 10px', borderRadius: '5px', fontSize: '0.74rem', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <FontAwesomeIcon icon={faPlus} /> Añadir Objeto
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {inventoryItems.map((item, idx) => (
+                      <div key={item.id || idx} style={{ background: '#181824', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px', padding: '8px 10px', display: 'grid', gridTemplateColumns: '2fr 70px 110px 100px 2fr auto', gap: '6px', alignItems: 'center' }}>
+                        <input
+                          value={item.name}
+                          onChange={(e) => {
+                            const updated = [...inventoryItems];
+                            updated[idx] = { ...updated[idx], name: e.target.value };
+                            handleFieldChange(setInventoryItems, updated);
+                          }}
+                          placeholder="Nombre del objeto"
+                          style={{ padding: '5px 8px', background: '#12121c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#fff', fontSize: '0.78rem' }}
+                        />
+                        <input
+                          type="number"
+                          value={item.qty || 1}
+                          onChange={(e) => {
+                            const updated = [...inventoryItems];
+                            updated[idx] = { ...updated[idx], qty: Number(e.target.value) };
+                            handleFieldChange(setInventoryItems, updated);
+                          }}
+                          placeholder="Cant."
+                          style={{ padding: '5px 6px', background: '#12121c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#fff', fontSize: '0.78rem' }}
+                        />
+                        <select
+                          value={item.rarity || 'Común'}
+                          onChange={(e) => {
+                            const updated = [...inventoryItems];
+                            updated[idx] = { ...updated[idx], rarity: e.target.value };
+                            handleFieldChange(setInventoryItems, updated);
+                          }}
+                          style={{ padding: '5px', background: '#12121c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#ffd36b', fontSize: '0.74rem' }}
+                        >
+                          <option value="Común">Común</option>
+                          <option value="Poco común">Poco común</option>
+                          <option value="Raro">Raro</option>
+                          <option value="Épico">Épico</option>
+                          <option value="Legendario">Legendario</option>
+                          <option value="Único">Único / Artefacto</option>
+                        </select>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem', color: item.equipped ? '#27ae60' : 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!item.equipped}
+                            onChange={(e) => {
+                              const updated = [...inventoryItems];
+                              updated[idx] = { ...updated[idx], equipped: e.target.checked };
+                              handleFieldChange(setInventoryItems, updated);
+                            }}
+                          />
+                          {item.equipped ? 'Equipado' : 'En bolsa'}
+                        </label>
+                        <input
+                          value={item.desc || ''}
+                          onChange={(e) => {
+                            const updated = [...inventoryItems];
+                            updated[idx] = { ...updated[idx], desc: e.target.value };
+                            handleFieldChange(setInventoryItems, updated);
+                          }}
+                          placeholder="Efectos / notas..."
+                          style={{ padding: '5px 8px', background: '#12121c', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '4px', color: 'rgba(255,255,255,0.8)', fontSize: '0.74rem' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = inventoryItems.filter((_, i) => i !== idx);
+                            handleFieldChange(setInventoryItems, updated);
+                          }}
+                          style={{ background: 'transparent', border: 'none', color: '#eb5757', cursor: 'pointer', padding: '4px' }}
+                          title="Eliminar objeto"
+                        >
+                          <FontAwesomeIcon icon={faTrashAlt} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Si es Personaje, hilera de Traits y Enlaces a Inventarios/Memorias */}
+            {itemType === 'Personaje' && (
+              <>
+                <div className="field-group" style={{ position: 'relative' }}>
+                  <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>Rasgos de Personalidad (Traits - Máx. 10)</label>
+                  
+                  {/* Listado de traits agregados */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px', marginTop: '4px' }}>
+                    {selectedTraits.length === 0 ? (
+                      <span style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>Sin rasgos agregados aún.</span>
+                    ) : (
+                      selectedTraits.map(t => (
+                        <span
+                          key={t}
+                          style={{
+                            background: 'rgba(255, 211, 107, 0.12)',
+                            border: '1px solid rgba(255, 211, 107, 0.3)',
+                            borderRadius: '12px',
+                            padding: '3px 10px',
+                            fontSize: '0.78rem',
+                            color: '#ffd36b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          {t}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedTraits(prev => prev.filter(x => x !== t));
+                              setIsDirty(true);
+                            }}
+                            style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', padding: 0, fontSize: '0.8rem', fontWeight: 'bold' }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Input con dropdown autocomplete para Traits */}
+                  {selectedTraits.length < 10 && (() => {
+                    const filteredTraits = CHARACTER_TRAITS.filter(tr => 
+                      tr.toLowerCase().includes(traitQuery.toLowerCase()) && !selectedTraits.includes(tr)
+                    );
+                    const customTrait = (traitQuery.trim() && !selectedTraits.includes(traitQuery.trim()) && !filteredTraits.some(t => t.toLowerCase() === traitQuery.trim().toLowerCase()))
+                      ? traitQuery.trim()
+                      : null;
+                    const allTraitOptions = customTrait 
+                      ? [{ isCustom: true, label: customTrait }, ...filteredTraits.map(t => ({ isCustom: false, label: t }))] 
+                      : filteredTraits.map(t => ({ isCustom: false, label: t }));
+
+                    const handleSelectTrait = (traitText) => {
+                      if (traitText && !selectedTraits.includes(traitText) && selectedTraits.length < 10) {
+                        setSelectedTraits(prev => [...prev, traitText]);
+                        setTraitQuery('');
+                        setHighlightedTraitIndex(-1);
+                        setShowTraitDropdown(false);
+                        setIsDirty(true);
+                      }
+                    };
+
+                    return (
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          value={traitQuery}
+                          onChange={(e) => {
+                            setTraitQuery(e.target.value);
+                            setShowTraitDropdown(true);
+                            setHighlightedTraitIndex(-1);
+                          }}
+                          onFocus={() => {
+                            setShowTraitDropdown(true);
+                            setHighlightedTraitIndex(-1);
+                          }}
+                          onBlur={() => {
+                            setTimeout(() => setShowTraitDropdown(false), 200);
+                          }}
+                          onKeyDown={(e) => {
+                            if (!showTraitDropdown && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                              setShowTraitDropdown(true);
+                              setHighlightedTraitIndex(0);
+                              e.preventDefault();
+                              return;
+                            }
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              if (allTraitOptions.length > 0) {
+                                setHighlightedTraitIndex(prev => (prev + 1) % allTraitOptions.length);
+                              }
+                            } else if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              if (allTraitOptions.length > 0) {
+                                setHighlightedTraitIndex(prev => (prev - 1 + allTraitOptions.length) % allTraitOptions.length);
+                              }
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (showTraitDropdown && highlightedTraitIndex >= 0 && highlightedTraitIndex < allTraitOptions.length) {
+                                handleSelectTrait(allTraitOptions[highlightedTraitIndex].label);
+                              } else if (traitQuery.trim()) {
+                                handleSelectTrait(traitQuery.trim());
+                              }
+                            } else if (e.key === 'Escape') {
+                              setShowTraitDropdown(false);
+                            }
+                          }}
+                          placeholder="Escribe o selecciona un rasgo..."
+                          style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
+                        />
+                        {showTraitDropdown && allTraitOptions.length > 0 && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '100%',
+                            left: 0,
+                            right: 0,
+                            background: '#14141f',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            borderRadius: '6px',
+                            zIndex: 100,
+                            maxHeight: '160px',
+                            overflowY: 'auto',
+                            marginTop: '4px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                          }}>
+                            {allTraitOptions.map((opt, idx) => (
+                              <div
+                                key={opt.label}
+                                onMouseDown={() => handleSelectTrait(opt.label)}
+                                onMouseEnter={() => setHighlightedTraitIndex(idx)}
+                                style={{
+                                  padding: '8px 10px',
+                                  color: idx === highlightedTraitIndex ? '#ffd36b' : '#fff',
+                                  background: idx === highlightedTraitIndex ? 'rgba(255, 211, 107, 0.15)' : 'transparent',
+                                  cursor: 'pointer',
+                                  fontSize: '0.85rem',
+                                  borderBottom: '1px solid rgba(255,255,255,0.04)',
+                                  transition: 'background 0.15s',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between'
+                                }}
+                              >
+                                <span>{opt.label}</span>
+                                {opt.isCustom && (
+                                  <span style={{ fontSize: '0.7rem', color: '#ffd36b', background: 'rgba(255,211,107,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                                    + Personalizado
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Inventarios y Memorias Vinculadas al Personaje */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', margin: '4px 0 10px 0' }}>
+                  {/* Inventarios del personaje */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <FontAwesomeIcon icon={faBoxes} /> Inventarios
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNestedCardType('Inventario');
+                          setNestedCardTitle(`Inventario de ${title || 'Personaje'}`);
+                        }}
+                        style={{ background: 'rgba(255,211,107,0.15)', border: '1px solid rgba(255,211,107,0.3)', color: '#ffd36b', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}
+                      >
+                        + Crear
+                      </button>
+                    </div>
+                    {(() => {
+                      const charInventories = (appData.cards || []).filter(c => c.type === 'Inventario' && (c.linkedCharacterId === editItem?.id || (title && c.linkedCharacterId === title)));
+                      return charInventories.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {charInventories.map(inv => (
+                            <span key={inv.id} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', padding: '3px 6px', fontSize: '0.72rem', color: '#fff' }}>
+                              🎒 {inv.title} ({inv.items?.length || 0} items)
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>Sin inventarios enlazados aún.</span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Memorias del personaje */}
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <FontAwesomeIcon icon={faBrain} /> Memorias
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNestedCardType('Memoria');
+                          setNestedCardTitle(`Memoria de ${title || 'Personaje'}`);
+                        }}
+                        style={{ background: 'rgba(255,211,107,0.15)', border: '1px solid rgba(255,211,107,0.3)', color: '#ffd36b', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}
+                      >
+                        + Registrar
+                      </button>
+                    </div>
+                    {(() => {
+                      const charMemories = (appData.cards || []).filter(c => c.type === 'Memoria' && (Array.isArray(c.linkedCharacters) && (c.linkedCharacters.includes(editItem?.id) || (title && c.linkedCharacters.includes(title)))));
+                      return charMemories.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {charMemories.map(mem => (
+                            <div key={mem.id} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '4px', padding: '3px 6px', fontSize: '0.72rem', color: '#eaeaea' }}>
+                              🧠 <strong>{mem.title}</strong>: {mem.summary || mem.text}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>Sin memorias vinculadas aún.</span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Introducción (Solo para Tarjetas estándar que no sean Memoria ni Inventario) */}
+            {itemType !== 'Memoria' && itemType !== 'Inventario' && (
+              <div className="field-group">
+                <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>
+                  Introducción (Resumen de máx. 200 caracteres)
+                </label>
+                <textarea
+                  value={intro}
+                  onChange={(e) => handleFieldChange(setIntro, e.target.value)}
+                  rows={2}
+                  maxLength={200}
+                  placeholder="Breve sumario descriptivo..."
+                  style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                />
+              </div>
+            )}
 
             {/* Campos exclusivos de Escenario (Presentación, Contexto Base, Instrucciones IA) */}
             {itemType === 'Escenario' ? (
@@ -1593,17 +2258,19 @@ export default function CreateModal({
                 </div>
               </>
             ) : (
-              /* Campo exclusivo de Tarjeta (Descripción) */
-              <div className="field-group">
-                <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>Detalles de la tarjeta / Lore</label>
-                <textarea
-                  value={text}
-                  onChange={(e) => handleFieldChange(setText, e.target.value)}
-                  rows={4}
-                  placeholder="Detalla las características, reglas, aspecto o mecánicas de la tarjeta..."
-                  style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
-                />
-              </div>
+              /* Campo de Detalles / Lore para tarjetas que no sean Memoria ni Inventario */
+              (itemType !== 'Memoria' && itemType !== 'Inventario') && (
+                <div className="field-group">
+                  <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>Detalles de la tarjeta / Lore</label>
+                  <textarea
+                    value={text}
+                    onChange={(e) => handleFieldChange(setText, e.target.value)}
+                    rows={4}
+                    placeholder="Detalla las características, reglas, aspecto o mecánicas de la tarjeta..."
+                    style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                  />
+                </div>
+              )
             )}
 
             {/* Etiquetas para Tarjetas (Ubicadas al final) */}

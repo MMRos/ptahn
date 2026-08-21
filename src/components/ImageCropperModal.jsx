@@ -1,6 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCrop, faCheck, faTimes, faSearchPlus, faSearchMinus, faCompress, faExpand } from '@fortawesome/free-solid-svg-icons';
+import { 
+  faCrop, 
+  faCheck, 
+  faTimes, 
+  faSearchPlus, 
+  faSearchMinus, 
+  faCompress, 
+  faExpand,
+  faExclamationTriangle,
+  faUpload,
+  faSpinner
+} from '@fortawesome/free-solid-svg-icons';
 import './scenario.css';
 
 export default function ImageCropperModal({ 
@@ -10,12 +21,16 @@ export default function ImageCropperModal({
   onClose = () => {}, 
   onCropComplete = () => {} 
 }) {
+  const [currentSrc, setCurrentSrc] = useState(imageSrc);
   const [zoom, setZoom] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [imgNatural, setImgNatural] = useState({ width: 0, height: 0 });
   const [baseFit, setBaseFit] = useState({ scale: 1, width: 0, height: 0, initX: 0, initY: 0 });
+  const [imgError, setImgError] = useState(false);
+  const [isImgLoading, setIsImgLoading] = useState(true);
+  const [manualUrlInput, setManualUrlInput] = useState('');
   
   const imgRef = useRef(null);
   const viewportRef = useRef(null);
@@ -48,14 +63,24 @@ export default function ImageCropperModal({
   }, [viewportWidth, viewportHeight, imgNatural.width, imgNatural.height]);
 
   const handleImageLoad = (e) => {
+    setIsImgLoading(false);
+    setImgError(false);
     const natW = e.target.naturalWidth || 800;
     const natH = e.target.naturalHeight || 600;
     setImgNatural({ width: natW, height: natH });
     resetToFit(natW, natH);
   };
 
+  const handleImageError = () => {
+    setIsImgLoading(false);
+    setImgError(true);
+  };
+
   useEffect(() => {
     if (isOpen && imageSrc) {
+      setCurrentSrc(imageSrc);
+      setImgError(false);
+      setIsImgLoading(true);
       setZoom(1);
       setPosition({ x: 0, y: 0 });
     }
@@ -64,13 +89,14 @@ export default function ImageCropperModal({
   if (!isOpen || !imageSrc) return null;
 
   const handleMouseDown = (e) => {
+    if (imgError) return;
     e.preventDefault();
     setIsDragging(true);
     setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
   };
 
   const handleMouseMove = (e) => {
-    if (!isDragging) return;
+    if (!isDragging || imgError) return;
     setPosition({
       x: e.clientX - dragStart.x,
       y: e.clientY - dragStart.y
@@ -82,6 +108,7 @@ export default function ImageCropperModal({
   };
 
   const handleTouchStart = (e) => {
+    if (imgError) return;
     if (e.touches.length === 1) {
       const touch = e.touches[0];
       setIsDragging(true);
@@ -90,7 +117,7 @@ export default function ImageCropperModal({
   };
 
   const handleTouchMove = (e) => {
-    if (!isDragging || e.touches.length !== 1) return;
+    if (!isDragging || e.touches.length !== 1 || imgError) return;
     const touch = e.touches[0];
     setPosition({
       x: touch.clientX - dragStart.x,
@@ -100,6 +127,7 @@ export default function ImageCropperModal({
 
   // Zoom con rueda de ratón centrado
   const handleWheel = (e) => {
+    if (imgError) return;
     e.preventDefault();
     const delta = e.deltaY < 0 ? 0.1 : -0.1;
     setZoom(prev => {
@@ -110,7 +138,7 @@ export default function ImageCropperModal({
 
   // Botón para llenar todo el marco (cover zoom)
   const handleFillFrame = () => {
-    if (!baseFit.width || !baseFit.height) return;
+    if (!baseFit.width || !baseFit.height || imgError) return;
     const fillZoom = Math.max(viewportWidth / baseFit.width, viewportHeight / baseFit.height);
     const newZoom = Number(fillZoom.toFixed(2));
     const currentW = baseFit.width * newZoom;
@@ -123,6 +151,12 @@ export default function ImageCropperModal({
   };
 
   const handleCrop = () => {
+    if (imgError) {
+      onCropComplete(currentSrc || imageSrc);
+      onClose();
+      return;
+    }
+
     const canvas = document.createElement('canvas');
     // Salida HD nítida
     const targetW = aspectRatio < 1 ? 600 : 960;
@@ -159,10 +193,10 @@ export default function ImageCropperModal({
         onCropComplete(croppedUrl);
       } catch (err) {
         console.warn('Canvas export fallback:', err);
-        onCropComplete(imageSrc);
+        onCropComplete(currentSrc || imageSrc);
       }
     } else {
-      onCropComplete(imageSrc);
+      onCropComplete(currentSrc || imageSrc);
     }
     onClose();
   };
@@ -213,31 +247,139 @@ export default function ImageCropperModal({
             position: 'relative',
             overflow: 'hidden',
             borderRadius: '10px',
-            cursor: isDragging ? 'grabbing' : 'grab',
+            cursor: imgError ? 'default' : (isDragging ? 'grabbing' : 'grab'),
             border: '2px dashed rgba(255, 211, 107, 0.45)',
             boxShadow: '0 8px 30px rgba(0,0,0,0.8)',
             display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             userSelect: 'none'
           }}
         >
-          <img 
-            ref={imgRef}
-            src={imageSrc} 
-            alt="Preview recortes"
-            onLoad={handleImageLoad}
-            draggable={false}
-            style={{
-              position: 'absolute',
-              left: `${position.x}px`,
-              top: `${position.y}px`,
-              width: typeof renderedWidth === 'number' ? `${renderedWidth}px` : renderedWidth,
-              height: typeof renderedHeight === 'number' ? `${renderedHeight}px` : renderedHeight,
-              maxWidth: 'none',
-              maxHeight: 'none',
-              pointerEvents: 'none',
-              transition: isDragging ? 'none' : 'width 0.05s ease, height 0.05s ease'
-            }}
-          />
+          {isImgLoading && !imgError && (
+            <div style={{ color: '#ffd36b', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px', zIndex: 5 }}>
+              <FontAwesomeIcon icon={faSpinner} spin /> Cargando imagen...
+            </div>
+          )}
+
+          {imgError ? (
+            <div style={{ padding: '16px', textAlign: 'center', color: 'rgba(255,255,255,0.85)', zIndex: 10, maxWidth: '400px', width: '90%' }}>
+              <FontAwesomeIcon icon={faExclamationTriangle} style={{ color: '#ff9f6b', fontSize: '1.8rem', marginBottom: '6px' }} />
+              <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#ffd36b', marginBottom: '4px' }}>
+                No se pudo cargar la imagen
+              </div>
+              <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', marginBottom: '12px' }}>
+                El servidor local aún está procesando o la URL no es accesible.
+              </div>
+
+              {/* Botón de subida local */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('cropper-recovery-file-input')?.click()}
+                  style={{
+                    background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                    border: 'none',
+                    color: '#000',
+                    padding: '7px 16px',
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <FontAwesomeIcon icon={faUpload} /> Cargar imagen del PC
+                </button>
+                <input
+                  id="cropper-recovery-file-input"
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      if (typeof reader.result === 'string') {
+                        setCurrentSrc(reader.result);
+                        setImgError(false);
+                        setIsImgLoading(true);
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+
+                {/* Input de URL manual alternativo */}
+                <div style={{ display: 'flex', width: '100%', maxWidth: '320px', marginTop: '4px' }}>
+                  <input
+                    type="text"
+                    value={manualUrlInput}
+                    onChange={(e) => setManualUrlInput(e.target.value)}
+                    placeholder="O pega una URL de imagen..."
+                    style={{
+                      flex: 1,
+                      padding: '5px 8px',
+                      background: '#1a1a28',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: '5px 0 0 5px',
+                      color: '#fff',
+                      fontSize: '0.74rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!manualUrlInput.trim()}
+                    onClick={() => {
+                      if (manualUrlInput.trim()) {
+                        setCurrentSrc(manualUrlInput.trim());
+                        setImgError(false);
+                        setIsImgLoading(true);
+                      }
+                    }}
+                    style={{
+                      background: manualUrlInput.trim() ? 'rgba(255,211,107,0.2)' : 'rgba(255,255,255,0.05)',
+                      color: manualUrlInput.trim() ? '#ffd36b' : 'rgba(255,255,255,0.3)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderLeft: 'none',
+                      borderRadius: '0 5px 5px 0',
+                      padding: '0 10px',
+                      cursor: manualUrlInput.trim() ? 'pointer' : 'not-allowed',
+                      fontSize: '0.74rem',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    Usar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <img 
+              ref={imgRef}
+              src={currentSrc} 
+              alt="Preview recortes"
+              onLoad={handleImageLoad}
+              onError={handleImageError}
+              crossOrigin="anonymous"
+              draggable={false}
+              style={{
+                position: 'absolute',
+                left: `${position.x}px`,
+                top: `${position.y}px`,
+                width: typeof renderedWidth === 'number' ? `${renderedWidth}px` : renderedWidth,
+                height: typeof renderedHeight === 'number' ? `${renderedHeight}px` : renderedHeight,
+                maxWidth: 'none',
+                maxHeight: 'none',
+                pointerEvents: 'none',
+                display: isImgLoading ? 'none' : 'block',
+                transition: isDragging ? 'none' : 'width 0.05s ease, height 0.05s ease'
+              }}
+            />
+          )}
         </div>
 
         {/* Controles de Zoom y Ajuste Rápido */}
