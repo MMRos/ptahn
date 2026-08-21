@@ -39,23 +39,41 @@ export function getBaseUrl(baseUrl) {
   return 'http://localhost:1234';
 }
 
-// Mapeo de los mejores modelos del usuario por tarea
+// Mapeo de los mejores modelos del usuario por tarea (enfocados en Rol y Narrativa Sin Censura)
 export const RECOMMENDED_MODELS = {
   chat: {
-    id: 'qwen3.5-4b-nsfw-ara',
-    name: 'Qwen 3.5 4B NSFW Arousal (Sinbad-The-Sailor)',
-    type: 'Narración & Rol Constante',
-    description: 'Bajo consumo de CPU, ideal para mantener en memoria de forma constante.'
+    id: 'Precog-Magnum-31B-i1-GGUF',
+    name: 'Precog-Magnum 31B (MRockatansky / mradermacher)',
+    type: 'Narración & Rol Sin Censura (Top Calidad)',
+    description: 'Máxima profundidad de prosa, iniciativa y razonamiento narrativo en 16GB VRAM.'
+  },
+  dark_rp: {
+    id: 'Magnum_Lyra_Darkness_12B-Heretic',
+    name: 'Magnum Lyra Darkness 12B Heretic',
+    type: 'Ficción Oscura & Rol Maduro',
+    description: 'Ultra-rápido, inmersivo, sin censura y con gran riqueza sensorial.'
+  },
+  heretic: {
+    id: 'Magnum-v4-12B-Heretic',
+    name: 'Magnum v4 12B Heretic',
+    type: 'Narrativa Creativa General',
+    description: 'Excelente equilibrio narrativo sin censura y alta velocidad.'
+  },
+  moe_dark: {
+    id: 'mistral-moe-4x7b-dark-multiverse',
+    name: 'Mistral MoE 4x7B Dark Multiverse (DavidAU)',
+    type: 'Fantasía Oscura & MoE',
+    description: 'Merge multi-experto sin censura para mundos oscuros.'
   },
   context: {
-    id: 'qwen2.5-coder-14b',
-    name: 'Qwen 2.5 Coder 14B',
-    type: 'Extracción de Tarjetas',
-    description: 'Alta precisión para procesamiento de tags y JSON estructurado.'
+    id: 'Magnum_Lyra_Darkness_12B-Heretic',
+    name: 'Magnum 12B / Mistral-Nemo',
+    type: 'Extracción y Resumen de Memorias',
+    description: 'Alta coherencia para procesar eventos de rol y memoria a largo plazo.'
   },
   image: {
     id: 'nova-anime-xl',
-    name: 'Nova Anime XL (nuupy / SDXL)',
+    name: 'Nova Anime XL (SDXL / Forge)',
     type: 'Escenificación / Imágenes',
     description: 'Generación visual bajo demanda. Se carga y descarga automáticamente.'
   },
@@ -67,7 +85,7 @@ export const RECOMMENDED_MODELS = {
   },
   audio: {
     id: 'audio.cpp',
-    name: 'Audio.cpp (audio-cpp)',
+    name: 'Audio.cpp (Kokoro / TTS)',
     type: 'Voces / TTS',
     description: 'Síntesis de voz y efectos sonoros locales. Se carga y descarga bajo demanda.'
   }
@@ -90,16 +108,53 @@ export async function getAvailableModels(baseUrl) {
 }
 
 /**
- * Resuelve el ID exacto del modelo disponible en LM Studio a partir de una palabra clave.
+ * Resuelve el ID exacto del modelo disponible en LM Studio con detección inteligente.
  */
 export async function resolveModelId(searchTerm, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
     const models = await getAvailableModels(finalBaseUrl);
-    const found = models.find(m => m.id.toLowerCase().includes(searchTerm.toLowerCase()));
-    return found ? found.id : null;
+    if (!models || models.length === 0) return searchTerm || null;
+
+    // 1. Coincidencia exacta o parcial con el término buscado
+    if (searchTerm) {
+      const exactMatch = models.find(m => m.id.toLowerCase() === searchTerm.toLowerCase());
+      if (exactMatch) return exactMatch.id;
+
+      const partialMatch = models.find(m => m.id.toLowerCase().includes(searchTerm.toLowerCase()));
+      if (partialMatch) return partialMatch.id;
+    }
+
+    // 2. Priorizar modelos sin censura / rol si están presentes en LM Studio
+    const uncensoredKeywords = [
+      'precog-magnum',
+      'precog',
+      'magnum_lyra',
+      'magnum lyra',
+      'darkness',
+      'magnum-v4',
+      'magnum v4',
+      'magnum',
+      'mistral-nemo',
+      'nemo',
+      'anthracite',
+      'dark-multiverse',
+      'heretic',
+      'mistral-moe',
+      'qwen3.5',
+      'qwen2.5',
+      'llama-3'
+    ];
+
+    for (const kw of uncensoredKeywords) {
+      const found = models.find(m => m.id.toLowerCase().includes(kw));
+      if (found) return found.id;
+    }
+
+    // 3. Devolver el primer modelo cargado o disponible en LM Studio
+    return models[0]?.id || searchTerm || null;
   } catch (e) {
-    return null;
+    return searchTerm || null;
   }
 }
 
@@ -258,14 +313,14 @@ export async function generateAudioLocal(text, voice = 'default', description = 
 
 /**
  * Envía una solicitud de completado de chat a LM Studio con soporte para instrucciones de sistema y contexto con pesos.
- * Se asegura de usar el modelo de narración constante qwen3.5-4b-nsfw-ara.
+ * Resuelve y carga automáticamente el modelo seleccionado por el usuario o el mejor modelo sin censura disponible.
  */
 export async function sendChatMessage({
   messages,
   systemInstruction = '',
   contextDocuments = [],
-  modelId = 'qwen3.5-4b-nsfw-ara',
-  temperature = 0.7,
+  modelId = 'Precog-Magnum-31B-i1-GGUF',
+  temperature = 0.85,
   baseUrl
 }) {
   const finalBaseUrl = getBaseUrl(baseUrl);
@@ -307,10 +362,10 @@ export async function sendChatMessage({
       formattedMessages.push({ role: 'user', content: 'Continuar la historia.' });
     }
 
-    // Resolviendo el ID real del modelo de narración
-    const narrationId = await resolveModelId('qwen3.5-4b-nsfw', finalBaseUrl) || await resolveModelId('Sinbad-The-Sailor', finalBaseUrl) || modelId;
+    // Resolviendo el ID real del modelo de narración en LM Studio
+    const narrationId = (await resolveModelId(modelId, finalBaseUrl)) || modelId;
     
-    // Asegurar que el modelo de narración esté cargado
+    // Asegurar que el modelo de narración esté cargado en GPU
     await loadModel(narrationId, finalBaseUrl);
 
     const requestBody = JSON.stringify({
@@ -353,7 +408,7 @@ export async function sendChatMessage({
 export async function sendContextSummarizationTask({
   messages,
   currentMemory = [],
-  modelId = 'qwen2.5-coder-14b',
+  modelId = 'Magnum_Lyra_Darkness_12B-Heretic',
   baseUrl
 }) {
   const finalBaseUrl = getBaseUrl(baseUrl);
@@ -365,7 +420,7 @@ export async function sendContextSummarizationTask({
     Memorias actuales: ${existingMem}.
     Responde SOLO con una frase corta para añadir a la memoria, o con la palabra NADA si no es relevante.`;
 
-    const summarizerId = await resolveModelId('qwen2.5-coder', finalBaseUrl) || await resolveModelId('qwen2.5', finalBaseUrl) || modelId;
+    const summarizerId = (await resolveModelId(modelId, finalBaseUrl)) || (await resolveModelId('magnum', finalBaseUrl)) || modelId;
 
     // Asegurar que el modelo de resumen esté cargado
     await loadModel(summarizerId, finalBaseUrl);

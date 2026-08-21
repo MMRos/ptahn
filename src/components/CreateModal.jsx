@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTimes, faSave } from '@fortawesome/free-solid-svg-icons';
+import { faTimes, faSave, faStar, faPlus, faCrop, faImage, faImages } from '@fortawesome/free-solid-svg-icons';
 import ConnectionSelector from './ConnectionSelector';
 import ImageCropperModal from './ImageCropperModal';
+import BatchCropperModal from './BatchCropperModal';
 import NarratorForm from './NarratorForm';
 import '../pages/create.css';
 
@@ -154,6 +155,24 @@ export default function CreateModal({
   // Crop state inside modal
   const [cropSrc, setCropSrc] = useState('');
   const [isCropperOpen, setIsCropperOpen] = useState(false);
+  const [cropTarget, setCropTarget] = useState('main'); // 'main' | 'character_new' | 'character_edit' | 'nested_single' | 'nested_character_new' | 'nested_character_edit'
+  const [editingImageId, setEditingImageId] = useState(null);
+
+  // Batch Crop state (subida múltiple)
+  const [batchCropItems, setBatchCropItems] = useState([]);
+  const [isBatchCropperOpen, setIsBatchCropperOpen] = useState(false);
+  const [batchCropTarget, setBatchCropTarget] = useState('main'); // 'main' | 'nested'
+
+  // Galería de imágenes y expresiones del personaje
+  const [characterImages, setCharacterImages] = useState([]); // [{ id, url, label, isDefault }]
+  const [newImageLabel, setNewImageLabel] = useState('');
+  const [newImageUrl, setNewImageUrl] = useState('');
+
+  // Highlight indices para navegación por teclado (ArrowUp/ArrowDown/Enter)
+  const [highlightedCategoryIndex, setHighlightedCategoryIndex] = useState(-1);
+  const [highlightedTagIndex, setHighlightedTagIndex] = useState(-1);
+  const [highlightedTraitIndex, setHighlightedTraitIndex] = useState(-1);
+  const [highlightedNestedTraitIndex, setHighlightedNestedTraitIndex] = useState(-1);
 
   // States para creación de tarjeta anidada (in-situ)
   const [nestedCardType, setNestedCardType] = useState(null);
@@ -164,6 +183,10 @@ export default function CreateModal({
   const [nestedCardTraits, setNestedCardTraits] = useState([]);
   const [nestedTraitQuery, setNestedTraitQuery] = useState('');
   const [showNestedTraitDropdown, setShowNestedTraitDropdown] = useState(false);
+  const [nestedCharacterImages, setNestedCharacterImages] = useState([]); // [{ id, url, label, isDefault }]
+  const [newNestedImageLabel, setNewNestedImageLabel] = useState('');
+  const [newNestedImageUrl, setNewNestedImageUrl] = useState('');
+  const [nestedEditingImageId, setNestedEditingImageId] = useState(null);
 
   // Sincronizar estados cuando se abre el modal o cambia el item a editar
   useEffect(() => {
@@ -207,6 +230,17 @@ export default function CreateModal({
           setSelectedTraits(editItem.traits || []);
           setIsPublic(!!editItem.public);
           setIsScenario(false);
+
+          // Cargar galería de imágenes / expresiones
+          if (Array.isArray(editItem.images) && editItem.images.length > 0) {
+            setCharacterImages(editItem.images);
+          } else if (editItem.cover) {
+            setCharacterImages([{ id: 'img-default', url: editItem.cover, label: 'Normal / Principal', isDefault: true }]);
+          } else {
+            setCharacterImages([]);
+          }
+          setNewImageLabel('');
+          setNewImageUrl('');
         }
       } else {
         // Nuevo elemento
@@ -233,7 +267,17 @@ export default function CreateModal({
         setTone('');
         setRules('');
         setRandomization('');
+
+        // Galería vacía
+        setCharacterImages([]);
+        setNewImageLabel('');
+        setNewImageUrl('');
+        setNestedCharacterImages([]);
+        setNewNestedImageLabel('');
+        setNewNestedImageUrl('');
       }
+      setBatchCropItems([]);
+      setIsBatchCropperOpen(false);
       setIsDirty(false);
       setShowUnsavedWarning(false);
     }
@@ -282,13 +326,17 @@ export default function CreateModal({
       onSaveItem({ type: 'scenario', data: scenarioData, isEdit: !!editItem });
     } else {
       // Es tipo de tarjeta
+      const primaryImg = characterImages.find(img => img.isDefault) || characterImages[0];
+      const finalCover = (itemType === 'Personaje' && primaryImg ? primaryImg.url : cover).trim();
+
       const cardData = {
         id: editItem ? editItem.id : `card-${Date.now()}`,
         type: itemType,
         title: trimmedTitle,
         intro: intro.trim(),
         text: text.trim(),
-        cover: cover.trim(),
+        cover: finalCover,
+        images: itemType === 'Personaje' ? characterImages : (finalCover ? [{ id: 'img-1', url: finalCover, label: 'Principal', isDefault: true }] : []),
         nsfw: nsfw,
         tags: selectedTags,
         connectedCards: selectedCards,
@@ -304,7 +352,7 @@ export default function CreateModal({
           title: trimmedTitle,
           category: 'Aventura',
           intro: intro.trim() || text.trim().substring(0, 80) + '...',
-          cover: cover.trim(),
+          cover: finalCover,
           presentation: '',
           baseContext: `[${itemType}]: ${text.trim()}`,
           aiInstructions: '',
@@ -323,19 +371,154 @@ export default function CreateModal({
     onClose();
   };
 
+  // Handlers para gestionar imágenes / expresiones del Personaje principal
+  const handleSetDefaultCharacterImage = (id) => {
+    setCharacterImages(prev => prev.map(img => ({ ...img, isDefault: img.id === id })));
+    const selected = characterImages.find(img => img.id === id);
+    if (selected) setCover(selected.url);
+    setIsDirty(true);
+  };
+
+  const handleRemoveCharacterImage = (id) => {
+    setCharacterImages(prev => {
+      const next = prev.filter(img => img.id !== id);
+      if (next.length > 0 && !next.some(img => img.isDefault)) {
+        next[0].isDefault = true;
+        setCover(next[0].url);
+      } else if (next.length === 0) {
+        setCover('');
+      }
+      return next;
+    });
+    setIsDirty(true);
+  };
+
+  const handleUpdateCharacterImageLabel = (id, newLabel) => {
+    setCharacterImages(prev => prev.map(img => img.id === id ? { ...img, label: newLabel } : img));
+    setIsDirty(true);
+  };
+
+  const handleReCropCharacterImage = (img) => {
+    setCropSrc(img.url);
+    setCropTarget('character_edit');
+    setEditingImageId(img.id);
+    setIsCropperOpen(true);
+  };
+
+  // Handlers para gestionar imágenes / expresiones del Personaje In-Situ (Nested)
+  const handleSetDefaultNestedCharacterImage = (id) => {
+    setNestedCharacterImages(prev => prev.map(img => ({ ...img, isDefault: img.id === id })));
+    const selected = nestedCharacterImages.find(img => img.id === id);
+    if (selected) setNestedCardCover(selected.url);
+  };
+
+  const handleRemoveNestedCharacterImage = (id) => {
+    setNestedCharacterImages(prev => {
+      const next = prev.filter(img => img.id !== id);
+      if (next.length > 0 && !next.some(img => img.isDefault)) {
+        next[0].isDefault = true;
+        setNestedCardCover(next[0].url);
+      } else if (next.length === 0) {
+        setNestedCardCover('');
+      }
+      return next;
+    });
+  };
+
+  const handleUpdateNestedCharacterImageLabel = (id, newLabel) => {
+    setNestedCharacterImages(prev => prev.map(img => img.id === id ? { ...img, label: newLabel } : img));
+  };
+
+  const handleReCropNestedCharacterImage = (img) => {
+    setCropSrc(img.url);
+    setCropTarget('nested_character_edit');
+    setNestedEditingImageId(img.id);
+    setIsCropperOpen(true);
+  };
+
+  // Handlers para procesamiento por lotes (Batch Upload & Crop)
+  const handleMultipleFilesSelected = async (fileList, target = 'main') => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    const readPromises = files.map((file, idx) => {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            const rawName = file.name.replace(/\.[^/.]+$/, '');
+            resolve({
+              id: `batch-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+              originalSrc: reader.result,
+              label: rawName || (idx === 0 ? 'Normal / Principal' : `Expresión ${idx + 1}`),
+              isDefault: idx === 0 && (target === 'main' ? characterImages.length === 0 : nestedCharacterImages.length === 0)
+            });
+          } else {
+            resolve(null);
+          }
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+    });
+
+    const results = (await Promise.all(readPromises)).filter(Boolean);
+    if (results.length > 0) {
+      setBatchCropItems(results);
+      setBatchCropTarget(target);
+      setIsBatchCropperOpen(true);
+    }
+  };
+
+  const handleSaveBatchCropped = (newCroppedItems) => {
+    if (batchCropTarget === 'main') {
+      setCharacterImages(prev => {
+        const hasNewDefault = newCroppedItems.some(it => it.isDefault);
+        let next = [];
+        if (hasNewDefault) {
+          next = [...prev.map(it => ({ ...it, isDefault: false })), ...newCroppedItems];
+        } else {
+          next = [...prev, ...newCroppedItems];
+        }
+        const def = next.find(it => it.isDefault) || next[0];
+        if (def) setCover(def.url);
+        return next;
+      });
+      setIsDirty(true);
+    } else if (batchCropTarget === 'nested') {
+      setNestedCharacterImages(prev => {
+        const hasNewDefault = newCroppedItems.some(it => it.isDefault);
+        let next = [];
+        if (hasNewDefault) {
+          next = [...prev.map(it => ({ ...it, isDefault: false })), ...newCroppedItems];
+        } else {
+          next = [...prev, ...newCroppedItems];
+        }
+        const def = next.find(it => it.isDefault) || next[0];
+        if (def) setNestedCardCover(def.url);
+        return next;
+      });
+      setIsDirty(true);
+    }
+  };
+
   const handleSaveNestedCard = () => {
     const trimmedTitle = nestedCardTitle.trim();
     if (!trimmedTitle) {
       alert('El nombre de la tarjeta es obligatorio.');
       return;
     }
+    const primaryImg = nestedCharacterImages.find(img => img.isDefault) || nestedCharacterImages[0];
+    const finalCover = (nestedCardType === 'Personaje' && primaryImg ? primaryImg.url : nestedCardCover).trim();
+
     const newCard = {
       id: `card-${Date.now()}`,
       type: nestedCardType,
       title: trimmedTitle,
       intro: nestedCardIntro.trim(),
       text: nestedCardText.trim(),
-      cover: nestedCardCover.trim(),
+      cover: finalCover,
+      images: nestedCardType === 'Personaje' ? nestedCharacterImages : (finalCover ? [{ id: 'img-1', url: finalCover, label: 'Principal', isDefault: true }] : []),
       nsfw: false,
       public: false,
       tags: [],
@@ -355,6 +538,13 @@ export default function CreateModal({
     setNestedCardText('');
     setNestedCardCover('');
     setNestedCardTraits([]);
+    setNestedTraitQuery('');
+    setShowNestedTraitDropdown(false);
+    setHighlightedNestedTraitIndex(-1);
+    setNestedCharacterImages([]);
+    setNewNestedImageLabel('');
+    setNewNestedImageUrl('');
+    setNestedEditingImageId(null);
   };
 
   const handleCloseAttempt = () => {
@@ -377,6 +567,26 @@ export default function CreateModal({
   };
 
   const renderTagsInput = () => {
+    const filteredTags = SUGGESTED_TAGS.filter(tg => 
+      tg.toLowerCase().includes(tagQuery.toLowerCase()) && !selectedTags.includes(tg)
+    );
+    const customTag = (tagQuery.trim() && !selectedTags.includes(tagQuery.trim()) && !filteredTags.some(t => t.toLowerCase() === tagQuery.trim().toLowerCase()))
+      ? tagQuery.trim()
+      : null;
+    const allTagOptions = customTag 
+      ? [{ isCustom: true, label: customTag }, ...filteredTags.map(t => ({ isCustom: false, label: t }))] 
+      : filteredTags.map(t => ({ isCustom: false, label: t }));
+
+    const handleSelectTag = (tagText) => {
+      if (tagText && !selectedTags.includes(tagText) && selectedTags.length < 5) {
+        setSelectedTags(prev => [...prev, tagText]);
+        setTagQuery('');
+        setHighlightedTagIndex(-1);
+        setShowTagDropdown(false);
+        setIsDirty(true);
+      }
+    };
+
     return (
       <div className="field-group" style={{ position: 'relative' }}>
         <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>Etiquetas (Tags - Máx. 5)</label>
@@ -425,26 +635,47 @@ export default function CreateModal({
               onChange={(e) => {
                 setTagQuery(e.target.value);
                 setShowTagDropdown(true);
+                setHighlightedTagIndex(-1);
               }}
-              onFocus={() => setShowTagDropdown(true)}
+              onFocus={() => {
+                setShowTagDropdown(true);
+                setHighlightedTagIndex(-1);
+              }}
               onBlur={() => {
                 setTimeout(() => setShowTagDropdown(false), 200);
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && tagQuery.trim()) {
+                if (!showTagDropdown && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                  setShowTagDropdown(true);
+                  setHighlightedTagIndex(0);
                   e.preventDefault();
-                  const val = tagQuery.trim();
-                  if (!selectedTags.includes(val) && selectedTags.length < 5) {
-                    setSelectedTags(prev => [...prev, val]);
-                    setTagQuery('');
-                    setIsDirty(true);
+                  return;
+                }
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (allTagOptions.length > 0) {
+                    setHighlightedTagIndex(prev => (prev + 1) % allTagOptions.length);
                   }
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  if (allTagOptions.length > 0) {
+                    setHighlightedTagIndex(prev => (prev - 1 + allTagOptions.length) % allTagOptions.length);
+                  }
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (showTagDropdown && highlightedTagIndex >= 0 && highlightedTagIndex < allTagOptions.length) {
+                    handleSelectTag(allTagOptions[highlightedTagIndex].label);
+                  } else if (tagQuery.trim()) {
+                    handleSelectTag(tagQuery.trim());
+                  }
+                } else if (e.key === 'Escape') {
+                  setShowTagDropdown(false);
                 }
               }}
               placeholder="Escribe o selecciona una etiqueta..."
               style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
             />
-            {showTagDropdown && (
+            {showTagDropdown && allTagOptions.length > 0 && (
               <div style={{
                 position: 'absolute',
                 top: '100%',
@@ -454,35 +685,35 @@ export default function CreateModal({
                 border: '1px solid rgba(255,255,255,0.12)',
                 borderRadius: '6px',
                 zIndex: 100,
-                maxHeight: '150px',
+                maxHeight: '160px',
                 overflowY: 'auto',
                 marginTop: '4px',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
               }}>
-                {SUGGESTED_TAGS.filter(tg => 
-                  tg.toLowerCase().includes(tagQuery.toLowerCase()) && !selectedTags.includes(tg)
-                ).map(tg => (
+                {allTagOptions.map((opt, idx) => (
                   <div
-                    key={tg}
-                    onMouseDown={() => {
-                      setSelectedTags(prev => [...prev, tg]);
-                      setTagQuery('');
-                      setShowTagDropdown(false);
-                      setIsDirty(true);
-                    }}
+                    key={opt.label}
+                    onMouseDown={() => handleSelectTag(opt.label)}
+                    onMouseEnter={() => setHighlightedTagIndex(idx)}
                     style={{
                       padding: '8px 10px',
-                      color: '#fff',
+                      color: idx === highlightedTagIndex ? '#ffd36b' : '#fff',
+                      background: idx === highlightedTagIndex ? 'rgba(255, 211, 107, 0.15)' : 'transparent',
                       cursor: 'pointer',
                       fontSize: '0.85rem',
                       borderBottom: '1px solid rgba(255,255,255,0.04)',
-                      background: 'transparent',
-                      transition: 'background 0.2s'
+                      transition: 'background 0.15s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
                     }}
-                    onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
-                    onMouseLeave={(e) => e.target.style.background = 'transparent'}
                   >
-                    {tg}
+                    <span>{opt.label}</span>
+                    {opt.isCustom && (
+                      <span style={{ fontSize: '0.7rem', color: '#ffd36b', background: 'rgba(255,211,107,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                        + Nueva
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -626,93 +857,349 @@ export default function CreateModal({
         {itemType !== 'Narrador' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             
-            {/* 1. Imagen de portada y Previsualización AL INICIO */}
-            <div className="field-group" style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-              <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)', display: 'block', marginBottom: '6px' }}>Imagen de portada</label>
-              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
-                {/* Caja de previsualización */}
-                <div style={{
-                  width: itemType === 'Personaje' ? '90px' : '150px',
-                  height: itemType === 'Personaje' ? '120px' : '85px',
-                  borderRadius: '6px',
-                  background: cover ? `url(${cover}) center/cover no-repeat` : 'rgba(255,255,255,0.02)',
-                  border: '1px dashed rgba(255,255,255,0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'rgba(255,255,255,0.4)',
-                  fontSize: '0.72rem',
-                  overflow: 'hidden',
-                  flexShrink: 0
-                }}>
-                  {!cover && <span>Sin portada</span>}
+            {/* 1. Imagen de portada / Galería de Expresiones AL INICIO */}
+            {itemType === 'Personaje' ? (
+              <div className="field-group" style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.85rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <FontAwesomeIcon icon={faImage} /> Imágenes y Expresiones del Personaje ({characterImages.length})
+                    </label>
+                    <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'block', marginTop: '2px' }}>
+                      Añade múltiples retratos y nómbralos (ej: Normal, Alegre, Enfadado, Con armadura). La IA los identificará para ilustrar reacciones y generar nuevas imágenes.
+                    </span>
+                  </div>
                 </div>
-                
-                {/* Inputs de carga */}
-                <div style={{ flex: 1, minWidth: '200px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', position: 'relative' }}>
-                    <input
-                      value={cover}
-                      onChange={(e) => handleFieldChange(setCover, e.target.value)}
-                      placeholder="https://... o ruta local de imagen"
-                      style={{
-                        flex: 1,
-                        padding: '8px 10px',
-                        background: '#1e1e2c',
-                        border: '1px solid rgba(255,255,255,0.12)',
-                        borderRadius: '6px 0 0 6px',
-                        color: '#fff',
-                        boxSizing: 'border-box',
-                        borderRight: 'none',
-                        fontSize: '0.85rem'
-                      }}
-                    />
+
+                {/* Lista de Imágenes Existentes */}
+                {characterImages.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', marginTop: '12px', marginBottom: '14px' }}>
+                    {characterImages.map((img, idx) => (
+                      <div 
+                        key={img.id || idx}
+                        style={{
+                          background: img.isDefault ? 'rgba(255, 211, 107, 0.08)' : 'rgba(255,255,255,0.03)',
+                          border: img.isDefault ? '1.5px solid rgba(255, 211, 107, 0.5)' : '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          position: 'relative'
+                        }}
+                      >
+                        {/* Badge de Principal */}
+                        {img.isDefault && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '4px',
+                            left: '4px',
+                            background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                            color: '#000',
+                            fontSize: '0.65rem',
+                            fontWeight: 'bold',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            zIndex: 3,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}>
+                            <FontAwesomeIcon icon={faStar} /> Portada
+                          </div>
+                        )}
+
+                        {/* Botón Borrar */}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCharacterImage(img.id)}
+                          style={{
+                            position: 'absolute',
+                            top: '4px',
+                            right: '4px',
+                            background: 'rgba(0,0,0,0.65)',
+                            border: 'none',
+                            color: '#ff6b6b',
+                            width: '20px',
+                            height: '20px',
+                            borderRadius: '50%',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.75rem',
+                            fontWeight: 'bold',
+                            zIndex: 3
+                          }}
+                          title="Eliminar imagen"
+                        >
+                          ×
+                        </button>
+
+                        {/* Miniatura 3:4 */}
+                        <div 
+                          style={{
+                            height: '130px',
+                            backgroundImage: `url(${img.url})`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            backgroundColor: '#0a0a12'
+                          }}
+                        />
+
+                        {/* Contenido inferior: Input del Identificador / Emoción y Botones */}
+                        <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <input
+                            type="text"
+                            value={img.label || ''}
+                            onChange={(e) => handleUpdateCharacterImageLabel(img.id, e.target.value)}
+                            placeholder="Ej: Alegre, Armadura..."
+                            style={{
+                              width: '100%',
+                              padding: '4px 6px',
+                              background: '#14141f',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              borderRadius: '4px',
+                              color: '#fff',
+                              fontSize: '0.72rem',
+                              boxSizing: 'border-box'
+                            }}
+                            title="Etiqueta / Estado de la imagen"
+                          />
+
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'space-between' }}>
+                            {!img.isDefault && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetDefaultCharacterImage(img.id)}
+                                style={{
+                                  flex: 1,
+                                  background: 'rgba(255,255,255,0.05)',
+                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  color: '#ffd36b',
+                                  padding: '3px 4px',
+                                  borderRadius: '4px',
+                                  fontSize: '0.68rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '3px'
+                                }}
+                                title="Establecer como imagen de portada principal"
+                              >
+                                <FontAwesomeIcon icon={faStar} /> Principal
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleReCropCharacterImage(img)}
+                              style={{
+                                flex: img.isDefault ? 1 : 'none',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid rgba(255,255,255,0.1)',
+                                color: '#eaeaea',
+                                padding: '3px 6px',
+                                borderRadius: '4px',
+                                fontSize: '0.68rem',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '3px'
+                              }}
+                              title="Re-encuadrar y recortar imagen"
+                            >
+                              <FontAwesomeIcon icon={faCrop} /> {img.isDefault ? 'Recortar' : ''}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Formulario para Añadir Nueva Imagen */}
+                <div style={{ background: 'rgba(0,0,0,0.25)', padding: '10px 12px', borderRadius: '8px', border: '1px dashed rgba(255,211,107,0.25)', marginTop: characterImages.length > 0 ? '0' : '8px' }}>
+                  <div style={{ fontSize: '0.76rem', color: '#ffd36b', fontWeight: '600', marginBottom: '8px' }}>
+                    <FontAwesomeIcon icon={faPlus} /> Añadir nueva imagen / expresión
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                    <div>
+                      <label style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.6)', display: 'block', marginBottom: '3px' }}>Identificador / Emoción / Traje</label>
+                      <input
+                        type="text"
+                        value={newImageLabel}
+                        onChange={(e) => setNewImageLabel(e.target.value)}
+                        placeholder="Ej: Alegre, Enfadado, Con armadura..."
+                        style={{ width: '100%', padding: '6px 8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '5px', color: '#fff', fontSize: '0.78rem', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.6)', display: 'block', marginBottom: '3px' }}>URL de Imagen</label>
+                      <div style={{ display: 'flex' }}>
+                        <input
+                          type="text"
+                          value={newImageUrl}
+                          onChange={(e) => setNewImageUrl(e.target.value)}
+                          placeholder="https://ejemplo.com/foto.jpg"
+                          style={{ flex: 1, padding: '6px 8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '5px 0 0 5px', color: '#fff', fontSize: '0.78rem', boxSizing: 'border-box', borderRight: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          disabled={!newImageUrl.trim()}
+                          onClick={() => {
+                            if (newImageUrl.trim()) {
+                              setCropSrc(newImageUrl.trim());
+                              setCropTarget('character_new');
+                              setIsCropperOpen(true);
+                            }
+                          }}
+                          style={{
+                            background: newImageUrl.trim() ? '#ffd36b' : 'rgba(255,255,255,0.05)',
+                            color: newImageUrl.trim() ? '#000' : 'rgba(255,255,255,0.3)',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            borderRadius: '0 5px 5px 0',
+                            padding: '0 10px',
+                            cursor: newImageUrl.trim() ? 'pointer' : 'not-allowed',
+                            fontSize: '0.75rem',
+                            fontWeight: 'bold'
+                          }}
+                        >
+                          Usar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)' }}>
+                      O sube archivo(s) desde tu ordenador con recorte 3:4:
+                    </span>
                     <button
                       type="button"
-                      onClick={() => document.getElementById('cover-file-input').click()}
+                      onClick={() => document.getElementById('char-new-image-file-input')?.click()}
                       style={{
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255,255,255,0.12)',
-                        borderLeft: 'none',
-                        color: '#fff',
-                        padding: '0 16px',
-                        borderRadius: '0 6px 6px 0',
+                        background: 'rgba(255, 211, 107, 0.15)',
+                        border: '1px solid rgba(255, 211, 107, 0.3)',
+                        color: '#ffd36b',
+                        padding: '5px 12px',
+                        borderRadius: '5px',
                         cursor: 'pointer',
-                        fontSize: '0.82rem',
+                        fontSize: '0.75rem',
                         fontWeight: '600',
-                        transition: 'background 0.2s',
-                        whiteSpace: 'nowrap'
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
                       }}
-                      onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
-                      onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.05)'}
                     >
-                      Seleccionar archivo
+                      <FontAwesomeIcon icon={faImages} /> Subir archivo(s) del PC
                     </button>
                     <input
-                      id="cover-file-input"
+                      id="char-new-image-file-input"
                       type="file"
                       accept="image/*"
+                      multiple
                       style={{ display: 'none' }}
                       onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                          if (typeof reader.result === 'string') {
-                            setCropSrc(reader.result);
-                            setIsCropperOpen(true);
-                          }
-                        };
-                        reader.readAsDataURL(file);
+                        const files = e.target.files;
+                        if (!files || files.length === 0) return;
+                        handleMultipleFilesSelected(files, 'main');
+                        e.target.value = '';
                       }}
                     />
                   </div>
-                  <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)' }}>
-                    Introduce la URL de una imagen o sube un archivo local.
-                  </span>
                 </div>
               </div>
-            </div>
+            ) : (
+              /* Portada estándar para Escenarios y otras Tarjetas */
+              <div className="field-group" style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)', display: 'block', marginBottom: '6px' }}>Imagen de portada</label>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {/* Caja de previsualización */}
+                  <div style={{
+                    width: '150px',
+                    height: '85px',
+                    borderRadius: '6px',
+                    background: cover ? `url(${cover}) center/cover no-repeat` : 'rgba(255,255,255,0.02)',
+                    border: '1px dashed rgba(255,255,255,0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'rgba(255,255,255,0.4)',
+                    fontSize: '0.72rem',
+                    overflow: 'hidden',
+                    flexShrink: 0
+                  }}>
+                    {!cover && <span>Sin portada</span>}
+                  </div>
+                  
+                  {/* Inputs de carga */}
+                  <div style={{ flex: 1, minWidth: '200px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', position: 'relative' }}>
+                      <input
+                        value={cover}
+                        onChange={(e) => handleFieldChange(setCover, e.target.value)}
+                        placeholder="https://... o ruta local de imagen"
+                        style={{
+                          flex: 1,
+                          padding: '8px 10px',
+                          background: '#1e1e2c',
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          borderRadius: '6px 0 0 6px',
+                          color: '#fff',
+                          boxSizing: 'border-box',
+                          borderRight: 'none',
+                          fontSize: '0.85rem'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('cover-file-input').click()}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          borderLeft: 'none',
+                          color: '#fff',
+                          padding: '0 16px',
+                          borderRadius: '0 6px 6px 0',
+                          cursor: 'pointer',
+                          fontSize: '0.82rem',
+                          fontWeight: '600',
+                          transition: 'background 0.2s',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
+                        onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.05)'}
+                      >
+                        Seleccionar archivo
+                      </button>
+                      <input
+                        id="cover-file-input"
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            if (typeof reader.result === 'string') {
+                              setCropSrc(reader.result);
+                              setCropTarget('main');
+                              setIsCropperOpen(true);
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)' }}>
+                      Introduce la URL de una imagen o sube un archivo local.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Si es una Tarjeta, mostramos selector de tipos de tarjeta */}
             {itemType !== 'Escenario' && (
@@ -762,62 +1249,120 @@ export default function CreateModal({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                   <div className="field-group" style={{ position: 'relative' }}>
                     <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>Categoría</label>
-                    <input
-                      value={categoryQuery}
-                      onChange={(e) => {
-                        setCategoryQuery(e.target.value);
-                        setCategory(e.target.value);
-                        setShowCategoryDropdown(true);
+                    {(() => {
+                      const filteredCategories = CATEGORIES.filter(cat => 
+                        cat.toLowerCase().includes((categoryQuery || '').toLowerCase())
+                      );
+                      const customCategory = (categoryQuery.trim() && !filteredCategories.some(c => c.toLowerCase() === categoryQuery.trim().toLowerCase()))
+                        ? categoryQuery.trim()
+                        : null;
+                      const allCategoryOptions = customCategory 
+                        ? [{ isCustom: true, label: customCategory }, ...filteredCategories.map(c => ({ isCustom: false, label: c }))] 
+                        : filteredCategories.map(c => ({ isCustom: false, label: c }));
+
+                      const handleSelectCategory = (catText) => {
+                        setCategory(catText);
+                        setCategoryQuery(catText);
+                        setHighlightedCategoryIndex(-1);
+                        setShowCategoryDropdown(false);
                         setIsDirty(true);
-                      }}
-                      onFocus={() => setShowCategoryDropdown(true)}
-                      onBlur={() => {
-                        setTimeout(() => setShowCategoryDropdown(false), 200);
-                      }}
-                      placeholder="Escribe o selecciona categoría..."
-                      style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
-                    />
-                    {showCategoryDropdown && (
-                      <div style={{
-                        position: 'absolute',
-                        top: '100%',
-                        left: 0,
-                        right: 0,
-                        background: '#14141f',
-                        border: '1px solid rgba(255,255,255,0.12)',
-                        borderRadius: '6px',
-                        zIndex: 100,
-                        maxHeight: '150px',
-                        overflowY: 'auto',
-                        marginTop: '4px',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-                      }}>
-                        {CATEGORIES.filter(cat => cat.toLowerCase().includes((categoryQuery || '').toLowerCase())).map(cat => (
-                          <div
-                            key={cat}
-                            onMouseDown={() => {
-                              setCategory(cat);
-                              setCategoryQuery(cat);
-                              setShowCategoryDropdown(false);
+                      };
+
+                      return (
+                        <>
+                          <input
+                            value={categoryQuery}
+                            onChange={(e) => {
+                              setCategoryQuery(e.target.value);
+                              setCategory(e.target.value);
+                              setShowCategoryDropdown(true);
+                              setHighlightedCategoryIndex(-1);
                               setIsDirty(true);
                             }}
-                            style={{
-                              padding: '8px 10px',
-                              color: '#fff',
-                              cursor: 'pointer',
-                              fontSize: '0.85rem',
-                              borderBottom: '1px solid rgba(255,255,255,0.04)',
-                              background: 'transparent',
-                              transition: 'background 0.2s'
+                            onFocus={() => {
+                              setShowCategoryDropdown(true);
+                              setHighlightedCategoryIndex(-1);
                             }}
-                            onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
-                            onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                          >
-                            {cat}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                            onBlur={() => {
+                              setTimeout(() => setShowCategoryDropdown(false), 200);
+                            }}
+                            onKeyDown={(e) => {
+                              if (!showCategoryDropdown && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                                setShowCategoryDropdown(true);
+                                setHighlightedCategoryIndex(0);
+                                e.preventDefault();
+                                return;
+                              }
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                if (allCategoryOptions.length > 0) {
+                                  setHighlightedCategoryIndex(prev => (prev + 1) % allCategoryOptions.length);
+                                }
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                if (allCategoryOptions.length > 0) {
+                                  setHighlightedCategoryIndex(prev => (prev - 1 + allCategoryOptions.length) % allCategoryOptions.length);
+                                }
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (showCategoryDropdown && highlightedCategoryIndex >= 0 && highlightedCategoryIndex < allCategoryOptions.length) {
+                                  handleSelectCategory(allCategoryOptions[highlightedCategoryIndex].label);
+                                } else if (categoryQuery.trim()) {
+                                  handleSelectCategory(categoryQuery.trim());
+                                }
+                              } else if (e.key === 'Escape') {
+                                setShowCategoryDropdown(false);
+                              }
+                            }}
+                            placeholder="Escribe o selecciona categoría..."
+                            style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
+                          />
+                          {showCategoryDropdown && allCategoryOptions.length > 0 && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '100%',
+                              left: 0,
+                              right: 0,
+                              background: '#14141f',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              borderRadius: '6px',
+                              zIndex: 100,
+                              maxHeight: '160px',
+                              overflowY: 'auto',
+                              marginTop: '4px',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                            }}>
+                              {allCategoryOptions.map((opt, idx) => (
+                                <div
+                                  key={opt.label}
+                                  onMouseDown={() => handleSelectCategory(opt.label)}
+                                  onMouseEnter={() => setHighlightedCategoryIndex(idx)}
+                                  style={{
+                                    padding: '8px 10px',
+                                    color: idx === highlightedCategoryIndex ? '#ffd36b' : '#fff',
+                                    background: idx === highlightedCategoryIndex ? 'rgba(255, 211, 107, 0.15)' : 'transparent',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem',
+                                    borderBottom: '1px solid rgba(255,255,255,0.04)',
+                                    transition: 'background 0.15s',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                  }}
+                                >
+                                  <span>{opt.label}</span>
+                                  {opt.isCustom && (
+                                    <span style={{ fontSize: '0.7rem', color: '#ffd36b', background: 'rgba(255,211,107,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                                      + Personalizada
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="field-group">
                     <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>Narrador asignado</label>
@@ -881,77 +1426,120 @@ export default function CreateModal({
                 </div>
 
                 {/* Input con dropdown autocomplete para Traits */}
-                {selectedTraits.length < 10 && (
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      value={traitQuery}
-                      onChange={(e) => {
-                        setTraitQuery(e.target.value);
-                        setShowTraitDropdown(true);
-                      }}
-                      onFocus={() => setShowTraitDropdown(true)}
-                      onBlur={() => {
-                        setTimeout(() => setShowTraitDropdown(false), 200);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && traitQuery.trim()) {
-                          e.preventDefault();
-                          const val = traitQuery.trim();
-                          if (!selectedTraits.includes(val) && selectedTraits.length < 10) {
-                            setSelectedTraits(prev => [...prev, val]);
-                            setTraitQuery('');
-                            setIsDirty(true);
+                {selectedTraits.length < 10 && (() => {
+                  const filteredTraits = CHARACTER_TRAITS.filter(tr => 
+                    tr.toLowerCase().includes(traitQuery.toLowerCase()) && !selectedTraits.includes(tr)
+                  );
+                  const customTrait = (traitQuery.trim() && !selectedTraits.includes(traitQuery.trim()) && !filteredTraits.some(t => t.toLowerCase() === traitQuery.trim().toLowerCase()))
+                    ? traitQuery.trim()
+                    : null;
+                  const allTraitOptions = customTrait 
+                    ? [{ isCustom: true, label: customTrait }, ...filteredTraits.map(t => ({ isCustom: false, label: t }))] 
+                    : filteredTraits.map(t => ({ isCustom: false, label: t }));
+
+                  const handleSelectTrait = (traitText) => {
+                    if (traitText && !selectedTraits.includes(traitText) && selectedTraits.length < 10) {
+                      setSelectedTraits(prev => [...prev, traitText]);
+                      setTraitQuery('');
+                      setHighlightedTraitIndex(-1);
+                      setShowTraitDropdown(false);
+                      setIsDirty(true);
+                    }
+                  };
+
+                  return (
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        value={traitQuery}
+                        onChange={(e) => {
+                          setTraitQuery(e.target.value);
+                          setShowTraitDropdown(true);
+                          setHighlightedTraitIndex(-1);
+                        }}
+                        onFocus={() => {
+                          setShowTraitDropdown(true);
+                          setHighlightedTraitIndex(-1);
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => setShowTraitDropdown(false), 200);
+                        }}
+                        onKeyDown={(e) => {
+                          if (!showTraitDropdown && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                            setShowTraitDropdown(true);
+                            setHighlightedTraitIndex(0);
+                            e.preventDefault();
+                            return;
                           }
-                        }
-                      }}
-                      placeholder="Escribe o selecciona un rasgo..."
-                      style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
-                    />
-                    {showTraitDropdown && (
-                      <div style={{
-                        position: 'absolute',
-                        top: '100%',
-                        left: 0,
-                        right: 0,
-                        background: '#14141f',
-                        border: '1px solid rgba(255,255,255,0.12)',
-                        borderRadius: '6px',
-                        zIndex: 100,
-                        maxHeight: '150px',
-                        overflowY: 'auto',
-                        marginTop: '4px',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-                      }}>
-                        {CHARACTER_TRAITS.filter(tr => 
-                          tr.toLowerCase().includes(traitQuery.toLowerCase()) && !selectedTraits.includes(tr)
-                        ).map(tr => (
-                          <div
-                            key={tr}
-                            onMouseDown={() => {
-                              setSelectedTraits(prev => [...prev, tr]);
-                              setTraitQuery('');
-                              setShowTraitDropdown(false);
-                              setIsDirty(true);
-                            }}
-                            style={{
-                              padding: '8px 10px',
-                              color: '#fff',
-                              cursor: 'pointer',
-                              fontSize: '0.85rem',
-                              borderBottom: '1px solid rgba(255,255,255,0.04)',
-                              background: 'transparent',
-                              transition: 'background 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
-                            onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                          >
-                            {tr}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                          if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            if (allTraitOptions.length > 0) {
+                              setHighlightedTraitIndex(prev => (prev + 1) % allTraitOptions.length);
+                            }
+                          } else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            if (allTraitOptions.length > 0) {
+                              setHighlightedTraitIndex(prev => (prev - 1 + allTraitOptions.length) % allTraitOptions.length);
+                            }
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (showTraitDropdown && highlightedTraitIndex >= 0 && highlightedTraitIndex < allTraitOptions.length) {
+                              handleSelectTrait(allTraitOptions[highlightedTraitIndex].label);
+                            } else if (traitQuery.trim()) {
+                              handleSelectTrait(traitQuery.trim());
+                            }
+                          } else if (e.key === 'Escape') {
+                            setShowTraitDropdown(false);
+                          }
+                        }}
+                        placeholder="Escribe o selecciona un rasgo..."
+                        style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
+                      />
+                      {showTraitDropdown && allTraitOptions.length > 0 && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          background: '#14141f',
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          borderRadius: '6px',
+                          zIndex: 100,
+                          maxHeight: '160px',
+                          overflowY: 'auto',
+                          marginTop: '4px',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                        }}>
+                          {allTraitOptions.map((opt, idx) => (
+                            <div
+                              key={opt.label}
+                              onMouseDown={() => handleSelectTrait(opt.label)}
+                              onMouseEnter={() => setHighlightedTraitIndex(idx)}
+                              style={{
+                                padding: '8px 10px',
+                                color: idx === highlightedTraitIndex ? '#ffd36b' : '#fff',
+                                background: idx === highlightedTraitIndex ? 'rgba(255, 211, 107, 0.15)' : 'transparent',
+                                cursor: 'pointer',
+                                fontSize: '0.85rem',
+                                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                                transition: 'background 0.15s',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {opt.isCustom && (
+                                <span style={{ fontSize: '0.7rem', color: '#ffd36b', background: 'rgba(255,211,107,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                                  + Personalizado
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1183,9 +1771,75 @@ export default function CreateModal({
         <ImageCropperModal
           isOpen={isCropperOpen}
           imageSrc={cropSrc}
-          aspectRatio={itemType === 'Personaje' ? 3 / 4 : 16 / 9}
-          onClose={() => setIsCropperOpen(false)}
-          onCropComplete={(croppedImage) => handleFieldChange(setCover, croppedImage)}
+          aspectRatio={(
+            cropTarget.includes('character') || (cropTarget === 'nested' && nestedCardType === 'Personaje') || (cropTarget === 'main' && itemType === 'Personaje')
+              ? 3 / 4 
+              : 16 / 9
+          )}
+          onClose={() => {
+            setIsCropperOpen(false);
+            setEditingImageId(null);
+            setNestedEditingImageId(null);
+          }}
+          onCropComplete={(croppedImage) => {
+            if (cropTarget === 'character_new') {
+              const newImg = {
+                id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                url: croppedImage,
+                label: newImageLabel.trim() || (characterImages.length === 0 ? 'Normal / Principal' : `Variante ${characterImages.length + 1}`),
+                isDefault: characterImages.length === 0
+              };
+              setCharacterImages(prev => {
+                const next = [...prev, newImg];
+                if (next.length === 1) setCover(croppedImage);
+                return next;
+              });
+              setNewImageLabel('');
+              setNewImageUrl('');
+              setIsDirty(true);
+            } else if (cropTarget === 'character_edit') {
+              setCharacterImages(prev => prev.map(img => img.id === editingImageId ? { ...img, url: croppedImage } : img));
+              const edited = characterImages.find(img => img.id === editingImageId);
+              if (edited?.isDefault) setCover(croppedImage);
+              setEditingImageId(null);
+              setIsDirty(true);
+            } else if (cropTarget === 'nested_character_new') {
+              const newImg = {
+                id: `img-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                url: croppedImage,
+                label: newNestedImageLabel.trim() || (nestedCharacterImages.length === 0 ? 'Normal / Principal' : `Variante ${nestedCharacterImages.length + 1}`),
+                isDefault: nestedCharacterImages.length === 0
+              };
+              setNestedCharacterImages(prev => {
+                const next = [...prev, newImg];
+                if (next.length === 1) setNestedCardCover(croppedImage);
+                return next;
+              });
+              setNewNestedImageLabel('');
+              setNewNestedImageUrl('');
+              setIsDirty(true);
+            } else if (cropTarget === 'nested_character_edit') {
+              setNestedCharacterImages(prev => prev.map(img => img.id === nestedEditingImageId ? { ...img, url: croppedImage } : img));
+              const edited = nestedCharacterImages.find(img => img.id === nestedEditingImageId);
+              if (edited?.isDefault) setNestedCardCover(croppedImage);
+              setNestedEditingImageId(null);
+              setIsDirty(true);
+            } else if (cropTarget === 'nested' || cropTarget === 'nested_single') {
+              setNestedCardCover(croppedImage);
+              setIsDirty(true);
+            } else {
+              handleFieldChange(setCover, croppedImage);
+            }
+          }}
+        />
+
+        {/* Modal de Recorte y Etiquetado por Lotes (Batch Cropper) */}
+        <BatchCropperModal
+          isOpen={isBatchCropperOpen}
+          items={batchCropItems}
+          aspectRatio={3 / 4}
+          onClose={() => setIsBatchCropperOpen(false)}
+          onSaveBatch={handleSaveBatchCropped}
         />
 
         {/* Sub-modal Flotante para Crear Tarjeta In-Situ (FictionLab Style) */}
@@ -1204,7 +1858,7 @@ export default function CreateModal({
               padding: '24px',
               borderRadius: '16px',
               border: '1px solid rgba(255, 255, 255, 0.12)',
-              maxWidth: '500px',
+              maxWidth: '520px',
               width: '90%',
               maxHeight: '85vh',
               overflowY: 'auto',
@@ -1232,17 +1886,310 @@ export default function CreateModal({
                 Crear Nuevo {nestedCardType} (In-Situ)
               </h4>
 
-              {/* Portada URL */}
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '6px' }}>Portada URL</label>
-                <input
-                  type="text"
-                  value={nestedCardCover}
-                  onChange={(e) => setNestedCardCover(e.target.value)}
-                  placeholder="https://ejemplo.com/imagen.jpg"
-                  style={{ width: '100%', padding: '8px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', fontSize: '0.82rem' }}
-                />
-              </div>
+              {/* Portada / Galería de Expresiones In-Situ */}
+              {nestedCardType === 'Personaje' ? (
+                <div style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
+                    <FontAwesomeIcon icon={faImage} /> Imágenes y Expresiones del Personaje ({nestedCharacterImages.length})
+                  </label>
+                  <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', display: 'block', marginBottom: '10px' }}>
+                    Añade retratos con identificadores (ej: Normal, Alegre, Enfadado, Con armadura).
+                  </span>
+
+                  {/* Lista de Imágenes Existentes */}
+                  {nestedCharacterImages.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', marginBottom: '12px' }}>
+                      {nestedCharacterImages.map((img, idx) => (
+                        <div 
+                          key={img.id || idx}
+                          style={{
+                            background: img.isDefault ? 'rgba(255, 211, 107, 0.08)' : 'rgba(255,255,255,0.03)',
+                            border: img.isDefault ? '1.5px solid rgba(255, 211, 107, 0.5)' : '1px solid rgba(255,255,255,0.08)',
+                            borderRadius: '6px',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            position: 'relative'
+                          }}
+                        >
+                          {img.isDefault && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '4px',
+                              left: '4px',
+                              background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                              color: '#000',
+                              fontSize: '0.62rem',
+                              fontWeight: 'bold',
+                              padding: '1px 5px',
+                              borderRadius: '3px',
+                              zIndex: 3
+                            }}>
+                              Portada
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveNestedCharacterImage(img.id)}
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              right: '4px',
+                              background: 'rgba(0,0,0,0.65)',
+                              border: 'none',
+                              color: '#ff6b6b',
+                              width: '18px',
+                              height: '18px',
+                              borderRadius: '50%',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.75rem',
+                              fontWeight: 'bold',
+                              zIndex: 3
+                            }}
+                          >
+                            ×
+                          </button>
+
+                          <div 
+                            style={{
+                              height: '100px',
+                              backgroundImage: `url(${img.url})`,
+                              backgroundSize: 'cover',
+                              backgroundPosition: 'center',
+                              backgroundColor: '#0a0a12'
+                            }}
+                          />
+
+                          <div style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <input
+                              type="text"
+                              value={img.label || ''}
+                              onChange={(e) => handleUpdateNestedCharacterImageLabel(img.id, e.target.value)}
+                              placeholder="Ej: Alegre, Armadura..."
+                              style={{
+                                width: '100%',
+                                padding: '3px 5px',
+                                background: '#14141f',
+                                border: '1px solid rgba(255,255,255,0.12)',
+                                borderRadius: '4px',
+                                color: '#fff',
+                                fontSize: '0.7rem',
+                                boxSizing: 'border-box'
+                              }}
+                            />
+                            <div style={{ display: 'flex', gap: '3px', justifyContent: 'space-between' }}>
+                              {!img.isDefault && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetDefaultNestedCharacterImage(img.id)}
+                                  style={{
+                                    flex: 1,
+                                    background: 'rgba(255,255,255,0.05)',
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    color: '#ffd36b',
+                                    padding: '2px 4px',
+                                    borderRadius: '3px',
+                                    fontSize: '0.65rem',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Principal
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleReCropNestedCharacterImage(img)}
+                                style={{
+                                  background: 'rgba(255,255,255,0.05)',
+                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  color: '#eaeaea',
+                                  padding: '2px 5px',
+                                  borderRadius: '3px',
+                                  fontSize: '0.65rem',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <FontAwesomeIcon icon={faCrop} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Formulario Añadir Imagen In-Situ */}
+                  <div style={{ background: 'rgba(0,0,0,0.2)', padding: '8px 10px', borderRadius: '6px', border: '1px dashed rgba(255,211,107,0.25)' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+                      <input
+                        type="text"
+                        value={newNestedImageLabel}
+                        onChange={(e) => setNewNestedImageLabel(e.target.value)}
+                        placeholder="Emoción (ej: Alegre, Armadura)..."
+                        style={{ width: '100%', padding: '5px 7px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.74rem', boxSizing: 'border-box' }}
+                      />
+                      <div style={{ display: 'flex' }}>
+                        <input
+                          type="text"
+                          value={newNestedImageUrl}
+                          onChange={(e) => setNewNestedImageUrl(e.target.value)}
+                          placeholder="https://... o sube"
+                          style={{ flex: 1, padding: '5px 7px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px 0 0 4px', color: '#fff', fontSize: '0.74rem', boxSizing: 'border-box', borderRight: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          disabled={!newNestedImageUrl.trim()}
+                          onClick={() => {
+                            if (newNestedImageUrl.trim()) {
+                              setCropSrc(newNestedImageUrl.trim());
+                              setCropTarget('nested_character_new');
+                              setIsCropperOpen(true);
+                            }
+                          }}
+                          style={{
+                            background: newNestedImageUrl.trim() ? '#ffd36b' : 'rgba(255,255,255,0.05)',
+                            color: newNestedImageUrl.trim() ? '#000' : 'rgba(255,255,255,0.3)',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            borderRadius: '0 4px 4px 0',
+                            padding: '0 8px',
+                            cursor: newNestedImageUrl.trim() ? 'pointer' : 'not-allowed',
+                            fontSize: '0.72rem',
+                            fontWeight: 'bold'
+                          }}
+                        >
+                          Usar
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('nested-char-file-input')?.click()}
+                        style={{
+                          background: 'rgba(255, 211, 107, 0.15)',
+                          border: '1px solid rgba(255, 211, 107, 0.3)',
+                          color: '#ffd36b',
+                          padding: '4px 10px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '0.72rem',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <FontAwesomeIcon icon={faImages} /> Subir archivo(s) del PC
+                      </button>
+                      <input
+                        id="nested-char-file-input"
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const files = e.target.files;
+                          if (!files || files.length === 0) return;
+                          handleMultipleFilesSelected(files, 'nested');
+                          e.target.value = '';
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Portada estándar para otros tipos in-situ */
+                <div style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.8)', display: 'block', marginBottom: '8px', fontWeight: '600' }}>
+                    Imagen de Portada
+                  </label>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <div style={{
+                      width: '90px',
+                      height: '55px',
+                      borderRadius: '6px',
+                      background: nestedCardCover ? `url(${nestedCardCover}) center/cover no-repeat` : 'rgba(255,255,255,0.03)',
+                      border: '1px dashed rgba(255,255,255,0.18)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'rgba(255,255,255,0.4)',
+                      fontSize: '0.7rem',
+                      overflow: 'hidden',
+                      flexShrink: 0
+                    }}>
+                      {!nestedCardCover && <span>Sin foto</span>}
+                    </div>
+                    
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ display: 'flex' }}>
+                        <input
+                          type="text"
+                          value={nestedCardCover}
+                          onChange={(e) => setNestedCardCover(e.target.value)}
+                          placeholder="https://... o sube archivo"
+                          style={{
+                            flex: 1,
+                            padding: '7px 10px',
+                            background: '#1e1e2c',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            borderRadius: '6px 0 0 6px',
+                            borderRight: 'none',
+                            color: '#fff',
+                            boxSizing: 'border-box',
+                            fontSize: '0.8rem'
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById('nested-cover-file-input')?.click()}
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.08)',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            borderLeft: 'none',
+                            color: '#fff',
+                            padding: '0 12px',
+                            borderRadius: '0 6px 6px 0',
+                            cursor: 'pointer',
+                            fontSize: '0.78rem',
+                            fontWeight: '600',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          Seleccionar archivo
+                        </button>
+                        <input
+                          id="nested-cover-file-input"
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              if (typeof reader.result === 'string') {
+                                setCropSrc(reader.result);
+                                setCropTarget('nested_single');
+                                setIsCropperOpen(true);
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                            e.target.value = '';
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)' }}>
+                        Pega una URL o sube una imagen de tu ordenador con recorte.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Nombre */}
               <div style={{ marginBottom: '14px' }}>
@@ -1281,45 +2228,132 @@ export default function CreateModal({
               </div>
 
               {/* Rasgos de personaje (sólo si es Personaje) */}
-              {nestedCardType === 'Personaje' && (
-                <div style={{ marginBottom: '14px' }}>
-                  <label style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '6px' }}>Traits (Rasgos de Personalidad)</label>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
-                    {nestedCardTraits.length === 0 ? (
-                      <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>Sin rasgos aún.</span>
-                    ) : (
-                      nestedCardTraits.map(t => (
-                        <span key={t} style={{ background: 'rgba(255,211,107,0.15)', border: '1px solid rgba(255,211,107,0.3)', borderRadius: '12px', padding: '2px 8px', fontSize: '0.75rem', color: '#ffd36b', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          {t}
-                          <button type="button" onClick={() => setNestedCardTraits(prev => prev.filter(x => x !== t))} style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', padding: 0, fontWeight: 'bold' }}>×</button>
-                        </span>
-                      ))
-                    )}
+              {nestedCardType === 'Personaje' && (() => {
+                const filteredNestedTraits = CHARACTER_TRAITS.filter(tr => 
+                  tr.toLowerCase().includes(nestedTraitQuery.toLowerCase()) && !nestedCardTraits.includes(tr)
+                );
+                const customNestedTrait = (nestedTraitQuery.trim() && !nestedCardTraits.includes(nestedTraitQuery.trim()) && !filteredNestedTraits.some(t => t.toLowerCase() === nestedTraitQuery.trim().toLowerCase()))
+                  ? nestedTraitQuery.trim()
+                  : null;
+                const allNestedTraitOptions = customNestedTrait 
+                  ? [{ isCustom: true, label: customNestedTrait }, ...filteredNestedTraits.map(t => ({ isCustom: false, label: t }))] 
+                  : filteredNestedTraits.map(t => ({ isCustom: false, label: t }));
+
+                const handleSelectNestedTrait = (traitText) => {
+                  if (traitText && !nestedCardTraits.includes(traitText) && nestedCardTraits.length < 10) {
+                    setNestedCardTraits(prev => [...prev, traitText]);
+                    setNestedTraitQuery('');
+                    setHighlightedNestedTraitIndex(-1);
+                    setShowNestedTraitDropdown(false);
+                  }
+                };
+
+                return (
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '6px' }}>Traits (Rasgos de Personalidad - Máx. 10)</label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+                      {nestedCardTraits.length === 0 ? (
+                        <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>Sin rasgos aún.</span>
+                      ) : (
+                        nestedCardTraits.map(t => (
+                          <span key={t} style={{ background: 'rgba(255,211,107,0.15)', border: '1px solid rgba(255,211,107,0.3)', borderRadius: '12px', padding: '2px 8px', fontSize: '0.75rem', color: '#ffd36b', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            {t}
+                            <button type="button" onClick={() => setNestedCardTraits(prev => prev.filter(x => x !== t))} style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', padding: 0, fontWeight: 'bold' }}>×</button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        value={nestedTraitQuery}
+                        onChange={(e) => {
+                          setNestedTraitQuery(e.target.value);
+                          setShowNestedTraitDropdown(true);
+                          setHighlightedNestedTraitIndex(-1);
+                        }}
+                        onFocus={() => {
+                          setShowNestedTraitDropdown(true);
+                          setHighlightedNestedTraitIndex(-1);
+                        }}
+                        onBlur={() => setTimeout(() => setShowNestedTraitDropdown(false), 200)}
+                        onKeyDown={(e) => {
+                          if (!showNestedTraitDropdown && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                            setShowNestedTraitDropdown(true);
+                            setHighlightedNestedTraitIndex(0);
+                            e.preventDefault();
+                            return;
+                          }
+                          if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            if (allNestedTraitOptions.length > 0) {
+                              setHighlightedNestedTraitIndex(prev => (prev + 1) % allNestedTraitOptions.length);
+                            }
+                          } else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            if (allNestedTraitOptions.length > 0) {
+                              setHighlightedNestedTraitIndex(prev => (prev - 1 + allNestedTraitOptions.length) % allNestedTraitOptions.length);
+                            }
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (showNestedTraitDropdown && highlightedNestedTraitIndex >= 0 && highlightedNestedTraitIndex < allNestedTraitOptions.length) {
+                              handleSelectNestedTrait(allNestedTraitOptions[highlightedNestedTraitIndex].label);
+                            } else if (nestedTraitQuery.trim()) {
+                              handleSelectNestedTrait(nestedTraitQuery.trim());
+                            }
+                          } else if (e.key === 'Escape') {
+                            setShowNestedTraitDropdown(false);
+                          }
+                        }}
+                        placeholder="Buscar o añadir rasgo..."
+                        style={{ width: '100%', padding: '8px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', fontSize: '0.82rem' }}
+                      />
+                      {showNestedTraitDropdown && allNestedTraitOptions.length > 0 && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          background: '#14141f',
+                          border: '1px solid rgba(255,255,255,0.12)',
+                          borderRadius: '6px',
+                          zIndex: 1500,
+                          maxHeight: '130px',
+                          overflowY: 'auto',
+                          marginTop: '4px',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                        }}>
+                          {allNestedTraitOptions.map((opt, idx) => (
+                            <div
+                              key={opt.label}
+                              onMouseDown={() => handleSelectNestedTrait(opt.label)}
+                              onMouseEnter={() => setHighlightedNestedTraitIndex(idx)}
+                              style={{
+                                padding: '8px 10px',
+                                color: idx === highlightedNestedTraitIndex ? '#ffd36b' : '#fff',
+                                background: idx === highlightedNestedTraitIndex ? 'rgba(255, 211, 107, 0.15)' : 'transparent',
+                                cursor: 'pointer',
+                                fontSize: '0.82rem',
+                                borderBottom: '1px solid rgba(255,255,255,0.04)',
+                                transition: 'background 0.15s',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {opt.isCustom && (
+                                <span style={{ fontSize: '0.7rem', color: '#ffd36b', background: 'rgba(255,211,107,0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                                  + Personalizado
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      value={nestedTraitQuery}
-                      onChange={(e) => {
-                        setNestedTraitQuery(e.target.value);
-                        setShowNestedTraitDropdown(true);
-                      }}
-                      onFocus={() => setShowNestedTraitDropdown(true)}
-                      onBlur={() => setTimeout(() => setShowNestedTraitDropdown(false), 200)}
-                      placeholder="Buscar o añadir rasgo..."
-                      style={{ width: '100%', padding: '8px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', fontSize: '0.82rem' }}
-                    />
-                    {showNestedTraitDropdown && (
-                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#14141f', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', zIndex: 1500, maxHeight: '120px', overflowY: 'auto', marginTop: '4px' }}>
-                        {CHARACTER_TRAITS.filter(tr => tr.toLowerCase().includes(nestedTraitQuery.toLowerCase()) && !nestedCardTraits.includes(tr)).map(tr => (
-                          <div key={tr} onMouseDown={() => { setNestedCardTraits(prev => [...prev, tr]); setNestedTraitQuery(''); setShowNestedTraitDropdown(false); }} style={{ padding: '8px', color: '#fff', cursor: 'pointer', fontSize: '0.82rem' }}>
-                            {tr}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Botones */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '20px' }}>

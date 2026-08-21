@@ -223,7 +223,7 @@ function App() {
       if (stored) {
         const parsed = JSON.parse(stored);
         return {
-          preferredModel: parsed.preferredModel || 'deepseek-r1-distill-qwen-7b',
+          preferredModel: parsed.preferredModel || 'Precog-Magnum-31B-i1-GGUF',
           preferredLanguage: parsed.preferredLanguage || 'Español',
           responseLength: parsed.responseLength || 1000,
           lmStudioUrl: parsed.lmStudioUrl || 'http://localhost:1234'
@@ -233,7 +233,7 @@ function App() {
       console.warn('[App Init]: Failed to load chatSettings from localStorage:', e);
     }
     return {
-      preferredModel: 'deepseek-r1-distill-qwen-7b',
+      preferredModel: 'Precog-Magnum-31B-i1-GGUF',
       preferredLanguage: 'Español',
       responseLength: 1000,
       lmStudioUrl: 'http://localhost:1234'
@@ -343,6 +343,7 @@ function App() {
             folderHandle={folderHandle}
             appData={appData}
             onUpdateAppData={updateAppData}
+            chatSettings={chatSettings}
           />
         )}
 

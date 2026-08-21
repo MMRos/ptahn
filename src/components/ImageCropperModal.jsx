@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCrop, faCheck, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { faCrop, faCheck, faTimes, faSearchPlus, faSearchMinus, faCompress, faExpand } from '@fortawesome/free-solid-svg-icons';
 import './scenario.css';
 
 export default function ImageCropperModal({ 
@@ -14,11 +14,57 @@ export default function ImageCropperModal({
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [imgNatural, setImgNatural] = useState({ width: 0, height: 0 });
+  const [baseFit, setBaseFit] = useState({ scale: 1, width: 0, height: 0, initX: 0, initY: 0 });
+  
   const imgRef = useRef(null);
+  const viewportRef = useRef(null);
+
+  // Determinar dimensiones del viewport de recorte según la relación de aspecto
+  const viewportWidth = aspectRatio >= 1 ? 480 : Math.round(360 * aspectRatio);
+  const viewportHeight = aspectRatio >= 1 ? Math.round(480 / aspectRatio) : 360;
+
+  // Inicializar y centrar la imagen completa dentro del viewport cuando se carga
+  const resetToFit = useCallback((natW, natH) => {
+    const w = natW || imgNatural.width;
+    const h = natH || imgNatural.height;
+    if (!w || !h) return;
+
+    const fitScale = Math.min(viewportWidth / w, viewportHeight / h);
+    const baseW = w * fitScale;
+    const baseH = h * fitScale;
+    const initX = (viewportWidth - baseW) / 2;
+    const initY = (viewportHeight - baseH) / 2;
+
+    setBaseFit({
+      scale: fitScale,
+      width: baseW,
+      height: baseH,
+      initX,
+      initY
+    });
+    setZoom(1);
+    setPosition({ x: initX, y: initY });
+  }, [viewportWidth, viewportHeight, imgNatural.width, imgNatural.height]);
+
+  const handleImageLoad = (e) => {
+    const natW = e.target.naturalWidth || 800;
+    const natH = e.target.naturalHeight || 600;
+    setImgNatural({ width: natW, height: natH });
+    resetToFit(natW, natH);
+  };
+
+  useEffect(() => {
+    if (isOpen && imageSrc) {
+      setZoom(1);
+      setPosition({ x: 0, y: 0 });
+    }
+  }, [isOpen, imageSrc, aspectRatio]);
 
   if (!isOpen || !imageSrc) return null;
 
   const handleMouseDown = (e) => {
+    e.preventDefault();
     setIsDragging(true);
     setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
   };
@@ -35,9 +81,51 @@ export default function ImageCropperModal({
     setIsDragging(false);
   };
 
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      setIsDragging(true);
+      setDragStart({ x: touch.clientX - position.x, y: touch.clientY - position.y });
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (!isDragging || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    setPosition({
+      x: touch.clientX - dragStart.x,
+      y: touch.clientY - dragStart.y
+    });
+  };
+
+  // Zoom con rueda de ratón centrado
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.1 : -0.1;
+    setZoom(prev => {
+      const nextZoom = Math.min(Math.max(Number((prev + delta).toFixed(2)), 0.8), 5.0);
+      return nextZoom;
+    });
+  };
+
+  // Botón para llenar todo el marco (cover zoom)
+  const handleFillFrame = () => {
+    if (!baseFit.width || !baseFit.height) return;
+    const fillZoom = Math.max(viewportWidth / baseFit.width, viewportHeight / baseFit.height);
+    const newZoom = Number(fillZoom.toFixed(2));
+    const currentW = baseFit.width * newZoom;
+    const currentH = baseFit.height * newZoom;
+    setZoom(newZoom);
+    setPosition({
+      x: (viewportWidth - currentW) / 2,
+      y: (viewportHeight - currentH) / 2
+    });
+  };
+
   const handleCrop = () => {
     const canvas = document.createElement('canvas');
-    const targetW = aspectRatio === (16 / 9) ? 800 : 600;
+    // Salida HD nítida
+    const targetW = aspectRatio < 1 ? 600 : 960;
     const targetH = Math.round(targetW / aspectRatio);
     canvas.width = targetW;
     canvas.height = targetH;
@@ -47,33 +135,30 @@ export default function ImageCropperModal({
 
     if (img && ctx) {
       try {
-        ctx.fillStyle = '#0d0e16';
+        ctx.fillStyle = '#0a0a12';
         ctx.fillRect(0, 0, targetW, targetH);
 
-        // Calcular relación de escala entre la vista previa (300px alto) y el canvas final
-        const viewportH = 300;
-        const viewportW = viewportH * aspectRatio;
-        const scaleFactor = targetW / viewportW;
-
-        // Calcular ancho/alto renderizado de la imagen en el viewport
-        const displayedWidth = img.clientWidth || (img.naturalWidth * zoom);
-        const displayedHeight = img.clientHeight || (img.naturalHeight * zoom);
+        const scaleFactor = targetW / viewportWidth;
+        const currentRenderWidth = baseFit.width * zoom;
+        const currentRenderHeight = baseFit.height * zoom;
 
         ctx.save();
-        // Dibujar imagen escalada a la resolución HD final con la posición exacta elegida
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
         ctx.drawImage(
           img,
           position.x * scaleFactor,
           position.y * scaleFactor,
-          displayedWidth * scaleFactor * zoom,
-          displayedHeight * scaleFactor * zoom
+          currentRenderWidth * scaleFactor,
+          currentRenderHeight * scaleFactor
         );
         ctx.restore();
 
-        const croppedUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const croppedUrl = canvas.toDataURL('image/jpeg', 0.94);
         onCropComplete(croppedUrl);
       } catch (err) {
-        console.warn('Canvas export failed due to cross-origin resource limitations. Falling back to raw image.', err);
+        console.warn('Canvas export fallback:', err);
         onCropComplete(imageSrc);
       }
     } else {
@@ -82,66 +167,187 @@ export default function ImageCropperModal({
     onClose();
   };
 
+  const renderedWidth = baseFit.width ? baseFit.width * zoom : 'auto';
+  const renderedHeight = baseFit.height ? baseFit.height * zoom : 'auto';
+
   return (
-    <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 1300 }}>
-      <div className="char-modal" style={{ width: '580px', background: '#14141f', padding: '20px' }}>
-        <button className="char-close" onClick={onClose}><FontAwesomeIcon icon={faTimes} /></button>
+    <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 1600 }}>
+      <div className="char-modal" style={{ maxWidth: '580px', width: '92%', background: '#14141f', padding: '22px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.12)' }}>
+        
+        {/* Encabezado */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <h4 style={{ color: '#ffd36b', margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FontAwesomeIcon icon={faCrop} />
+            Recortar y Encuadrar Imagen {aspectRatio < 1 ? '(Vertical 3:4)' : '(Panorámica 16:9)'}
+          </h4>
+          <button 
+            onClick={onClose} 
+            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}
+          >
+            <FontAwesomeIcon icon={faTimes} />
+          </button>
+        </div>
 
-        <h4 style={{ color: '#fff', margin: '0 0 12px 0' }}>
-          <FontAwesomeIcon icon={faCrop} style={{ color: '#ffd36b', marginRight: '8px' }} />
-          Recortar e Inspeccionar Portada
-        </h4>
+        <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.6)', margin: '0 0 14px 0' }}>
+          Arrastra para mover la imagen o amplíala para encuadrar la zona que desees. La imagen inicia completa.
+        </p>
 
+        {/* Viewport del Recorte */}
         <div 
+          ref={viewportRef}
           className="cropper-viewport"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleMouseUp}
+          onWheel={handleWheel}
           style={{
-            width: aspectRatio < 1 ? `${300 * aspectRatio}px` : '100%',
-            height: '300px',
+            width: `${viewportWidth}px`,
+            height: `${viewportHeight}px`,
+            maxWidth: '100%',
             margin: '0 auto',
-            background: '#000',
+            background: '#0a0a12',
             position: 'relative',
             overflow: 'hidden',
             borderRadius: '10px',
             cursor: isDragging ? 'grabbing' : 'grab',
-            border: '2px dashed rgba(255,211,107,0.4)'
+            border: '2px dashed rgba(255, 211, 107, 0.45)',
+            boxShadow: '0 8px 30px rgba(0,0,0,0.8)',
+            display: 'flex',
+            userSelect: 'none'
           }}
         >
           <img 
             ref={imgRef}
             src={imageSrc} 
             alt="Preview recortes"
+            onLoad={handleImageLoad}
+            draggable={false}
             style={{
               position: 'absolute',
-              transformOrigin: 'top left',
-              transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})`,
+              left: `${position.x}px`,
+              top: `${position.y}px`,
+              width: typeof renderedWidth === 'number' ? `${renderedWidth}px` : renderedWidth,
+              height: typeof renderedHeight === 'number' ? `${renderedHeight}px` : renderedHeight,
               maxWidth: 'none',
-              transition: isDragging ? 'none' : 'transform 0.1s ease'
+              maxHeight: 'none',
+              pointerEvents: 'none',
+              transition: isDragging ? 'none' : 'width 0.05s ease, height 0.05s ease'
             }}
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '16px' }}>
-          <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)' }}>Zoom:</span>
-          <input 
-            type="range" 
-            min="0.5" 
-            max="3" 
-            step="0.1" 
-            value={zoom} 
-            onChange={(e) => setZoom(Number(e.target.value))}
-            style={{ flex: 1 }}
-          />
+        {/* Controles de Zoom y Ajuste Rápido */}
+        <div style={{ marginTop: '16px', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <button 
+              type="button" 
+              onClick={() => setZoom(prev => Math.max(Number((prev - 0.1).toFixed(2)), 0.8))} 
+              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
+              title="Reducir zoom"
+            >
+              <FontAwesomeIcon icon={faSearchMinus} />
+            </button>
+            
+            <input 
+              type="range" 
+              min="0.8" 
+              max="4.0" 
+              step="0.05" 
+              value={zoom} 
+              onChange={(e) => setZoom(Number(e.target.value))}
+              style={{ flex: 1, accentColor: '#ffd36b' }}
+            />
+            
+            <button 
+              type="button" 
+              onClick={() => setZoom(prev => Math.min(Number((prev + 0.1).toFixed(2)), 4.0))} 
+              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer' }}
+              title="Aumentar zoom"
+            >
+              <FontAwesomeIcon icon={faSearchPlus} />
+            </button>
+            
+            <span style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: 'bold', minWidth: '45px', textAlign: 'right' }}>
+              {Math.round(zoom * 100)}%
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => resetToFit()}
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#eaeaea',
+                padding: '4px 10px',
+                borderRadius: '5px',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <FontAwesomeIcon icon={faCompress} /> Ver completa (100% Fit)
+            </button>
+            <button
+              type="button"
+              onClick={handleFillFrame}
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#eaeaea',
+                padding: '4px 10px',
+                borderRadius: '5px',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <FontAwesomeIcon icon={faExpand} /> Llenar marco
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer' }}>
+        {/* Botones de acción */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
+          <button 
+            onClick={onClose} 
+            style={{ 
+              background: 'transparent', 
+              border: '1px solid rgba(255,255,255,0.2)', 
+              color: '#fff', 
+              padding: '8px 16px', 
+              borderRadius: '6px', 
+              cursor: 'pointer',
+              fontSize: '0.85rem'
+            }}
+          >
             Cancelar
           </button>
-          <button onClick={handleCrop} style={{ background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)', border: 'none', color: '#000', fontWeight: '700', padding: '8px 18px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button 
+            onClick={handleCrop} 
+            style={{ 
+              background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)', 
+              border: 'none', 
+              color: '#000', 
+              fontWeight: '700', 
+              padding: '8px 20px', 
+              borderRadius: '6px', 
+              cursor: 'pointer', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px',
+              fontSize: '0.85rem'
+            }}
+          >
             <FontAwesomeIcon icon={faCheck} /> Aplicar Recorte
           </button>
         </div>

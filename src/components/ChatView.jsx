@@ -36,7 +36,7 @@ function FormattedMessageText({ text }) {
   );
 }
 
-export default function ChatView({ chat, folderHandle, onBranchChat, appData, onUpdateAppData }) {
+export default function ChatView({ chat, folderHandle, onBranchChat, appData, onUpdateAppData, chatSettings = {} }) {
   const [messages, setMessages] = useState(chat?.messages || []);
   const [inputMsg, setInputMsg] = useState('');
   const [editingIndex, setEditingIndex] = useState(null);
@@ -240,7 +240,9 @@ ${memoryContext || 'No hay memorias previas.'}
       try {
         const newSummary = await sendContextSummarizationTask({
           messages: finalMsgs,
-          currentMemory: chat.memoryCards || []
+          currentMemory: chat.memoryCards || [],
+          modelId: chatSettings?.preferredModel,
+          baseUrl: chatSettings?.lmStudioUrl
         });
         if (newSummary && typeof newSummary === 'string' && newSummary.trim()) {
           console.log('[Context Summary Task]: Nueva memoria generada:', newSummary);
@@ -286,7 +288,9 @@ ${memoryContext || 'No hay memorias previas.'}
       const res = await sendChatMessage({
         messages: nextMsgs,
         systemInstruction: systemPrompt,
-        contextDocuments: chat.contextDocuments || []
+        contextDocuments: chat.contextDocuments || [],
+        modelId: chatSettings?.preferredModel,
+        baseUrl: chatSettings?.lmStudioUrl
       });
 
       const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };
@@ -317,7 +321,9 @@ ${memoryContext || 'No hay memorias previas.'}
       const res = await sendChatMessage({
         messages: messages,
         systemInstruction: systemPrompt,
-        contextDocuments: chat.contextDocuments || []
+        contextDocuments: chat.contextDocuments || [],
+        modelId: chatSettings?.preferredModel,
+        baseUrl: chatSettings?.lmStudioUrl
       });
 
       const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };

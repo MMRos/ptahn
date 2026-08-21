@@ -15,6 +15,7 @@ import {
   faTerminal,
   faUserAstronaut
 } from '@fortawesome/free-solid-svg-icons';
+import { getAvailableModels } from '../utils/lmstudio';
 import './topbar.css';
 
 export default function TopBar({ 
@@ -42,6 +43,7 @@ export default function TopBar({
   const [showPromptInput, setShowPromptInput] = useState(false);
   const [showMemoryInput, setShowMemoryInput] = useState(false);
   const [newMemoryText, setNewMemoryText] = useState('');
+  const [availableLmModels, setAvailableLmModels] = useState([]);
   const dropdownRef = useRef(null);
 
   const toggleSettings = () => setSettingsOpen(prev => !prev);
@@ -56,10 +58,23 @@ export default function TopBar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Cargar modelos reales conectados desde LM Studio al abrir ajustes o cambiar URL
+  useEffect(() => {
+    if (settingsOpen) {
+      getAvailableModels(chatSettings.lmStudioUrl)
+        .then(models => {
+          if (Array.isArray(models) && models.length > 0) {
+            setAvailableLmModels(models);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [settingsOpen, chatSettings.lmStudioUrl]);
+
   const isChatView = currentView === 'chat';
 
   // Valores de los ajustes de chat
-  const preferredModel = chatSettings.preferredModel || 'deepseek-r1-distill-qwen-7b';
+  const preferredModel = chatSettings.preferredModel || 'Precog-Magnum-31B-i1-GGUF';
   const preferredLanguage = chatSettings.preferredLanguage || 'Español';
   const responseLength = chatSettings.responseLength || 1000;
 
@@ -151,14 +166,28 @@ export default function TopBar({
 
             {/* Modelo Favorito */}
             <div className="settings-group">
-              <label><FontAwesomeIcon icon={faSlidersH} /> Modelo Favorito</label>
+              <label><FontAwesomeIcon icon={faSlidersH} /> Modelo de Narración & Rol</label>
               <select 
                 value={preferredModel}
                 onChange={(e) => onUpdateChatSettings({ ...chatSettings, preferredModel: e.target.value })}
               >
-                <option value="deepseek-r1-distill-qwen-7b">DeepSeek R1 Distill Qwen 7B</option>
-                <option value="qwen2.5-coder-7b-instruct">Qwen 2.5 7B Instruct</option>
-                <option value="llama-3-8b-instruct">Llama 3 8B Instruct</option>
+                {availableLmModels.length > 0 && (
+                  <optgroup label="🟢 Detectados en tu LM Studio">
+                    {availableLmModels.map(m => (
+                      <option key={m.id} value={m.id}>{m.id}</option>
+                    ))}
+                  </optgroup>
+                )}
+                
+                <optgroup label="👑 Modelos Sin Censura (Tus Descargas & Recomendados)">
+                  <option value="Precog-Magnum-31B-i1-GGUF">Precog-Magnum 31B I1 (mradermacher) - Máxima Narrativa</option>
+                  <option value="Magnum_Lyra_Darkness_12B-Heretic-GGUF">Magnum Lyra Darkness 12B Heretic (mradermacher) - Rol Oscuro / Rápido</option>
+                  <option value="Magnum-v4-12B-GGUF">Magnum v4 12B (anthracite-org) - Narrativa Equilibrada</option>
+                  <option value="Mistral-Nemo-Instruct-2407-GGUF">Mistral Nemo Instruct 2407 (pbhappliedsystems) - Excelente en Español</option>
+                  <option value="mistral-moe-4x7b-dark-multiverse">Mistral MoE 4x7B Dark Multiverse (DavidAU)</option>
+                  <option value="llama-3.2-8x3b-moe-dark">Llama 3.2 8x3B MoE Dark (DavidAU)</option>
+                  <option value="qwen3.5-9b-uncensored">Qwen 3.5 9B Uncensored (HauhauCS)</option>
+                </optgroup>
               </select>
             </div>
 
