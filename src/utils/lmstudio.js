@@ -530,7 +530,8 @@ export async function sendChatMessage({
   contextDocuments = [],
   modelId = 'Precog-Magnum-31B-i1-GGUF',
   temperature = 0.85,
-  baseUrl
+  baseUrl,
+  onChunk = null
 }) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
@@ -577,11 +578,13 @@ export async function sendChatMessage({
     // Asegurar que el modelo de narración esté cargado en GPU
     await loadModel(narrationId, finalBaseUrl);
 
+    const isStream = typeof onChunk === 'function';
+
     const requestBody = JSON.stringify({
       model: narrationId,
       messages: formattedMessages,
       temperature: temperature,
-      stream: false
+      stream: isStream
     });
 
     const response = await apiFetch('/v1/chat/completions', {
@@ -595,11 +598,45 @@ export async function sendChatMessage({
       throw new Error(`Error en LM Studio API: ${errText || response.statusText}`);
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || 'No se recibió respuesta del modelo.';
+    let fullContent = '';
+
+    if (isStream && response.body && response.body.getReader) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(dataStr);
+            const delta = parsed.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              fullContent += delta;
+              onChunk(fullContent, delta);
+            }
+          } catch (e) {
+            // Fragmento JSON parcial
+          }
+        }
+      }
+    } else {
+      const data = await response.json();
+      const messageObj = data.choices?.[0]?.message;
+      fullContent = messageObj?.content || messageObj?.reasoning_content || 'No se recibió respuesta del modelo.';
+    }
     
     return {
-      text: content,
+      text: fullContent,
       usedContextDocs: weightedDocs.map(d => d.title)
     };
   } catch (error) {

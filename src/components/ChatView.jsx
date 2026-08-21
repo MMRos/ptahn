@@ -15,7 +15,13 @@ import {
   faRunning, 
   faBrain, 
   faHighlighter,
-  faTrashAlt
+  faTrashAlt,
+  faBookOpen,
+  faMagic,
+  faSave,
+  faEye,
+  faPlus,
+  faExternalLinkAlt
 } from '@fortawesome/free-solid-svg-icons';
 import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask } from '../utils/lmstudio';
 import { saveChatToFolder } from '../utils/storage';
@@ -24,7 +30,60 @@ import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
 import './chats.css';
 
-function FormattedMessageText({ text }) {
+function renderInlineFormattedText(rawText, onTagClick, appData) {
+  if (!rawText) return null;
+  // Regex para capturar resaltados ==...==, negritas **...**, pensamientos ~...~, o diálogos "..."
+  const innerRegex = /(==[^=\n]+==|\*\*[^*\n]+\*\*|~[^~\n]+~|"[^"\n]+")/g;
+  const innerParts = rawText.split(innerRegex);
+  return innerParts.map((sub, j) => {
+    if (!sub) return null;
+    if (sub.startsWith('==') && sub.endsWith('==') && sub.length >= 4) {
+      const tagContent = sub.slice(2, -2).trim();
+      const existing = (appData?.cards || []).find(c => (c.title || c.name || '').toLowerCase() === tagContent.toLowerCase()) ||
+                       (appData?.scenarios || []).find(s => (s.title || '').toLowerCase() === tagContent.toLowerCase());
+      return (
+        <mark 
+          key={j} 
+          className={`msg-highlight ${existing ? 'existing-card' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onTagClick) onTagClick(tagContent, existing);
+          }}
+          title={existing 
+            ? `📖 Entidad existente: ${existing.title || existing.name} (${existing.type || 'Escenario'}). Clic para inspeccionar.` 
+            : `✨ Término clave: "${tagContent}". Clic para inspeccionar o crear tarjeta en el compendio.`
+          }
+        >
+          <FontAwesomeIcon icon={existing ? faBookOpen : faHighlighter} className="msg-type-icon highlight-icon" />
+          {tagContent}
+        </mark>
+      );
+    }
+    if (sub.startsWith('**') && sub.endsWith('**') && sub.length >= 4) {
+      return <strong key={j} className="msg-bold">{sub.slice(2, -2)}</strong>;
+    }
+    if (sub.startsWith('~') && sub.endsWith('~') && sub.length >= 2) {
+      return (
+        <span key={j} className="msg-thought">
+          <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />
+          {sub.slice(1, -1)}
+        </span>
+      );
+    }
+    if (sub.startsWith('"') && sub.endsWith('"') && sub.length >= 2) {
+      return (
+        <span key={j} className="msg-dialogue">
+          <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
+          {sub}
+        </span>
+      );
+    }
+    return sub;
+  });
+}
+
+function FormattedMessageText({ text, onTagClick, appData }) {
+  const [showThinking, setShowThinking] = useState(false);
   if (!text) return null;
 
   // Extraer bloque de razonamiento / pensamiento <think>...</think> si el modelo lo incluye
@@ -41,71 +100,107 @@ function FormattedMessageText({ text }) {
     }
   }
 
-  const regex = /(".*?"|\*\*.*?\*\*|\*.*?\*|~.*?~|==.*?==)/g;
+  // Regex para bloques principales: asteriscos *...*, comillas "...", o resaltar ==...==
+  const regex = /(\*[^*]+\*|"[^"]+"|\*\*[^*]+\*\*|~[^~]+~|==[^=]+==)/g;
   const parts = cleanText.split(regex);
+
   return (
     <span>
       {thinkingContent && (
         <div className="msg-think-box" style={{
-          background: 'rgba(192, 132, 252, 0.08)',
-          borderLeft: '3px solid #c084fc',
-          padding: '6px 10px',
-          borderRadius: '4px',
-          marginBottom: '8px',
-          fontSize: '0.8rem',
-          color: 'rgba(255,255,255,0.7)',
-          fontStyle: 'italic'
+          background: 'rgba(192, 132, 252, 0.04)',
+          border: '1px solid rgba(192, 132, 252, 0.2)',
+          borderRadius: '6px',
+          marginBottom: '10px',
+          fontSize: '0.78rem',
+          overflow: 'hidden'
         }}>
-          <div style={{ fontWeight: 'bold', color: '#c084fc', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <FontAwesomeIcon icon={faBrain} /> Pensamiento del Narrador
+          <div 
+            onClick={() => setShowThinking(prev => !prev)}
+            style={{
+              cursor: 'pointer',
+              padding: '5px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              userSelect: 'none',
+              background: 'rgba(192, 132, 252, 0.08)',
+              color: '#c084fc'
+            }}
+            title="Clic para desplegar el razonamiento interno"
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}>
+              <FontAwesomeIcon icon={faBrain} /> Pensamiento del Narrador
+            </span>
+            <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>
+              {showThinking ? '▼ Ocultar' : '▶ Ver pensamiento'}
+            </span>
           </div>
-          <div>{thinkingContent}</div>
+          {showThinking && (
+            <div style={{ padding: '8px 12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.7)', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
+              {thinkingContent}
+            </div>
+          )}
         </div>
       )}
       {parts.map((part, i) => {
         if (!part) return null;
-        if (part.startsWith('"') && part.endsWith('"')) {
-          return (
-            <span key={i} className="msg-dialogue">
-              <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
-              {part}
-            </span>
-          );
-        }
-        if (part.startsWith('==') && part.endsWith('==')) {
-          return (
-            <mark key={i} className="msg-highlight">
-              <FontAwesomeIcon icon={faHighlighter} className="msg-type-icon highlight-icon" />
-              {part.slice(2, -2)}
-            </mark>
-          );
-        }
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="msg-bold">{part.slice(2, -2)}</strong>;
-        }
-        if (part.startsWith('~') && part.endsWith('~')) {
-          return (
-            <span key={i} className="msg-thought">
-              <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />
-              {part.slice(1, -1)}
-            </span>
-          );
-        }
-        if (part.startsWith('*') && part.endsWith('*')) {
+        if (part.startsWith('*') && part.endsWith('*') && part.length >= 2) {
           return (
             <em key={i} className="msg-action">
               <FontAwesomeIcon icon={faRunning} className="msg-type-icon action-icon" />
-              {part.slice(1, -1)}
+              {renderInlineFormattedText(part.slice(1, -1), onTagClick, appData)}
             </em>
           );
         }
-        return part;
+        if (part.startsWith('"') && part.endsWith('"') && part.length >= 2) {
+          return (
+            <span key={i} className="msg-dialogue">
+              <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
+              {renderInlineFormattedText(part, onTagClick, appData)}
+            </span>
+          );
+        }
+        if (part.startsWith('==') && part.endsWith('==') && part.length >= 4) {
+          const tagContent = part.slice(2, -2).trim();
+          const existing = (appData?.cards || []).find(c => (c.title || c.name || '').toLowerCase() === tagContent.toLowerCase()) ||
+                           (appData?.scenarios || []).find(s => (s.title || '').toLowerCase() === tagContent.toLowerCase());
+          return (
+            <mark 
+              key={i} 
+              className={`msg-highlight ${existing ? 'existing-card' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onTagClick) onTagClick(tagContent, existing);
+              }}
+              title={existing 
+                ? `📖 Entidad existente: ${existing.title || existing.name} (${existing.type || 'Escenario'}). Clic para inspeccionar.` 
+                : `✨ Término clave: "${tagContent}". Clic para inspeccionar o crear tarjeta en el compendio.`
+              }
+            >
+              <FontAwesomeIcon icon={existing ? faBookOpen : faHighlighter} className="msg-type-icon highlight-icon" />
+              {tagContent}
+            </mark>
+          );
+        }
+        if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+          return <strong key={i} className="msg-bold">{renderInlineFormattedText(part.slice(2, -2), onTagClick, appData)}</strong>;
+        }
+        if (part.startsWith('~') && part.endsWith('~') && part.length >= 2) {
+          return (
+            <span key={i} className="msg-thought">
+              <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />
+              {renderInlineFormattedText(part.slice(1, -1), onTagClick, appData)}
+            </span>
+          );
+        }
+        return <React.Fragment key={i}>{renderInlineFormattedText(part, onTagClick, appData)}</React.Fragment>;
       })}
     </span>
   );
 }
 
-export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {} }) {
+export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onOpenCreateModal }) {
   const [messages, setMessages] = useState(chat?.messages || []);
   const [inputMsg, setInputMsg] = useState('');
   const [editingIndex, setEditingIndex] = useState(null);
@@ -114,6 +209,8 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
   const [isSending, setIsSending] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState(null);
   const [popupCharacter, setPopupCharacter] = useState(null);
+  const [activeEntityModal, setActiveEntityModal] = useState(null);
+  const [isGeneratingLore, setIsGeneratingLore] = useState(false);
   const inputRef = useRef(null);
 
   // States para generación manual y automática de tarjetas
@@ -123,6 +220,90 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
   const [newCardName, setNewCardName] = useState('');
   const [newCardType, setNewCardType] = useState('Personaje');
   const [newCardText, setNewCardText] = useState('');
+
+  // Manejar clic en etiquetas doradas/verdes ==texto==
+  const handleTagClick = (tagContent, existingEntity) => {
+    setActiveEntityModal({
+      tagName: tagContent,
+      existing: existingEntity || null,
+      draftType: existingEntity ? (existingEntity.type || 'Lugar') : 'Personaje',
+      draftTitle: tagContent,
+      draftIntro: existingEntity ? (existingEntity.intro || '') : '',
+      draftText: existingEntity ? (existingEntity.text || existingEntity.desc || '') : '',
+      draftTraits: existingEntity ? (existingEntity.traits || []) : []
+    });
+  };
+
+  // Generar lore automático para la tarjeta basada en el término y contexto
+  const handleGenerateTagLore = async () => {
+    if (!activeEntityModal || isGeneratingLore) return;
+    setIsGeneratingLore(true);
+    try {
+      const prompt = `Describe brevemente (2-3 frases evocadoras e inmersivas en español) la entidad, personaje, lugar u objeto "${activeEntityModal.draftTitle}" de tipo "${activeEntityModal.draftType}" dentro de una partida de rol de fantasía.`;
+      const res = await sendChatMessage({
+        messages: [{ from: 'user', text: prompt }],
+        systemInstruction: 'Eres un generador de fichas de compendio y lore de alta fantasía. Responde directamente con el texto descriptivo sin rodeos.',
+        modelId: chatSettings?.preferredModel,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+      if (res && res.text) {
+        const cleanLore = res.text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        setActiveEntityModal(prev => ({
+          ...prev,
+          draftText: cleanLore,
+          draftIntro: cleanLore.length > 80 ? cleanLore.substring(0, 80) + '...' : cleanLore
+        }));
+      }
+    } catch (e) {
+      console.warn('Error generating lore for tag:', e);
+    } finally {
+      setIsGeneratingLore(false);
+    }
+  };
+
+  // Guardar la tarjeta en el compendio de appData
+  const handleSaveTagCard = () => {
+    if (!activeEntityModal) return;
+    const title = activeEntityModal.draftTitle.trim();
+    if (!title) return;
+
+    if (activeEntityModal.existing) {
+      const updatedCard = {
+        ...activeEntityModal.existing,
+        type: activeEntityModal.draftType,
+        title: title,
+        intro: activeEntityModal.draftIntro,
+        text: activeEntityModal.draftText
+      };
+      if (appData && onUpdateAppData) {
+        const nextCards = (appData.cards || []).map(c => c.id === updatedCard.id ? updatedCard : c);
+        const nextData = { ...appData, cards: nextCards };
+        onUpdateAppData(nextData);
+        if (folderHandle) saveAppDataToFolder(folderHandle, nextData).catch(console.warn);
+      }
+    } else {
+      const newCard = {
+        id: `card_${Date.now()}`,
+        type: activeEntityModal.draftType,
+        title: title,
+        intro: activeEntityModal.draftIntro || (activeEntityModal.draftText ? activeEntityModal.draftText.substring(0, 80) + '...' : ''),
+        text: activeEntityModal.draftText || '',
+        cover: '',
+        tags: [],
+        traits: [],
+        createdAt: new Date().toISOString()
+      };
+      if (appData && onUpdateAppData) {
+        const nextData = {
+          ...appData,
+          cards: [newCard, ...(appData.cards || [])]
+        };
+        onUpdateAppData(nextData);
+        if (folderHandle) saveAppDataToFolder(folderHandle, nextData).catch(console.warn);
+      }
+    }
+    setActiveEntityModal(null);
+  };
 
   useEffect(() => {
     let currentMsgs = chat?.messages || [];
@@ -423,11 +604,37 @@ ${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
 ${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}[ÓRDENES CONSTANTES DE LA IA]:
 ${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva.'}
 
-[REGLAS CRÍTICAS DEL ARNÉS (OBLIGATORIO)]:
-- NUNCA respondas, hables, actúes, describas pensamientos o tomes decisiones en nombre del personaje del usuario ({{user}} o ${userChar ? userChar.title || userChar.name : 'el jugador'}). Limítate a describir lo que hacen otros personajes y el entorno en respuesta a lo que él hace.
-- Diálogos de personajes EXCLUSIVAMENTE entre comillas dobles: "Hola".
-- Acciones, narrativa y pensamientos de la IA/PNJs EXCLUSIVAMENTE entre asteriscos: *Miró hacia la puerta*.
-- Escribe en un estilo literario, detallado e inmersivo.
+[REGLAS CRÍTICAS DEL ARNÉS (DIRECTIVAS INVIOLABLES DE NARRACIÓN)]:
+1. PROHIBICIÓN TOTAL DE DESCRIBIR EL ASPECTO, CUERPO O INVENTARIO DEL JUGADOR:
+   - El jugador YA CONOCE perfectamente cómo es su personaje, qué ropa lleva y qué armas porta.
+   - NUNCA malgastes texto ni párrafos describiendo la apariencia física de {{user}}, su musculatura, su equipo al cinto, ni inventes mutaciones o rasgos anatómicos arbitrarios (como orejas de animal, colas, edad o etiquetas). {{user}} es estrictamente humano según su ficha.
+   - PROHIBIDO el estilo invasivo de segunda persona ("Eres...", "Tu cuerpo...", "Sientes...", "Tus ojos...").
+
+2. PROHIBICIÓN ABSOLUTA DE ACTUAR O DECIDIR POR EL JUGADOR (NO AUTOPLAY/GODMODING):
+   - NUNCA hables, actúes, tomes decisiones, ni describas los pensamientos, intenciones o reacciones físicas de {{user}} (${userChar ? userChar.title || userChar.name : 'el personaje del jugador'}).
+   - Limítate a describir cómo reacciona el entorno y qué hacen o dicen los PNJs.
+   - Al concluir las consecuencias inmediatas, detén la narración para ceder el turno al jugador.
+
+3. ENFOQUE TOTAL EN EL MUNDO EXTERNO, AMBIENTACIÓN Y PNJS:
+   - Centra el 100% de tu vocabulario y esfuerzo descriptivo en lo que rodea a {{user}}: los edificios del poblado, el clima, los olores, la tensión en el aire y, sobre todo, las acciones, diálogos, posturas y miradas de los PNJs que habitan el mundo.
+
+4. CERO ECO / SIN PARAFRASEO REPETITIVO:
+   - NO comiences tu respuesta resumiendo, repitiendo o haciendo eco de lo que el usuario acaba de escribir.
+   - Entra de lleno en la acción con las consecuencias y reacciones vivas del mundo.
+
+5. LOS PERSONAJES Y PNJs NO SON OMNISCIENTES:
+   - Los PNJs y criaturas del mundo poseen conocimiento limitado y subjetivo: solo saben lo que han visto, oído o aprendido en su vida.
+   - Ningún PNJ puede leer la mente de {{user}}, conocer sus planes ocultos, intenciones secretas ni adivinar los objetos guardados en su inventario a menos que se les muestre o mencione de forma explícita.
+
+6. MUNDO VIVO, ORGÁNICO Y COHERENTE:
+   - El mundo no gira de forma sumisa ante el jugador; las acciones imprudentes conllevan riesgos, consecuencias lógicas y oposición verosímil.
+   - Mantén consistencia estricta con el lore del escenario, el inventario y las memorias acumuladas.
+
+7. FORMATO TIPOGRÁFICO ESTRICTO (PARA EL MOTOR VISUAL):
+   - Diálogos hablados: EXCLUSIVAMENTE entre comillas dobles: "Hola, forastero."
+   - Acciones, descripciones y narrativa del mundo: EXCLUSIVAMENTE entre asteriscos: *El tabernero limpió la mesa con un trapo húmedo.*
+   - Pensamientos o monólogos internos: entre virgulillas: ~¿Estará diciendo la verdad?~
+   - Términos, pistas, lugares o nombres clave: entre signos de igual: ==Vallebruma==
 
 [MEMORIAS Y HECHOS DE LA HISTORIA]:
 ${memoryContext}
@@ -506,8 +713,16 @@ ${memoryContext}
       return;
     }
 
-    // Truncar historial para eliminar la respuesta a regenerar
+    const aiRole = messages[targetIdx]?.from || 'narrator';
+    const streamingPlaceholder = {
+      from: aiRole,
+      text: '',
+      timestamp: new Date().toISOString()
+    };
+
+    // Truncar historial para eliminar la respuesta anterior e insertar el placeholder de stream
     await persistMessages(historyBefore);
+    setMessages([...historyBefore, streamingPlaceholder]);
     setIsSending(true);
 
     try {
@@ -517,11 +732,20 @@ ${memoryContext}
         systemInstruction: systemPrompt,
         contextDocuments: chat.contextDocuments || [],
         modelId: chatSettings?.preferredModel,
-        baseUrl: chatSettings?.lmStudioUrl
+        baseUrl: chatSettings?.lmStudioUrl,
+        onChunk: (accumulated) => {
+          setMessages(prev => {
+            const copy = [...prev];
+            if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
+              copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
+            }
+            return copy;
+          });
+        }
       });
 
       const newAiMsg = {
-        from: messages[targetIdx]?.from || 'narrator',
+        from: aiRole,
         text: res.text || 'Sin respuesta.',
         timestamp: new Date().toISOString()
       };
@@ -549,11 +773,12 @@ ${memoryContext}
     const newMsg = { from: 'user', text: textToSend.trim() || '...', timestamp: new Date().toISOString() };
     const nextMsgs = textToSend.trim() ? [...messages, newMsg] : messages;
     
+    const streamingAiMsg = { from: 'ai', text: '', timestamp: new Date().toISOString() };
+    
     if (textToSend.trim()) {
       await persistMessages(nextMsgs);
-    } else {
-      setMessages(nextMsgs);
     }
+    setMessages([...nextMsgs, streamingAiMsg]);
     
     if (overrideText === null) setInputMsg('');
     setIsSending(true);
@@ -566,7 +791,16 @@ ${memoryContext}
         systemInstruction: systemPrompt,
         contextDocuments: chat.contextDocuments || [],
         modelId: chatSettings?.preferredModel,
-        baseUrl: chatSettings?.lmStudioUrl
+        baseUrl: chatSettings?.lmStudioUrl,
+        onChunk: (accumulated) => {
+          setMessages(prev => {
+            const copy = [...prev];
+            if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
+              copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
+            }
+            return copy;
+          });
+        }
       });
 
       const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };
@@ -588,6 +822,9 @@ ${memoryContext}
   // Función "Continuar" para pedir a la IA que prosiga la narrativa sin mensaje nuevo de usuario
   const handleContinue = async () => {
     if (isSending) return;
+    
+    const streamingAiMsg = { from: 'ai', text: '', timestamp: new Date().toISOString() };
+    setMessages([...messages, streamingAiMsg]);
     setIsSending(true);
 
     try {
@@ -599,7 +836,16 @@ ${memoryContext}
         systemInstruction: systemPrompt,
         contextDocuments: chat.contextDocuments || [],
         modelId: chatSettings?.preferredModel,
-        baseUrl: chatSettings?.lmStudioUrl
+        baseUrl: chatSettings?.lmStudioUrl,
+        onChunk: (accumulated) => {
+          setMessages(prev => {
+            const copy = [...prev];
+            if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
+              copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
+            }
+            return copy;
+          });
+        }
       });
 
       const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };
@@ -620,14 +866,47 @@ ${memoryContext}
 
   const chatRef = useRef(null);
 
-  useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight;
-    }
-  }, [messages, isSending]);
+  const custom = chat?.customStyle || {};
+  const global = chatSettings || {};
+
+  const effectiveFontFamily = custom.fontFamily || global.fontFamily || 'default';
+  const effectiveFontSize = custom.fontSize || global.fontSize || 'normal';
+  const effectiveTextColor = custom.textColor || global.textColor || '#eaeaea';
+  const effectiveDialogueColor = custom.dialogueColor || global.dialogueColor || '#ffd36b';
+  const effectiveActionColor = custom.actionColor || global.actionColor || '#6ee7b7';
+  const effectiveThoughtColor = custom.thoughtColor || global.thoughtColor || '#c084fc';
+  const effectiveAiBubbleBg = custom.aiBubbleBg || global.aiBubbleBg || 'rgba(255, 255, 255, 0.03)';
+  const effectiveUserBubbleBg = custom.userBubbleBg || global.userBubbleBg || 'rgba(255, 211, 107, 0.1)';
+
+  const fontFamiliesMap = {
+    default: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    serif: "'Merriweather', 'Georgia', 'Crimson Text', serif",
+    fantasy: "'Cinzel', 'Palatino', 'Book Antiqua', serif",
+    mono: "'Fira Code', 'Consolas', 'Courier New', monospace",
+    round: "'Quicksand', 'Nunito', 'Segoe UI', sans-serif"
+  };
+
+  const fontSizesMap = {
+    small: '0.85rem',
+    normal: '0.95rem',
+    medium: '1.08rem',
+    large: '1.22rem',
+    xlarge: '1.38rem'
+  };
+
+  const containerStyle = {
+    '--chat-font-family': fontFamiliesMap[effectiveFontFamily] || fontFamiliesMap.default,
+    '--chat-font-size': fontSizesMap[effectiveFontSize] || fontSizesMap.normal,
+    '--chat-text-color': effectiveTextColor,
+    '--chat-dialogue-color': effectiveDialogueColor,
+    '--chat-action-color': effectiveActionColor,
+    '--chat-thought-color': effectiveThoughtColor,
+    '--chat-ai-bubble-bg': effectiveAiBubbleBg,
+    '--chat-user-bubble-bg': effectiveUserBubbleBg,
+  };
 
   return (
-    <div className="chat-container">
+    <div className="chat-container" style={containerStyle}>
       {/* Historial de Mensajes Principal (Ocupa todo el alto disponible) */}
       <div className="chat-messages" ref={chatRef}>
         {messages.length === 0 && (
@@ -711,17 +990,23 @@ ${memoryContext}
                 </div>
               ) : (
                 <div className="msg-body">
-                  <FormattedMessageText text={m.text} />
+                  {!m.text && isSending && idx === messages.length - 1 ? (
+                    <span className="typing-dots" style={{ fontStyle: 'italic', color: 'rgba(255, 211, 107, 0.8)' }}>
+                      *El narrador procesa y redacta su respuesta...*
+                    </span>
+                  ) : (
+                    <>
+                      <FormattedMessageText text={m.text} />
+                      {isSending && idx === messages.length - 1 && (
+                        <span className="streaming-cursor" style={{ display: 'inline-block', width: '7px', height: '14px', background: '#ffd36b', marginLeft: '4px', verticalAlign: '-1px', borderRadius: '1px', opacity: 0.8 }} />
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </div>
           </div>
         ))}
-        {isSending && (
-          <div className="chat-message-bubble ai typing">
-            <span className="typing-dots">*El narrador está procesando su respuesta...*</span>
-          </div>
-        )}
       </div>
 
       {/* ÁREA INFERIOR SIEMPRE FIJA ABAJO */}

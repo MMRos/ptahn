@@ -10,7 +10,7 @@ import Home from './pages/Home';
 import Create from './pages/Create';
 import CreateModal from './components/CreateModal';
 import CharacterPopup from './components/CharacterPopup';
-import { getAllChats } from './utils/db';
+import { getAllChats, addChat } from './utils/db';
 import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, loadAppDataFromFolder, saveAppDataToFolder, saveChatToFolder } from './utils/storage';
 
 import Profile from './pages/Profile';
@@ -236,7 +236,15 @@ function App() {
           preferredLanguage: parsed.preferredLanguage || 'Español',
           responseLength: parsed.responseLength || 1000,
           lmStudioUrl: parsed.lmStudioUrl || 'http://localhost:1234',
-          imageServerUrl: parsed.imageServerUrl || 'http://127.0.0.1:42016'
+          imageServerUrl: parsed.imageServerUrl || 'http://127.0.0.1:42016',
+          fontFamily: parsed.fontFamily || 'default',
+          fontSize: parsed.fontSize || 'normal',
+          textColor: parsed.textColor || '#eaeaea',
+          dialogueColor: parsed.dialogueColor || '#ffd36b',
+          actionColor: parsed.actionColor || '#6ee7b7',
+          thoughtColor: parsed.thoughtColor || '#c084fc',
+          aiBubbleBg: parsed.aiBubbleBg || 'rgba(255, 255, 255, 0.03)',
+          userBubbleBg: parsed.userBubbleBg || 'rgba(255, 211, 107, 0.1)'
         };
       }
     } catch (e) {
@@ -247,18 +255,38 @@ function App() {
       preferredLanguage: 'Español',
       responseLength: 1000,
       lmStudioUrl: 'http://localhost:1234',
-      imageServerUrl: 'http://127.0.0.1:42016'
+      imageServerUrl: 'http://127.0.0.1:42016',
+      fontFamily: 'default',
+      fontSize: 'normal',
+      textColor: '#eaeaea',
+      dialogueColor: '#ffd36b',
+      actionColor: '#6ee7b7',
+      thoughtColor: '#c084fc',
+      aiBubbleBg: 'rgba(255, 255, 255, 0.03)',
+      userBubbleBg: 'rgba(255, 211, 107, 0.1)'
     };
   });
 
-  // Función para guardar y actualizar la configuración de chat del usuario.
-  // Protege la escritura en localStorage usando try-catch.
+  // Función para guardar y actualizar la configuración de chat del usuario (global)
   const handleUpdateChatSettings = (nextSettings) => {
     setChatSettings(nextSettings);
     try {
       localStorage.setItem('ptah-chat-settings', JSON.stringify(nextSettings));
     } catch (e) {
       console.warn('[App Update]: Failed to save chatSettings to localStorage:', e);
+    }
+  };
+
+  // Función para guardar y actualizar la configuración de estilo específica de este chat
+  const handleUpdateChatCustomStyle = async (newStyle) => {
+    if (!selectedChat) return;
+    const updated = { ...selectedChat, customStyle: newStyle };
+    setSelectedChat(updated);
+    try {
+      await addChat(updated);
+      refreshChats();
+    } catch (e) {
+      console.warn('Error saving customStyle:', e);
     }
   };
 
@@ -284,6 +312,7 @@ function App() {
           storageStatus={storageStatus}
           chatSettings={chatSettings}
           onUpdateChatSettings={handleUpdateChatSettings}
+          onUpdateChatCustomStyle={handleUpdateChatCustomStyle}
           activeChat={selectedChat}
           dmName={
             selectedChat 
@@ -359,6 +388,7 @@ function App() {
             appData={appData}
             onUpdateAppData={updateAppData}
             chatSettings={chatSettings}
+            onOpenCreateModal={openCreateModal}
           />
         )}
 

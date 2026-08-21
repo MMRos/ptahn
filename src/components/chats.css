@@ -152,7 +152,9 @@
   flex-direction: column;
   height: calc(100vh - 52px);
   background: transparent;
-  color: #eaeaea;
+  color: var(--chat-text-color, #eaeaea);
+  font-family: var(--chat-font-family, 'Inter', sans-serif);
+  font-size: var(--chat-font-size, 0.95rem);
   position: relative;
 }
 
@@ -163,6 +165,8 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  font-family: var(--chat-font-family, inherit);
+  font-size: var(--chat-font-size, 0.95rem);
 }
 
 .chat-empty-intro {
@@ -237,27 +241,37 @@
 }
 
 .chat-message-bubble {
-  max-width: 80%;
-  padding: 14px 16px;
+  max-width: 82%;
+  padding: 14px 18px;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   position: relative;
+  font-family: var(--chat-font-family, inherit);
+  font-size: var(--chat-font-size, 0.95rem);
+  line-height: 1.65;
+  transition: background 0.2s ease;
 }
 
 .chat-message-bubble.user {
   align-self: flex-end;
-  background: rgba(255, 211, 107, 0.1);
+  background: var(--chat-user-bubble-bg, rgba(255, 211, 107, 0.1));
   border: 1px solid rgba(255, 211, 107, 0.25);
   border-bottom-right-radius: 2px;
 }
 
 .chat-message-bubble.ai {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--chat-ai-bubble-bg, rgba(255, 255, 255, 0.03));
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-bottom-left-radius: 2px;
+}
+
+.msg-body {
+  color: var(--chat-text-color, #eaeaea);
+  font-family: var(--chat-font-family, inherit);
+  font-size: var(--chat-font-size, 0.95rem);
 }
 
 .msg-header {
@@ -297,20 +311,20 @@
 }
 
 .msg-dialogue {
-  color: #ffd36b;
+  color: var(--chat-dialogue-color, #ffd36b);
   font-weight: 500;
   display: inline;
 }
 
 .msg-action {
-  color: #6ee7b7;
+  color: var(--chat-action-color, #6ee7b7);
   font-style: italic;
   font-weight: 400;
   display: inline;
 }
 
 .msg-thought {
-  color: #c084fc;
+  color: var(--chat-thought-color, #c084fc);
   font-style: italic;
   background: rgba(192, 132, 252, 0.08);
   padding: 2px 6px;
