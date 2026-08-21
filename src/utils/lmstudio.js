@@ -569,7 +569,13 @@ export async function sendChatMessage({
     });
 
     if (formattedMessages.length === 0 || (formattedMessages.length === 1 && formattedMessages[0].role === 'system')) {
-      formattedMessages.push({ role: 'user', content: 'Continuar la historia.' });
+      formattedMessages.push({ role: 'user', content: 'Inicia la narración del escenario y describe el entorno en tercera persona como Narrador.' });
+    } else if (formattedMessages[formattedMessages.length - 1].role === 'assistant') {
+      // Si el último mensaje es del asistente (ej. al pulsar Continuar), añadir instrucción de usuario para que la IA responda como Narrador externo
+      formattedMessages.push({ 
+        role: 'user', 
+        content: '[El jugador aguarda]. Continúa la narración de los sucesos del entorno y los PNJs en tercera persona desde tu rol de Narrador externo.' 
+      });
     }
 
     // Resolviendo el ID real del modelo de narración en LM Studio
@@ -599,6 +605,7 @@ export async function sendChatMessage({
     }
 
     let fullContent = '';
+    let isReasoning = false;
 
     if (isStream && response.body && response.body.getReader) {
       const reader = response.body.getReader();
@@ -619,20 +626,41 @@ export async function sendChatMessage({
           if (dataStr === '[DONE]') continue;
           try {
             const parsed = JSON.parse(dataStr);
-            const delta = parsed.choices?.[0]?.delta?.content || '';
-            if (delta) {
-              fullContent += delta;
-              onChunk(fullContent, delta);
+            const deltaObj = parsed.choices?.[0]?.delta;
+            const contentDelta = deltaObj?.content || '';
+            const reasoningDelta = deltaObj?.reasoning_content || deltaObj?.reasoning || '';
+
+            if (reasoningDelta) {
+              if (!isReasoning && !fullContent.includes('<think>')) {
+                fullContent += '<think>';
+                isReasoning = true;
+              }
+              fullContent += reasoningDelta;
+              onChunk(fullContent, reasoningDelta);
+            } else if (contentDelta) {
+              if (isReasoning && !fullContent.includes('</think>')) {
+                fullContent += '</think>\n\n';
+                isReasoning = false;
+              }
+              fullContent += contentDelta;
+              onChunk(fullContent, contentDelta);
             }
           } catch (e) {
             // Fragmento JSON parcial
           }
         }
       }
+      if (isReasoning && !fullContent.includes('</think>')) {
+        fullContent += '</think>';
+      }
     } else {
       const data = await response.json();
       const messageObj = data.choices?.[0]?.message;
-      fullContent = messageObj?.content || messageObj?.reasoning_content || 'No se recibió respuesta del modelo.';
+      let text = messageObj?.content || '';
+      if (messageObj?.reasoning_content && !text.includes('<think>')) {
+        text = `<think>${messageObj.reasoning_content}</think>\n\n${text}`.trim();
+      }
+      fullContent = text || 'No se recibió respuesta del modelo.';
     }
     
     return {
@@ -667,10 +695,8 @@ export async function sendContextSummarizationTask({
     Memorias actuales: ${existingMem}.
     Responde SOLO con una frase corta para añadir a la memoria, o con la palabra NADA si no es relevante.`;
 
-    const summarizerId = (await resolveModelId(modelId, finalBaseUrl)) || (await resolveModelId('magnum', finalBaseUrl)) || modelId;
-
-    // Asegurar que el modelo de resumen esté cargado
-    await loadModel(summarizerId, finalBaseUrl);
+    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
+    const summarizerId = currentlyLoaded || (await resolveModelId(modelId, finalBaseUrl)) || (await resolveModelId('magnum', finalBaseUrl)) || modelId;
 
     const requestBody = JSON.stringify({
       model: summarizerId,
@@ -690,7 +716,8 @@ export async function sendContextSummarizationTask({
 
     if (!response.ok) return null;
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content?.trim() || 'NADA';
+    let content = data.choices?.[0]?.message?.content?.trim() || 'NADA';
+    content = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     
     if (content.toUpperCase().includes('NADA') || content.length < 5) {
       return null;
@@ -699,5 +726,100 @@ export async function sendContextSummarizationTask({
   } catch (error) {
     console.warn('Fallo en la tarea de resumen de contexto:', error);
     return null;
+  }
+}
+
+/**
+ * Tarea en Background: Analiza los últimos mensajes de la historia y extrae
+ * de forma estructurada personajes, criaturas, lugares u objetos relevantes
+ * que aún no existan en el compendio de tarjetas.
+ * Utiliza el modelo cargado actualmente o el modelo secundario sin forzar cambio de VRAM.
+ */
+export async function sendExtractCardsTask({
+  messages = [],
+  existingCards = [],
+  modelId = '',
+  baseUrl
+}) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
+  try {
+    const recentStory = messages.slice(-4).map(m => `${m.from === 'user' ? 'Jugador' : 'Narrador'}: ${m.text}`).join('\n\n');
+    if (!recentStory || recentStory.trim().length < 20) return [];
+
+    const existingNames = existingCards.map(c => (c.title || c.name || '').trim().toLowerCase()).filter(Boolean);
+
+    const systemInstruction = `Eres el Archivista del Compendio de un juego de rol.
+Tu misión es analizar los últimos mensajes de la partida y detectar personajes, criaturas, lugares u objetos significativos recién introducidos que merezcan una ficha de compendio.
+
+Nombres ya registrados (IGNORAR ESTOS): ${existingNames.join(', ') || 'Ninguno'}.
+
+Si encuentras entidades nuevas y relevantes, responde ÚNICAMENTE con un array JSON válido con la siguiente estructura exacta por cada entidad:
+[
+  {
+    "title": "Nombre de la entidad",
+    "type": "Personaje",
+    "intro": "Descripción breve y evocadora en 1 frase",
+    "text": "Detalles, apariencia física, lore, trasfondo o comportamiento descriptivo",
+    "tags": ["etiqueta1", "etiqueta2"],
+    "traits": ["Rasgo 1", "Rasgo 2"],
+    "imagePrompt": "A detailed digital painting portrait of [Nombre], fantasy RPG character, dramatic atmospheric lighting, high quality, masterpiece"
+  }
+]
+
+Tipos permitidos: "Personaje", "Lugar", "Objeto", "Historia".
+Si NO hay ninguna entidad nueva relevante que deba registrarse, responde ÚNICAMENTE con: []
+NO agregues explicaciones ni texto fuera del JSON.`;
+
+    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
+    let targetModelId = currentlyLoaded || modelId;
+    if (!targetModelId) {
+      targetModelId = (await resolveModelId('nemo', finalBaseUrl)) || (await resolveModelId('magnum', finalBaseUrl)) || 'default';
+    }
+
+    const requestBody = JSON.stringify({
+      model: targetModelId,
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: `Analiza esta narrativa reciente y extrae las entidades nuevas:\n\n${recentStory}` }
+      ],
+      temperature: 0.2,
+      stream: false
+    });
+
+    const response = await apiFetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: requestBody
+    }, finalBaseUrl);
+
+    if (!response.ok) return [];
+    const data = await response.json();
+    let rawContent = data.choices?.[0]?.message?.content?.trim() || '[]';
+    
+    // Limpiar posibles bloques <think> o ```json
+    rawContent = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    if (rawContent.startsWith('```')) {
+      rawContent = rawContent.replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
+    }
+
+    const jsonStart = rawContent.indexOf('[');
+    const jsonEnd = rawContent.lastIndexOf(']');
+    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+      rawContent = rawContent.substring(jsonStart, jsonEnd + 1);
+    }
+
+    const parsed = JSON.parse(rawContent);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(item => {
+        if (!item || !item.title || typeof item.title !== 'string') return false;
+        const cleanName = item.title.trim().toLowerCase();
+        if (!cleanName || existingNames.includes(cleanName)) return false;
+        return true;
+      });
+    }
+    return [];
+  } catch (error) {
+    console.warn('[Auto-Card Extractor Task]: Error en extracción automática:', error.message);
+    return [];
   }
 }

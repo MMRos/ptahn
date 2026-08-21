@@ -3,6 +3,7 @@ import { loadAppData } from '../utils/storage';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft, faPlay, faPause, faVideo, faMicrophone, faImage } from '@fortawesome/free-solid-svg-icons';
 import { generateImageLocal, generateVideoLocal, generateAudioLocal, getAvailableModels } from '../utils/lmstudio';
+import ConfirmModal from '../components/ConfirmModal';
 
 // Mock list of community voices
 const COMMUNITY_VOICES = [
@@ -27,6 +28,7 @@ const INITIAL_IMAGES = [
 export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpenCreateModal }) {
   const [data, setData] = useState(() => appData || loadAppData());
   const [selectedCard, setSelectedCard] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null);
   
   // AI Tools states
   const [activeAiTool, setActiveAiTool] = useState(null); // 'video' | 'voice' | 'image'
@@ -1721,9 +1723,19 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
               </button>
               <button 
                 onClick={() => {
-                  if (window.confirm('¿Seguro que deseas eliminar esta tarjeta?')) {
-                    handleDeleteCard(selectedCard.id);
-                  }
+                  setConfirmModal({
+                    isOpen: true,
+                    title: '¿Eliminar tarjeta?',
+                    message: `¿Estás seguro de que deseas eliminar la tarjeta "${selectedCard.title || selectedCard.name || ''}" del compendio? Esta acción no se puede deshacer.`,
+                    type: 'danger',
+                    confirmText: 'Eliminar',
+                    cancelText: 'Cancelar',
+                    onConfirm: () => {
+                      setConfirmModal(null);
+                      handleDeleteCard(selectedCard.id);
+                    },
+                    onCancel: () => setConfirmModal(null)
+                  });
                 }}
                 style={{
                   background: 'transparent',
@@ -1741,6 +1753,19 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
             </div>
           </div>
         </div>
+      )}
+
+      {confirmModal && (
+        <ConfirmModal
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          type={confirmModal.type}
+          confirmText={confirmModal.confirmText}
+          cancelText={confirmModal.cancelText}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={confirmModal.onCancel}
+        />
       )}
     </div>
   );

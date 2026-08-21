@@ -21,11 +21,12 @@ import {
   faSave,
   faExternalLinkAlt
 } from '@fortawesome/free-solid-svg-icons';
-import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask } from '../utils/lmstudio';
+import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask } from '../utils/lmstudio';
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { addChat } from '../utils/db';
 import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
+import ConfirmModal from './ConfirmModal';
 import './chats.css';
 
 function renderInlineFormattedText(rawText, onTagClick, appData) {
@@ -82,32 +83,37 @@ function renderInlineFormattedText(rawText, onTagClick, appData) {
 
 function FormattedMessageText({ text, onTagClick, appData }) {
   const [showThinking, setShowThinking] = useState(false);
-  if (!text) return null;
+  if (!text) {
+    return (
+      <span className="msg-streaming-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', opacity: 0.75, fontStyle: 'italic', fontSize: '0.85rem', color: '#ffd36b' }}>
+        <FontAwesomeIcon icon={faBrain} className="fa-pulse" /> Esperando respuesta del narrador...
+      </span>
+    );
+  }
 
   // Extraer bloque de razonamiento / pensamiento <think>...</think> si el modelo lo incluye
   let thinkingContent = null;
   let cleanText = text;
+  const isCurrentlyThinking = text.includes('<think>') && !text.includes('</think>');
 
   const thinkMatch = text.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
   if (thinkMatch) {
     thinkingContent = thinkMatch[1].trim();
     cleanText = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
-    if (!cleanText && thinkingContent) {
-      cleanText = thinkingContent;
-      thinkingContent = null;
-    }
   }
 
   // Regex para bloques principales: asteriscos *...*, comillas "...", o resaltar ==...==
   const regex = /(\*[^*]+\*|"[^"]+"|\*\*[^*]+\*\*|~[^~]+~|==[^=]+==)/g;
-  const parts = cleanText.split(regex);
+  const parts = cleanText ? cleanText.split(regex) : [];
+
+  const shouldDisplayThinking = showThinking || isCurrentlyThinking;
 
   return (
     <span>
       {thinkingContent && (
         <div className="msg-think-box" style={{
           background: 'rgba(192, 132, 252, 0.04)',
-          border: '1px solid rgba(192, 132, 252, 0.2)',
+          border: isCurrentlyThinking ? '1px dashed #c084fc' : '1px solid rgba(192, 132, 252, 0.2)',
           borderRadius: '6px',
           marginBottom: '10px',
           fontSize: '0.78rem',
@@ -128,15 +134,17 @@ function FormattedMessageText({ text, onTagClick, appData }) {
             title="Clic para desplegar el razonamiento interno"
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}>
-              <FontAwesomeIcon icon={faBrain} /> Pensamiento del Narrador
+              <FontAwesomeIcon icon={faBrain} className={isCurrentlyThinking ? 'fa-pulse' : ''} /> 
+              {isCurrentlyThinking ? 'Razonando en vivo...' : 'Pensamiento del Narrador'}
             </span>
             <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-              {showThinking ? '▼ Ocultar' : '▶ Ver pensamiento'}
+              {shouldDisplayThinking ? '▼ Ocultar' : '▶ Ver pensamiento'}
             </span>
           </div>
-          {showThinking && (
+          {shouldDisplayThinking && (
             <div style={{ padding: '8px 12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.7)', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
               {thinkingContent}
+              {isCurrentlyThinking && <span style={{ opacity: 0.6, color: '#c084fc' }}> ▍</span>}
             </div>
           )}
         </div>
@@ -209,10 +217,53 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
   const [popupCharacter, setPopupCharacter] = useState(null);
   const [activeEntityModal, setActiveEntityModal] = useState(null);
   const [isGeneratingLore, setIsGeneratingLore] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const inputRef = useRef(null);
+  const chatRef = useRef(null);
+  const messagesEndRef = useRef(null);
 
-  // States para generación manual y automática de tarjetas
-  const [autoGenCards, setAutoGenCards] = useState(false);
+  // Auto-scroll para mostrar siempre la última interacción al abrir, refrescar o recibir mensajes
+  const scrollToBottom = (behavior = 'smooth') => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior });
+    } else if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  };
+
+  // Scroll instantáneo al montar o cambiar de chat
+  useEffect(() => {
+    scrollToBottom('auto');
+    const timer = setTimeout(() => scrollToBottom('auto'), 80);
+    return () => clearTimeout(timer);
+  }, [chat?.id]);
+
+  // Scroll dinámico cuando cambian los mensajes o durante el streaming
+  useEffect(() => {
+    if (isSending) {
+      scrollToBottom('auto');
+    } else {
+      scrollToBottom('smooth');
+    }
+  }, [messages.length, isSending]);
+
+  // States para generación manual y automática de tarjetas (persistido en localStorage)
+  const [autoGenCards, setAutoGenCards] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ptahn_auto_gen_cards');
+      return saved !== null ? saved === 'true' : false;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const handleToggleAutoGenCards = (checked) => {
+    setAutoGenCards(checked);
+    try {
+      localStorage.setItem('ptahn_auto_gen_cards', checked ? 'true' : 'false');
+    } catch (e) {}
+  };
+
   const [isSelectingForCard, setIsSelectingForCard] = useState(false);
   const [selectedMessagesForCard, setSelectedMessagesForCard] = useState([]);
   const [newCardName, setNewCardName] = useState('');
@@ -593,6 +644,16 @@ ${scenario.aiInstructions ? `- Instrucciones adicionales del GM (Contexto Extra)
     const memoryContext = allMemories.length > 0 ? allMemories.join('\n') : 'No hay memorias previas registradas.';
 
     return `
+[IDENTIDAD FUNDAMENTAL Y PERSPECTIVA OBLIGATORIA]:
+- TU ROL ES: NARRADOR EXTERNO y DIRECTOR DE JUEGO (Game Master / DM). Eres el mundo, el entorno, el clima y los PERSONAJES NO JUGADORES (PNJs).
+- EL USUARIO ES: {{user}} (${userChar ? userChar.title || userChar.name : 'el personaje del jugador'}). Solo el usuario tiene potestad sobre {{user}}.
+- PERSPECTIVA DE NARRACIÓN: TERCERA PERSONA ESTRICTA. Describe el entorno y los PNJs desde una perspectiva exterior inmersiva.
+- PROHIBICIÓN RADICAL DE PRIMERA PERSONA DEL JUGADOR:
+  * NUNCA narres en primera persona ("Observo...", "Me acerco...", "Pregunto...", "Siento..."). Eso es suplantar al jugador.
+  * NUNCA inventes diálogos, pensamientos ni acciones de {{user}}.
+  * NUNCA generes prefijos como "Tú:", "{{user}}:", "Jugador:".
+  * Tu respuesta debe contener ÚNICAMENTE cómo reacciona el mundo y qué dicen o hacen los PNJs ante lo que el jugador hizo.
+
 ${scenarioDetails}
 
 ${narratorDetails}
@@ -600,17 +661,17 @@ ${narratorDetails}
 ${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
 
 ${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}[ÓRDENES CONSTANTES DE LA IA]:
-${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva.'}
+${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva como narrador externo.'}
 
 [REGLAS CRÍTICAS DEL ARNÉS (DIRECTIVAS INVIOLABLES DE NARRACIÓN)]:
 1. PROHIBICIÓN TOTAL DE DESCRIBIR EL ASPECTO, CUERPO O INVENTARIO DEL JUGADOR:
    - El jugador YA CONOCE perfectamente cómo es su personaje, qué ropa lleva y qué armas porta.
-   - NUNCA malgastes texto ni párrafos describiendo la apariencia física de {{user}}, su musculatura, su equipo al cinto, ni inventes mutaciones o rasgos anatómicos arbitrarios (como orejas de animal, colas, edad o etiquetas). {{user}} es estrictamente humano según su ficha.
+   - NUNCA malgastes texto ni párrafos describiendo la apariencia física de {{user}}, su musculatura, su equipo al cinto, ni inventes mutaciones o rasgos anatómicos arbitrarios. {{user}} es estrictamente humano según su ficha.
    - PROHIBIDO el estilo invasivo de segunda persona ("Eres...", "Tu cuerpo...", "Sientes...", "Tus ojos...").
 
 2. PROHIBICIÓN ABSOLUTA DE ACTUAR O DECIDIR POR EL JUGADOR (NO AUTOPLAY/GODMODING):
    - NUNCA hables, actúes, tomes decisiones, ni describas los pensamientos, intenciones o reacciones físicas de {{user}} (${userChar ? userChar.title || userChar.name : 'el personaje del jugador'}).
-   - Limítate a describir cómo reacciona el entorno y qué hacen o dicen los PNJs.
+   - Limítate a describir cómo reacciona el entorno y qué hacen o dicen los PNJs en tercera persona.
    - Al concluir las consecuencias inmediatas, detén la narración para ceder el turno al jugador.
 
 3. ENFOQUE TOTAL EN EL MUNDO EXTERNO, AMBIENTACIÓN Y PNJS:
@@ -629,9 +690,9 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva.'}
    - Mantén consistencia estricta con el lore del escenario, el inventario y las memorias acumuladas.
 
 7. FORMATO TIPOGRÁFICO ESTRICTO (PARA EL MOTOR VISUAL):
-   - Diálogos hablados: EXCLUSIVAMENTE entre comillas dobles: "Hola, forastero."
+   - Diálogos hablados de PNJs: EXCLUSIVAMENTE entre comillas dobles: "Hola, forastero."
    - Acciones, descripciones y narrativa del mundo: EXCLUSIVAMENTE entre asteriscos: *El tabernero limpió la mesa con un trapo húmedo.*
-   - Pensamientos o monólogos internos: entre virgulillas: ~¿Estará diciendo la verdad?~
+   - Pensamientos o monólogos internos de PNJs: entre virgulillas: ~¿Estará diciendo la verdad?~
    - Términos, pistas, lugares o nombres clave: entre signos de igual: ==Vallebruma==
 
 [MEMORIAS Y HECHOS DE LA HISTORIA]:
@@ -672,26 +733,119 @@ ${memoryContext}
     }, 1000);
   };
 
-  const handleDeleteMessage = async (idxToDelete) => {
-    if (window.confirm('¿Eliminar este mensaje del historial?')) {
-      const nextMsgs = messages.filter((_, i) => i !== idxToDelete);
-      await persistMessages(nextMsgs);
-    }
+  // Función asíncrona en segundo plano para extraer entidades y generar tarjetas automáticas con imágenes.
+  const runBackgroundCardGeneration = (finalMsgs) => {
+    if (!autoGenCards) return;
+    setTimeout(async () => {
+      try {
+        const existingCards = appData?.cards || [];
+        const extractedEntities = await sendExtractCardsTask({
+          messages: finalMsgs,
+          existingCards: existingCards,
+          modelId: chatSettings?.preferredModel,
+          baseUrl: chatSettings?.lmStudioUrl
+        });
+
+        if (Array.isArray(extractedEntities) && extractedEntities.length > 0) {
+          console.log(`[Auto-Card Task]: ${extractedEntities.length} entidades detectadas por IA:`, extractedEntities);
+          const newCardObjects = [];
+
+          for (const entity of extractedEntities) {
+            // Generar ilustración/imagen local para la nueva entidad
+            let coverUrl = '';
+            try {
+              const promptForImg = entity.imagePrompt || `${entity.title}, ${entity.type}, ${entity.intro || entity.text}`;
+              coverUrl = await generateImageLocal(promptForImg, 'Fantasía Oscura', chatSettings?.imageServerUrl);
+            } catch (imgErr) {
+              console.warn(`[Auto-Card Image]: Error al generar imagen para ${entity.title}:`, imgErr);
+            }
+
+            const cardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+            const isChar = entity.type === 'Personaje';
+
+            const cardObj = {
+              id: cardId,
+              type: entity.type || 'Personaje',
+              title: entity.title,
+              intro: entity.intro || (entity.text ? entity.text.substring(0, 100) + '...' : ''),
+              text: entity.text || '',
+              cover: coverUrl || '',
+              characterImages: (isChar && coverUrl) ? [{ id: 'img-1', url: coverUrl, label: 'Principal', isDefault: true }] : [],
+              tags: Array.isArray(entity.tags) ? entity.tags : [],
+              traits: Array.isArray(entity.traits) ? entity.traits : [],
+              connectedCards: [],
+              nsfw: false,
+              public: false,
+              createdAt: new Date().toISOString()
+            };
+
+            newCardObjects.push(cardObj);
+          }
+
+          if (newCardObjects.length > 0 && appData && onUpdateAppData) {
+            const nextCards = [...newCardObjects, ...(appData.cards || [])];
+            const nextData = { ...appData, cards: nextCards };
+            onUpdateAppData(nextData);
+            if (folderHandle) {
+              try { await saveAppDataToFolder(nextData, folderHandle); } catch (e) {}
+            }
+            console.log(`[Auto-Card Task]: ${newCardObjects.length} tarjetas añadidas con imagen al compendio.`);
+          }
+        }
+      } catch (cardErr) {
+        console.warn('[Auto-Card Task]: Fallo en la extracción automática:', cardErr);
+      }
+    }, 1500);
   };
 
-  const handleRewindToMessage = async (idx) => {
-    if (window.confirm(`¿Rebobinar chat hasta este mensaje (#${idx + 1})? Los mensajes posteriores se eliminarán.`)) {
-      const nextMsgs = messages.slice(0, idx + 1);
-      await persistMessages(nextMsgs);
-    }
+  const handleDeleteMessage = (idxToDelete) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: '¿Eliminar mensaje?',
+      message: '¿Estás seguro de que deseas eliminar este mensaje del historial? Esta acción no se puede deshacer.',
+      type: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        const nextMsgs = messages.filter((_, i) => i !== idxToDelete);
+        await persistMessages(nextMsgs);
+      },
+      onCancel: () => setConfirmDialog(null)
+    });
+  };
+
+  const handleRewindToMessage = (idx) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: '¿Rebobinar chat?',
+      message: `¿Rebobinar chat hasta este mensaje (#${idx + 1})? Los mensajes posteriores se eliminarán definitivamente.`,
+      type: 'rewind',
+      confirmText: 'Rebobinar',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        const nextMsgs = messages.slice(0, idx + 1);
+        await persistMessages(nextMsgs);
+      },
+      onCancel: () => setConfirmDialog(null)
+    });
   };
 
   const handleRedo = async (specificIdx = null) => {
     if (isSending || messages.length === 0) return;
 
     let targetIdx = specificIdx;
+    
+    // Si se pulsa desde la barra de herramientas inferior
     if (targetIdx === null) {
-      // Buscar el último mensaje de la IA / Narrador
+      // Si el último mensaje es del usuario, enviar respuesta para ese mensaje
+      if (messages[messages.length - 1].from === 'user') {
+        handleSend(null);
+        return;
+      }
+
+      // Buscar el último mensaje del narrador / IA para rehacerlo
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].from !== 'user') {
           targetIdx = i;
@@ -701,14 +855,17 @@ ${memoryContext}
     }
 
     if (targetIdx === null || targetIdx < 0) {
+      handleSend(null);
       return;
     }
 
     // Contexto previo: todos los mensajes anteriores a esta respuesta
     const historyBefore = messages.slice(0, targetIdx);
+    let promptMessages = historyBefore;
+
+    // Si targetIdx es 0 (primer mensaje del chat), recrear con la intro del escenario
     if (historyBefore.length === 0) {
-      alert('No hay prompt previo para regenerar esta respuesta.');
-      return;
+      promptMessages = [{ from: 'user', text: `Inicia la narración del escenario "${chat.scenario}". Describe el entorno y la escena inicial en tercera persona como Narrador.` }];
     }
 
     const aiRole = messages[targetIdx]?.from || 'narrator';
@@ -726,7 +883,7 @@ ${memoryContext}
     try {
       const systemPrompt = buildSystemPrompt();
       const res = await sendChatMessage({
-        messages: historyBefore,
+        messages: promptMessages,
         systemInstruction: systemPrompt,
         contextDocuments: chat.contextDocuments || [],
         modelId: chatSettings?.preferredModel,
@@ -750,6 +907,7 @@ ${memoryContext}
       const finalMsgs = [...historyBefore, newAiMsg];
       await persistMessages(finalMsgs);
       runBackgroundSummarization(finalMsgs);
+      runBackgroundCardGeneration(finalMsgs);
 
     } catch (err) {
       console.error("Error al rehacer respuesta:", err);
@@ -805,8 +963,9 @@ ${memoryContext}
       const finalMsgs = [...nextMsgs, aiMsg];
       await persistMessages(finalMsgs);
 
-      // Lanzar el resumen de contexto automático en segundo plano
+      // Lanzar el resumen de contexto automático y la generación de tarjetas en segundo plano
       runBackgroundSummarization(finalMsgs);
+      runBackgroundCardGeneration(finalMsgs);
 
     } catch (err) {
       console.error("Error al enviar chat:", err);
@@ -850,8 +1009,9 @@ ${memoryContext}
       const finalMsgs = [...messages, aiMsg];
       await persistMessages(finalMsgs);
 
-      // Lanzar el resumen de contexto automático en segundo plano
+      // Lanzar el resumen de contexto automático y la generación de tarjetas en segundo plano
       runBackgroundSummarization(finalMsgs);
+      runBackgroundCardGeneration(finalMsgs);
 
     } catch (err) {
       console.error("Error al continuar chat:", err);
@@ -861,8 +1021,6 @@ ${memoryContext}
       setIsSending(false);
     }
   };
-
-  const chatRef = useRef(null);
 
   const custom = chat?.customStyle || {};
   const global = chatSettings || {};
@@ -1005,6 +1163,8 @@ ${memoryContext}
             </div>
           </div>
         ))}
+        {/* Marcador invisible para auto-scroll hacia la última interacción */}
+        <div ref={messagesEndRef} style={{ height: '1px', width: '100%' }} />
       </div>
 
       {/* ÁREA INFERIOR SIEMPRE FIJA ABAJO */}
@@ -1140,7 +1300,7 @@ ${memoryContext}
                 id="autoGenCardsCheck" 
                 checked={autoGenCards} 
                 onChange={(e) => {
-                  setAutoGenCards(e.target.checked);
+                  handleToggleAutoGenCards(e.target.checked);
                   if (e.target.checked) {
                     setIsSelectingForCard(false);
                     setSelectedMessagesForCard([]);
@@ -1423,6 +1583,19 @@ ${memoryContext}
             </div>
           </div>
         </div>
+      )}
+
+      {confirmDialog && (
+        <ConfirmModal
+          isOpen={confirmDialog.isOpen}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          type={confirmDialog.type}
+          confirmText={confirmDialog.confirmText}
+          cancelText={confirmDialog.cancelText}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={confirmDialog.onCancel}
+        />
       )}
     </div>
   );

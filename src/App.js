@@ -10,6 +10,7 @@ import Home from './pages/Home';
 import Create from './pages/Create';
 import CreateModal from './components/CreateModal';
 import CharacterPopup from './components/CharacterPopup';
+import ConfirmModal from './components/ConfirmModal';
 import { getAllChats, addChat } from './utils/db';
 import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, loadAppDataFromFolder, saveAppDataToFolder, saveChatToFolder } from './utils/storage';
 
@@ -207,16 +208,28 @@ function App() {
     refreshChats();
   };
 
-  const handleDeleteChat = async (id) => {
-    if (window.confirm('¿Seguro que deseas eliminar este chat?')) {
-      const { deleteChat } = await import('./utils/db');
-      await deleteChat(id);
-      if (selectedChat && selectedChat.id === id) {
-        setSelectedChat(null);
-        setView('home');
-      }
-      refreshChats();
-    }
+  const [confirmModal, setConfirmModal] = useState(null);
+
+  const handleDeleteChat = (id) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar partida?',
+      message: '¿Estás seguro de que deseas eliminar este chat y todo su historial de interacción? Esta acción no se puede deshacer.',
+      type: 'danger',
+      confirmText: 'Eliminar partida',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        const { deleteChat } = await import('./utils/db');
+        await deleteChat(id);
+        if (selectedChat && selectedChat.id === id) {
+          setSelectedChat(null);
+          setView('home');
+        }
+        refreshChats();
+      },
+      onCancel: () => setConfirmModal(null)
+    });
   };
 
   const handleModifyScenario = (scenario) => {
@@ -483,6 +496,19 @@ function App() {
           updateAppData(nextData);
         }}
       />
+
+      {confirmModal && (
+        <ConfirmModal
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          type={confirmModal.type}
+          confirmText={confirmModal.confirmText}
+          cancelText={confirmModal.cancelText}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={confirmModal.onCancel}
+        />
+      )}
     </div>
   );
 }
