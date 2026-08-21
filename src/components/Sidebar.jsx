@@ -56,8 +56,9 @@ function Sidebar({ appData = {}, onNavigate = () => {}, onOpenChat = () => {}, o
       </button>
 
       <div className="sidebar-content">
-        <div className="sidebar-brand">
-          <div className="logo">Ptah</div>
+        <div className="sidebar-brand" onClick={() => onNavigate('home')} title="Ptahn Engine">
+          <img src="/ptahicon.png" alt="Ptahn Logo" className="sidebar-brand-icon" />
+          <div className="logo">Ptahn</div>
         </div>
 
         <nav className="sidebar-nav" role="navigation" aria-label="Navegación principal">
