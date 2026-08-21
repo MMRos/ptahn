@@ -19,12 +19,10 @@ import {
   faBookOpen,
   faMagic,
   faSave,
-  faEye,
-  faPlus,
   faExternalLinkAlt
 } from '@fortawesome/free-solid-svg-icons';
 import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask } from '../utils/lmstudio';
-import { saveChatToFolder } from '../utils/storage';
+import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { addChat } from '../utils/db';
 import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
@@ -996,7 +994,7 @@ ${memoryContext}
                     </span>
                   ) : (
                     <>
-                      <FormattedMessageText text={m.text} />
+                      <FormattedMessageText text={m.text} onTagClick={handleTagClick} appData={appData} />
                       {isSending && idx === messages.length - 1 && (
                         <span className="streaming-cursor" style={{ display: 'inline-block', width: '7px', height: '14px', background: '#ffd36b', marginLeft: '4px', verticalAlign: '-1px', borderRadius: '1px', opacity: 0.8 }} />
                       )}
@@ -1243,6 +1241,189 @@ ${memoryContext}
         isOpen={!!popupCharacter}
         onClose={() => setPopupCharacter(null)}
       />
+
+      {/* MODAL DE ENTIDAD O TÉRMINO CLAVE CLICKEADO (COMPENDIO / LORE) */}
+      {activeEntityModal && (
+        <div className="popup-overlay" style={{ zIndex: 1200 }}>
+          <div className="scenario-popup-card" style={{ maxWidth: '520px', width: '90%', animation: 'fadeIn 0.2s ease-out', padding: '24px', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ 
+                  background: activeEntityModal.existing ? 'rgba(110, 231, 183, 0.15)' : 'rgba(255, 211, 107, 0.15)', 
+                  color: activeEntityModal.existing ? '#6ee7b7' : '#ffd36b',
+                  border: `1px solid ${activeEntityModal.existing ? 'rgba(110, 231, 183, 0.3)' : 'rgba(255, 211, 107, 0.3)'}`,
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  fontWeight: '700'
+                }}>
+                  {activeEntityModal.existing ? '📖 Ficha en Compendio' : '✨ Término de Historia'}
+                </span>
+                <h3 style={{ margin: 0, color: '#fff', fontSize: '1.15rem' }}>{activeEntityModal.draftTitle}</h3>
+              </div>
+              <button 
+                onClick={() => setActiveEntityModal(null)}
+                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: '1.1rem' }}
+              >
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {activeEntityModal.existing ? (
+                <div>
+                  <div style={{ fontSize: '0.8rem', color: '#ffd36b', marginBottom: '6px', fontWeight: '600' }}>
+                    Tipo: {activeEntityModal.existing.type || 'Escenario / Entidad'}
+                  </div>
+                  {activeEntityModal.existing.intro && (
+                    <p style={{ fontStyle: 'italic', color: 'rgba(255,255,255,0.85)', fontSize: '0.88rem', margin: '0 0 10px 0' }}>
+                      "{activeEntityModal.existing.intro}"
+                    </p>
+                  )}
+                  {activeEntityModal.existing.text && (
+                    <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px 12px', borderRadius: '6px', fontSize: '0.84rem', color: 'rgba(255,255,255,0.8)', maxHeight: '180px', overflowY: 'auto', lineHeight: '1.5' }}>
+                      {activeEntityModal.existing.text}
+                    </div>
+                  )}
+                  {activeEntityModal.existing.traits && activeEntityModal.existing.traits.length > 0 && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
+                      {activeEntityModal.existing.traits.map((t, idx) => (
+                        <span key={idx} style={{ background: 'rgba(255,211,107,0.1)', color: '#ffd36b', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <p style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.7)', margin: '0 0 10px 0' }}>
+                    El narrador ha resaltado este elemento clave. Puedes registrarlo como tarjeta para que forme parte del compendio de tu mundo y la IA mantenga su coherencia.
+                  </p>
+                  
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Tipo de Tarjeta</label>
+                      <select 
+                        value={activeEntityModal.draftType}
+                        onChange={(e) => setActiveEntityModal(prev => ({ ...prev, draftType: e.target.value }))}
+                        style={{ width: '100%', padding: '6px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }}
+                      >
+                        <option value="Personaje">👤 Personaje / PNJ</option>
+                        <option value="Objeto">🎒 Objeto / Equipo</option>
+                        <option value="Inventario">📦 Mochila / Inventario</option>
+                        <option value="Lugar">🏰 Lugar / Escenario</option>
+                        <option value="Memoria">📜 Tarjeta de Memoria / Lore</option>
+                        <option value="Facción">🛡️ Facción / Gremio</option>
+                        <option value="Criatura">🐉 Bestia / Criatura</option>
+                      </select>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                      <button
+                        type="button"
+                        onClick={handleGenerateTagLore}
+                        disabled={isGeneratingLore}
+                        style={{
+                          background: 'rgba(192, 132, 252, 0.15)',
+                          border: '1px solid rgba(192, 132, 252, 0.35)',
+                          color: '#c084fc',
+                          padding: '7px 12px',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontWeight: '600'
+                        }}
+                        title="Generar lore con IA para este término"
+                      >
+                        <FontAwesomeIcon icon={faMagic} /> {isGeneratingLore ? 'Generando...' : 'Generar Lore'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Descripción / Lore</label>
+                    <textarea 
+                      rows={4}
+                      value={activeEntityModal.draftText}
+                      onChange={(e) => setActiveEntityModal(prev => ({ ...prev, draftText: e.target.value, draftIntro: e.target.value.substring(0, 80) }))}
+                      placeholder="Escribe detalles sobre este personaje, lugar u objeto..."
+                      style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', resize: 'vertical', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px' }}>
+                <div>
+                  {onOpenCreateModal && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const itemToEdit = activeEntityModal.existing || {
+                          title: activeEntityModal.draftTitle,
+                          type: activeEntityModal.draftType,
+                          intro: activeEntityModal.draftIntro,
+                          text: activeEntityModal.draftText
+                        };
+                        onOpenCreateModal(activeEntityModal.draftType, itemToEdit);
+                        setActiveEntityModal(null);
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        color: 'rgba(255,255,255,0.85)',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <FontAwesomeIcon icon={faExternalLinkAlt} /> Taller Avanzado
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveEntityModal(null)}
+                    style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', padding: '6px 12px', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer' }}
+                  >
+                    Cerrar
+                  </button>
+                  {!activeEntityModal.existing && (
+                    <button
+                      type="button"
+                      onClick={handleSaveTagCard}
+                      style={{
+                        background: '#ffd36b',
+                        border: 'none',
+                        color: '#0d0e16',
+                        fontWeight: '700',
+                        padding: '6px 14px',
+                        borderRadius: '6px',
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <FontAwesomeIcon icon={faSave} /> Guardar en Compendio
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
