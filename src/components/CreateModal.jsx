@@ -19,7 +19,7 @@ import ImageCropperModal from './ImageCropperModal';
 import BatchCropperModal from './BatchCropperModal';
 import NarratorForm from './NarratorForm';
 import ToolWorkshopForm from './ToolWorkshopForm';
-import { generateImageLocal } from '../utils/lmstudio';
+import { generateImageLocal } from '../utils/localAIStudio';
 import '../pages/create.css';
 
 const CARD_TYPES = ['Historia', 'Personaje', 'Inventario', 'Memoria', 'Raza', 'Facción', 'Regla', 'Criatura', 'Objeto', 'Lugar', 'Otros'];

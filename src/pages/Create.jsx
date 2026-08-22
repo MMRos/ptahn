@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { loadAppData } from '../utils/storage';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft, faPlay, faPause, faVideo, faMicrophone, faImage } from '@fortawesome/free-solid-svg-icons';
-import { generateImageLocal, generateVideoLocal, generateAudioLocal, getAvailableModels } from '../utils/lmstudio';
+import { generateImageLocal, generateVideoLocal, generateAudioLocal, getAvailableModels } from '../utils/localAIStudio';
+import { speakBrowserUtterance, cancelBrowserSpeech, getBrowserVoices } from '../utils/speechTTS';
 import ConfirmModal from '../components/ConfirmModal';
 
 // Mock list of community voices
@@ -70,7 +71,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
 
   useEffect(() => {
     const loadVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
+      const voices = getBrowserVoices();
       setSystemVoices(voices);
       const defaultEs = voices.find(v => v.lang.startsWith('es'));
       if (defaultEs) {
@@ -80,7 +81,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
       }
     };
     loadVoices();
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.onvoiceschanged !== undefined) {
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
   }, []);
@@ -187,10 +188,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
 
   // Helper for voice synthesis fallback
   const playVoiceSpeechSynthesis = (voice) => {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(voice.phrase);
-    
-    const voices = window.speechSynthesis.getVoices();
+    const voices = getBrowserVoices();
     let selectedVoice = null;
     const isMale = voice.gender === 'Masculino';
     
@@ -209,16 +207,14 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
     if (!selectedVoice && voices.length > 0) {
       selectedVoice = voices.find(v => v.lang.startsWith('es'));
     }
-    
-    if (selectedVoice) {
-      utterance.voice = selectedVoice;
-      utterance.lang = selectedVoice.lang;
-    } else {
-      utterance.lang = 'es-ES';
-    }
 
-    utterance.onend = () => setPlayingVoiceId(null);
-    window.speechSynthesis.speak(utterance);
+    speakBrowserUtterance({
+      text: voice.phrase,
+      voiceURI: selectedVoice?.voiceURI,
+      onStart: () => setPlayingVoiceId(voice.id),
+      onEnd: () => setPlayingVoiceId(null),
+      onError: () => setPlayingVoiceId(null)
+    });
   };
 
   // Voice Speech Synth with local audio.cpp support
@@ -228,7 +224,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
         window.activeAudioElement.pause();
         window.activeAudioElement = null;
       } else {
-        window.speechSynthesis.cancel();
+        cancelBrowserSpeech();
       }
       setPlayingVoiceId(null);
       return;
@@ -284,7 +280,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
     setIsGeneratingCustomVoice(true);
     setGeneratedVoicePreviews(null);
     setSelectedPreviewIndex(null);
-    window.speechSynthesis.cancel();
+    cancelBrowserSpeech();
     setPlayingPreviewId(null);
     
     setTimeout(() => {
@@ -328,24 +324,15 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
   };
 
   const playPreviewSpeechSynthesis = (preview, textToSpeak) => {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-    
-    const voices = window.speechSynthesis.getVoices();
-    const voice = voices.find(v => v.voiceURI === selectedVoiceURI);
-    if (voice) {
-      utterance.voice = voice;
-      utterance.lang = voice.lang;
-    } else {
-      utterance.lang = 'es-ES';
-    }
-    
-    utterance.pitch = voicePitch * preview.pitchFactor;
-    utterance.rate = voiceRate * preview.rateFactor;
-    
-    utterance.onend = () => setPlayingPreviewId(null);
-    window.speechSynthesis.speak(utterance);
-    setPlayingPreviewId(preview.id);
+    speakBrowserUtterance({
+      text: textToSpeak,
+      voiceURI: selectedVoiceURI,
+      pitch: voicePitch * preview.pitchFactor,
+      rate: voiceRate * preview.rateFactor,
+      onStart: () => setPlayingPreviewId(preview.id),
+      onEnd: () => setPlayingPreviewId(null),
+      onError: () => setPlayingPreviewId(null)
+    });
   };
 
   const handlePlayVoicePreview = async (preview) => {
@@ -354,7 +341,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
         window.activeAudioElement.pause();
         window.activeAudioElement = null;
       } else {
-        window.speechSynthesis.cancel();
+        cancelBrowserSpeech();
       }
       setPlayingPreviewId(null);
       return;
@@ -460,6 +447,12 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
     }
     
     try {
+      const fallbackSoundSpeak = () => {
+        speakBrowserUtterance({
+          text: `Sintetizando efecto de sonido para: ${audioPrompt.trim()}`
+        });
+      };
+
       const audioUrl = await generateAudioLocal(`Efecto de sonido de: ${audioPrompt.trim()}`);
       if (audioUrl) {
         if (window.activeAudioElement) {
@@ -468,24 +461,17 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
         const audio = new Audio(audioUrl);
         window.activeAudioElement = audio;
         audio.play().catch(() => {
-          window.speechSynthesis.cancel();
-          const utterance = new SpeechSynthesisUtterance(`Sintetizando efecto de sonido para: ${audioPrompt.trim()}`);
-          utterance.lang = 'es-ES';
-          window.speechSynthesis.speak(utterance);
+          fallbackSoundSpeak();
         });
         alert(`Efecto de sonido "${audioPrompt.trim()}" generado y reproducido localmente.`);
       } else {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(`Sintetizando efecto de sonido para: ${audioPrompt.trim()}`);
-        utterance.lang = 'es-ES';
-        window.speechSynthesis.speak(utterance);
+        fallbackSoundSpeak();
         alert(`Efecto de sonido "${audioPrompt.trim()}" generado mediante síntesis del navegador.`);
       }
     } catch (e) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(`Sintetizando efecto de sonido para: ${audioPrompt.trim()}`);
-      utterance.lang = 'es-ES';
-      window.speechSynthesis.speak(utterance);
+      speakBrowserUtterance({
+        text: `Sintetizando efecto de sonido para: ${audioPrompt.trim()}`
+      });
       alert(`Efecto de sonido "${audioPrompt.trim()}" generado mediante síntesis del navegador.`);
     }
   };
@@ -516,7 +502,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
       <div className="create-page" style={{ padding: '16px' }}>
         <button 
           onClick={() => {
-            window.speechSynthesis.cancel();
+            cancelBrowserSpeech();
             setPlayingVoiceId(null);
             setActiveAiTool(null);
           }}

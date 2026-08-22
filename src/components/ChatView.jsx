@@ -16,195 +16,20 @@ import {
   faBrain, 
   faHighlighter,
   faTrashAlt,
-  faBookOpen,
   faMagic,
   faSave,
   faExternalLinkAlt
 } from '@fortawesome/free-solid-svg-icons';
-import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask } from '../utils/lmstudio';
+import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask } from '../utils/localAIStudio';
+import { resolveTargetLanguage, getLanguageDirective } from '../utils/language';
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
+import { speakBrowserUtterance, cancelBrowserSpeech } from '../utils/speechTTS';
+import { FormattedMessageText } from '../utils/textFormatter';
 import { addChat } from '../utils/db';
 import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
 import ConfirmModal from './ConfirmModal';
 import './chats.css';
-
-function renderInlineFormattedText(rawText, onTagClick, appData) {
-  if (!rawText) return null;
-  // Regex para capturar resaltados ==...==, negritas **...**, pensamientos ~...~, o diálogos "..."
-  const innerRegex = /(==[^=\n]+==|\*\*[^*\n]+\*\*|~[^~\n]+~|"[^"\n]+")/g;
-  const innerParts = rawText.split(innerRegex);
-  return innerParts.map((sub, j) => {
-    if (!sub) return null;
-    if (sub.startsWith('==') && sub.endsWith('==') && sub.length >= 4) {
-      const tagContent = sub.slice(2, -2).trim();
-      const existing = (appData?.cards || []).find(c => (c.title || c.name || '').toLowerCase() === tagContent.toLowerCase()) ||
-                       (appData?.scenarios || []).find(s => (s.title || '').toLowerCase() === tagContent.toLowerCase());
-      return (
-        <mark 
-          key={j} 
-          className={`msg-highlight ${existing ? 'existing-card' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onTagClick) onTagClick(tagContent, existing);
-          }}
-          title={existing 
-            ? `📖 Entidad existente: ${existing.title || existing.name} (${existing.type || 'Escenario'}). Clic para inspeccionar.` 
-            : `✨ Término clave: "${tagContent}". Clic para inspeccionar o crear tarjeta en el compendio.`
-          }
-        >
-          <FontAwesomeIcon icon={existing ? faBookOpen : faHighlighter} className="msg-type-icon highlight-icon" />
-          {tagContent}
-        </mark>
-      );
-    }
-    if (sub.startsWith('**') && sub.endsWith('**') && sub.length >= 4) {
-      return <strong key={j} className="msg-bold">{sub.slice(2, -2)}</strong>;
-    }
-    if (sub.startsWith('~') && sub.endsWith('~') && sub.length >= 2) {
-      return (
-        <span key={j} className="msg-thought">
-          <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />
-          {sub.slice(1, -1)}
-        </span>
-      );
-    }
-    if (sub.startsWith('"') && sub.endsWith('"') && sub.length >= 2) {
-      return (
-        <span key={j} className="msg-dialogue">
-          <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
-          {sub}
-        </span>
-      );
-    }
-    return sub;
-  });
-}
-
-function FormattedMessageText({ text, onTagClick, appData }) {
-  const [showThinking, setShowThinking] = useState(false);
-  if (!text) {
-    return (
-      <span className="msg-streaming-indicator" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', opacity: 0.75, fontStyle: 'italic', fontSize: '0.85rem', color: '#ffd36b' }}>
-        <FontAwesomeIcon icon={faBrain} className="fa-pulse" /> Esperando respuesta del narrador...
-      </span>
-    );
-  }
-
-  // Extraer bloque de razonamiento / pensamiento <think>...</think> si el modelo lo incluye
-  let thinkingContent = null;
-  let cleanText = text;
-  const isCurrentlyThinking = text.includes('<think>') && !text.includes('</think>');
-
-  const thinkMatch = text.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
-  if (thinkMatch) {
-    thinkingContent = thinkMatch[1].trim();
-    cleanText = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
-  }
-
-  // Regex para bloques principales: asteriscos *...*, comillas "...", o resaltar ==...==
-  const regex = /(\*[^*]+\*|"[^"]+"|\*\*[^*]+\*\*|~[^~]+~|==[^=]+==)/g;
-  const parts = cleanText ? cleanText.split(regex) : [];
-
-  const shouldDisplayThinking = showThinking || isCurrentlyThinking;
-
-  return (
-    <span>
-      {thinkingContent && (
-        <div className="msg-think-box" style={{
-          background: 'rgba(192, 132, 252, 0.04)',
-          border: isCurrentlyThinking ? '1px dashed #c084fc' : '1px solid rgba(192, 132, 252, 0.2)',
-          borderRadius: '6px',
-          marginBottom: '10px',
-          fontSize: '0.78rem',
-          overflow: 'hidden'
-        }}>
-          <div 
-            onClick={() => setShowThinking(prev => !prev)}
-            style={{
-              cursor: 'pointer',
-              padding: '5px 10px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              userSelect: 'none',
-              background: 'rgba(192, 132, 252, 0.08)',
-              color: '#c084fc'
-            }}
-            title="Clic para desplegar el razonamiento interno"
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}>
-              <FontAwesomeIcon icon={faBrain} className={isCurrentlyThinking ? 'fa-pulse' : ''} /> 
-              {isCurrentlyThinking ? 'Razonando en vivo...' : 'Pensamiento del Narrador'}
-            </span>
-            <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-              {shouldDisplayThinking ? '▼ Ocultar' : '▶ Ver pensamiento'}
-            </span>
-          </div>
-          {shouldDisplayThinking && (
-            <div style={{ padding: '8px 12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.7)', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
-              {thinkingContent}
-              {isCurrentlyThinking && <span style={{ opacity: 0.6, color: '#c084fc' }}> ▍</span>}
-            </div>
-          )}
-        </div>
-      )}
-      {parts.map((part, i) => {
-        if (!part) return null;
-        if (part.startsWith('*') && part.endsWith('*') && part.length >= 2) {
-          return (
-            <em key={i} className="msg-action">
-              <FontAwesomeIcon icon={faRunning} className="msg-type-icon action-icon" />
-              {renderInlineFormattedText(part.slice(1, -1), onTagClick, appData)}
-            </em>
-          );
-        }
-        if (part.startsWith('"') && part.endsWith('"') && part.length >= 2) {
-          return (
-            <span key={i} className="msg-dialogue">
-              <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
-              {renderInlineFormattedText(part, onTagClick, appData)}
-            </span>
-          );
-        }
-        if (part.startsWith('==') && part.endsWith('==') && part.length >= 4) {
-          const tagContent = part.slice(2, -2).trim();
-          const existing = (appData?.cards || []).find(c => (c.title || c.name || '').toLowerCase() === tagContent.toLowerCase()) ||
-                           (appData?.scenarios || []).find(s => (s.title || '').toLowerCase() === tagContent.toLowerCase());
-          return (
-            <mark 
-              key={i} 
-              className={`msg-highlight ${existing ? 'existing-card' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onTagClick) onTagClick(tagContent, existing);
-              }}
-              title={existing 
-                ? `📖 Entidad existente: ${existing.title || existing.name} (${existing.type || 'Escenario'}). Clic para inspeccionar.` 
-                : `✨ Término clave: "${tagContent}". Clic para inspeccionar o crear tarjeta en el compendio.`
-              }
-            >
-              <FontAwesomeIcon icon={existing ? faBookOpen : faHighlighter} className="msg-type-icon highlight-icon" />
-              {tagContent}
-            </mark>
-          );
-        }
-        if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-          return <strong key={i} className="msg-bold">{renderInlineFormattedText(part.slice(2, -2), onTagClick, appData)}</strong>;
-        }
-        if (part.startsWith('~') && part.endsWith('~') && part.length >= 2) {
-          return (
-            <span key={i} className="msg-thought">
-              <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />
-              {renderInlineFormattedText(part.slice(1, -1), onTagClick, appData)}
-            </span>
-          );
-        }
-        return <React.Fragment key={i}>{renderInlineFormattedText(part, onTagClick, appData)}</React.Fragment>;
-      })}
-    </span>
-  );
-}
 
 export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onOpenCreateModal }) {
   const [messages, setMessages] = useState(chat?.messages || []);
@@ -288,10 +113,30 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
     if (!activeEntityModal || isGeneratingLore) return;
     setIsGeneratingLore(true);
     try {
-      const prompt = `Describe brevemente (2-3 frases evocadoras e inmersivas en español) la entidad, personaje, lugar u objeto "${activeEntityModal.draftTitle}" de tipo "${activeEntityModal.draftType}" dentro de una partida de rol de fantasía.`;
+      const scenario = appData?.scenarios?.find(s => s.id === chat?.scenarioId || s.title === chat?.scenario);
+      const recentHistory = messages.slice(-8).map(m => (m.from === 'user' ? 'Jugador: ' : 'Narrador: ') + m.text).join('\n');
+      const scenarioContext = scenario ? `[Escenario: ${scenario.title}. Lore base: ${scenario.baseContext || scenario.intro || 'Sin contexto adicional'}]` : `[Escenario: ${chat?.scenario || 'Fantasía'}]`;
+      const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, [recentHistory, scenario?.baseContext, activeEntityModal.draftTitle]);
+
+      const prompt = `Provide a rich, precise, and highly atmospheric 2-3 sentence description for the entity "${activeEntityModal.draftTitle}" of type "${activeEntityModal.draftType}".
+
+[SCENARIO CONTEXT & WORLD LORE]:
+${scenarioContext}
+
+[RECENT STORY EVENTS WHERE THIS ENTITY APPEARS]:
+${recentHistory || 'Beginning of the game session.'}
+
+[MANDATORY SITUATIONAL COHERENCE RULES]:
+1. If the character has a specific role, physical condition, or situation in the ongoing scene (e.g. captive, enslaved, merchant, injured guard, etc.), your description MUST strictly reflect that exact reality.
+2. STRICTLY FORBIDDEN to invent generic, ungrounded mythological archetypes that contradict the ongoing scene (e.g. do not invent free forest guardians if the scene portrays an enslaved captive in a town square).
+3. Output language: Write the description strictly in ${targetLang.name} (${targetLang.code}).`;
+
       const res = await sendChatMessage({
         messages: [{ from: 'user', text: prompt }],
-        systemInstruction: 'Eres un generador de fichas de compendio y lore de alta fantasía. Responde directamente con el texto descriptivo sin rodeos.',
+        systemInstruction: `You are the Compendium Lorekeeper of a tabletop RPG.
+Generate rich, highly atmospheric, and strictly context-grounded compendium descriptions.
+Language: Output MUST be strictly in ${targetLang.name} (${targetLang.code}).
+Respond directly with the descriptive lore text without introductory fluff or preamble.`,
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl
       });
@@ -460,7 +305,7 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
         window.activeAudioElement.pause();
         window.activeAudioElement = null;
       } else {
-        window.speechSynthesis.cancel();
+        cancelBrowserSpeech();
       }
       setSpeakingMessageId(null);
       return;
@@ -473,6 +318,17 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
     const narrator = (appData?.narrators || []).find(n => n.id === scenario?.narrator);
 
     const textToSpeak = message.text;
+
+    const fallbackBrowserSpeech = () => {
+      speakBrowserUtterance({
+        text: textToSpeak,
+        voiceURI: narrator?.voiceURI,
+        pitch: narrator?.pitch || 1.0,
+        rate: narrator?.rate || 1.0,
+        onEnd: () => setSpeakingMessageId(null),
+        onError: () => setSpeakingMessageId(null)
+      });
+    };
 
     // Si hay un narrador asignado y tiene motor de LM Studio configurado
     if (narrator && narrator.voiceEngine === 'lmstudio') {
@@ -495,70 +351,47 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
             window.activeAudioElement = null;
           };
           audio.onerror = () => {
-            setSpeakingMessageId(null);
-            playMessageSpeechSynthesis(textToSpeak, narrator);
+            fallbackBrowserSpeech();
           };
           audio.play().catch(() => {
             setSpeakingMessageId(null);
           });
         } else {
-          playMessageSpeechSynthesis(textToSpeak, narrator);
+          fallbackBrowserSpeech();
         }
       } catch (err) {
-        playMessageSpeechSynthesis(textToSpeak, narrator);
+        fallbackBrowserSpeech();
       }
     } else {
-      playMessageSpeechSynthesis(textToSpeak, narrator);
+      fallbackBrowserSpeech();
     }
-  };
-
-  const playMessageSpeechSynthesis = (text, narrator) => {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    if (narrator && narrator.voiceURI) {
-      const voices = window.speechSynthesis.getVoices();
-      const voice = voices.find(v => v.voiceURI === narrator.voiceURI);
-      if (voice) {
-        utterance.voice = voice;
-        utterance.lang = voice.lang;
-      }
-    } else {
-      utterance.lang = 'es-ES';
-    }
-
-    utterance.pitch = narrator?.pitch || 1.0;
-    utterance.rate = narrator?.rate || 1.0;
-
-    utterance.onend = () => setSpeakingMessageId(null);
-    window.speechSynthesis.speak(utterance);
   };
 
   // Construcción unificada y estructurada del systemPrompt (arnés de contexto).
   // Consolida los detalles del escenario, narrador, herramientas del taller, jugador, inventario y memorias.
   const buildSystemPrompt = () => {
-    // 1. Obtener escenario y narrador vinculados
+    // 1. Resolve linked scenario and narrator
     const scenario = appData?.scenarios?.find(s => s.id === chat.scenarioId);
     const narrator = (appData?.narrators || []).find(n => n.id === scenario?.narrator);
 
-    // 2. Obtener ficha del personaje interpretado por el usuario
+    // 2. Resolve player character sheet
     const userChar = (appData?.cards || []).find(c => c.id === chat.characterId);
 
-    // 3. Formatear los detalles del perfil del narrador (Instrucciones narrativas, Estilo, Tono, Reglas)
+    // 3. Format Narrator/DM Profile
     let narratorDetails = '';
     if (narrator) {
       narratorDetails = `
-[NARRADOR / DM ACTIVO]:
-- Nombre: ${narrator.name}
-${narrator.bio ? `- Instrucciones narrativas: ${narrator.bio}` : ''}
-${narrator.style ? `- Estilo Narrativo: ${narrator.style}` : ''}
-${narrator.tone ? `- Tono: ${narrator.tone}` : ''}
-${narrator.rules ? `- Reglas del Narrador: ${narrator.rules}` : ''}
-${narrator.randomization ? `- Azar/Mecánicas: ${narrator.randomization}` : ''}
+[ACTIVE GAME MASTER / NARRATOR PROFILE]:
+- Name: ${narrator.name}
+${narrator.bio ? `- Narrative Directives: ${narrator.bio}` : ''}
+${narrator.style ? `- Prose Style: ${narrator.style}` : ''}
+${narrator.tone ? `- Tone: ${narrator.tone}` : ''}
+${narrator.rules ? `- Narrator Rules: ${narrator.rules}` : ''}
+${narrator.randomization ? `- Mechanics/Randomness: ${narrator.randomization}` : ''}
 `.trim();
     }
 
-    // 4. Formatear herramientas del taller asignadas al narrador
+    // 4. Format modular tools from workshop
     let narratorToolsDetails = '';
     if (narrator && narrator.tools && narrator.tools.length > 0) {
       const assignedTools = (appData?.tools || []).filter(t => narrator.tools.includes(t.id));
@@ -567,92 +400,97 @@ ${narrator.randomization ? `- Azar/Mecánicas: ${narrator.randomization}` : ''}
           let mechanics = '';
           if (tool.toolType === 'attributes') {
             const attrs = tool.config?.attributes || [];
-            mechanics = `Barras de Atributos del Sistema:\n` + attrs.map(a => `  * ${a.name} [${a.current ?? a.max}/${a.max}] (Color: ${a.color || 'auto'}) - ${a.desc || 'Recurso/Métrica'}`).join('\n');
+            mechanics = `System Attribute Bars:\n` + attrs.map(a => `  * ${a.name} [${a.current ?? a.max}/${a.max}] (Color: ${a.color || 'auto'}) - ${a.desc || 'Metric/Resource'}`).join('\n');
           } else if (tool.toolType === 'progression') {
             const levels = tool.config?.levels || [];
-            mechanics = `Tabla de Progresión (${tool.config?.scaleName || 'Nivel'}):\n` + levels.map(l => `  * Nivel ${l.level} (${l.title}): ${l.perks || 'Requisitos/Ventajas'}`).join('\n');
+            mechanics = `Progression Scale (${tool.config?.scaleName || 'Level'}):\n` + levels.map(l => `  * Level ${l.level} (${l.title}): ${l.perks || 'Requirements/Perks'}`).join('\n');
           } else if (tool.toolType === 'dice') {
             const dice = tool.config?.diceType || '1d20';
             const dc = tool.config?.defaultDC || '12';
-            mechanics = `Sistema de Resolución y Azar: Dados ${dice} (DC base: ${dc}). Críticos: Éxito en ${tool.config?.critSuccess || 20}, Pifia en ${tool.config?.critFail || 1}. Modificadores: ${tool.config?.statModifier || 'Atributo relevante'}.`;
+            mechanics = `Resolution System: Dice ${dice} (Base DC: ${dc}). Crits: Success on ${tool.config?.critSuccess || 20}, Fail on ${tool.config?.critFail || 1}. Modifiers: ${tool.config?.statModifier || 'Relevant Attribute'}.`;
           } else if (tool.toolType === 'events') {
             const evts = tool.config?.events || [];
-            mechanics = `Tabla de Encuentros y Eventos (${tool.config?.diceType || '1d20'}):\n` + evts.map(e => `  * Rango [${e.min}-${e.max}]: ${e.event} (${e.severity || 'Normal'})`).join('\n');
+            mechanics = `Event & Encounter Table (${tool.config?.diceType || '1d20'}):\n` + evts.map(e => `  * Range [${e.min}-${e.max}]: ${e.event} (${e.severity || 'Normal'})`).join('\n');
           } else {
-            mechanics = `Reglas / Mecánica Personalizada:\n${tool.config?.customRules || tool.description || 'Sin reglas especificadas.'}`;
+            mechanics = `Custom Mechanics & Rules:\n${tool.config?.customRules || tool.description || 'No specific rules.'}`;
           }
-          return `--- [HERRAMIENTA: ${tool.name} (${(tool.toolType || 'custom').toUpperCase()})] ---\nDescripción: ${tool.description || 'Herramienta de juego'}\n${mechanics}`;
+          return `--- [TOOL: ${tool.name} (${(tool.toolType || 'custom').toUpperCase()})] ---\nDescription: ${tool.description || 'Game Mechanic Tool'}\n${mechanics}`;
         }).join('\n\n');
 
         narratorToolsDetails = `
-[HERRAMIENTAS Y MECÁNICAS MODULARES (TALLER DE FUNCIONES)]:
-El narrador tiene acceso a las siguientes herramientas y presets para modularizar la partida. Úsalos como referencia para resolver acciones, calcular daño/éxitos o detonar eventos cuando la situación lo amerite:
+[MODULAR GAME MECHANICS & TOOL WORKSHOP]:
+The Game Master has access to the following modular tools and mechanics. Reference them when resolving checks, damage, DC tests, or triggering events:
 ${toolsText}
 `.trim();
       }
     }
 
-    // 5. Formatear la descripción del personaje del usuario
+    // 5. Format Player Character dossier
     let userCharDetails = '';
     if (userChar) {
       userCharDetails = `
-[PERSONAJE DEL JUGADOR ({{user}})]:
-- Nombre: ${userChar.title || userChar.name}
-${userChar.intro ? `- Descripción corta: ${userChar.intro}` : ''}
-${userChar.text ? `- Detalles/Historia: ${userChar.text}` : ''}
-${userChar.traits && userChar.traits.length > 0 ? `- Rasgos: ${userChar.traits.join(', ')}` : ''}
+[PLAYER CHARACTER DOSSIER ({{user}})]:
+- Name: ${userChar.title || userChar.name}
+${userChar.intro ? `- Brief Summary: ${userChar.intro}` : ''}
+${userChar.text ? `- Background/Details: ${userChar.text}` : ''}
+${userChar.traits && userChar.traits.length > 0 ? `- Traits: ${userChar.traits.join(', ')}` : ''}
 `.trim();
     }
 
-    // 6. Formatear inventario del personaje
+    // 6. Format Player Inventory
     let userInventoryDetails = '';
     if (userChar) {
       const userInventories = (appData?.cards || []).filter(c => c.type === 'Inventario' && (c.linkedCharacterId === userChar.id || c.linkedCharacterId === userChar.title));
       if (userInventories.length > 0) {
         const invText = userInventories.map(inv => {
-          const itemsList = (inv.items || []).map(it => `  * [${it.equipped ? 'EQUIPADO' : 'EN BOLSA'}] ${it.name} (x${it.qty || 1}, ${it.rarity || 'Común'}) - ${it.desc || ''}`).join('\n');
-          return `Mochila/Inventario "${inv.title}" (Capacidad: ${inv.capacity || 'Estándar'}):\n${itemsList || '  (Vacío)'}`;
+          const itemsList = (inv.items || []).map(it => `  * [${it.equipped ? 'EQUIPPED' : 'IN BAG'}] ${it.name} (x${it.qty || 1}, ${it.rarity || 'Common'}) - ${it.desc || ''}`).join('\n');
+          return `Inventory/Bag "${inv.title}" (Capacity: ${inv.capacity || 'Standard'}):\n${itemsList || '  (Empty)'}`;
         }).join('\n\n');
 
         userInventoryDetails = `
-[INVENTARIO Y EQUIPAMIENTO DE {{user}}]:
+[PLAYER INVENTORY & EQUIPMENT ({{user}})]:
 ${invText}
 `.trim();
       }
     }
 
-    // 7. Formatear los detalles del escenario y reglas adicionales del formulario (Contexto Extra)
-    let scenarioDetails = `Escenario: ${chat.scenario}.`;
+    // 7. Format Playable Scenario details
+    let scenarioDetails = `Scenario: ${chat.scenario}.`;
     if (scenario) {
       scenarioDetails = `
-[ESCENARIO JUGABLE]:
-- Título: ${scenario.title}
-${scenario.intro ? `- Introducción: ${scenario.intro}` : ''}
-${scenario.baseContext ? `- Lore / Contexto base: ${scenario.baseContext}` : ''}
-${scenario.aiInstructions ? `- Instrucciones adicionales del GM (Contexto Extra): ${scenario.aiInstructions}` : ''}
+[ACTIVE PLAYABLE SCENARIO]:
+- Scenario Title: ${scenario.title}
+${scenario.intro ? `- Introduction: ${scenario.intro}` : ''}
+${scenario.baseContext ? `- Base Lore / World Context: ${scenario.baseContext}` : ''}
+${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${scenario.aiInstructions}` : ''}
 `.trim();
     }
 
-    // 8. Formatear memorias e hitos (tanto del chat como tarjetas de memoria enlazadas)
+    // 8. Format Memories & Milestones
     const inChatMemories = (chat.memoryCards || []).map(m => `* ${m}`);
     const cardMemories = (appData?.cards || []).filter(c => c.type === 'Memoria' && (
       c.linkedScenario === chat.scenarioId || 
       (Array.isArray(c.linkedCharacters) && userChar && (c.linkedCharacters.includes(userChar.id) || c.linkedCharacters.includes(userChar.title)))
-    )).map(m => `* [Impacto: ${m.impact || 'Medio'}] (${m.timeline || 'Hito'}) ${m.title}: ${m.summary || m.text}`);
+    )).map(m => `* [Impact: ${m.impact || 'Medium'}] (${m.timeline || 'Milestone'}) ${m.title}: ${m.summary || m.text}`);
 
     const allMemories = [...inChatMemories, ...cardMemories];
-    const memoryContext = allMemories.length > 0 ? allMemories.join('\n') : 'No hay memorias previas registradas.';
+    const memoryContext = allMemories.length > 0 ? allMemories.join('\n') : 'No previous memories recorded.';
+
+    const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
+    const languageDirective = getLanguageDirective(targetLang);
 
     return `
-[IDENTIDAD FUNDAMENTAL Y PERSPECTIVA OBLIGATORIA]:
-- TU ROL ES: NARRADOR EXTERNO y DIRECTOR DE JUEGO (Game Master / DM). Eres el mundo, el entorno, el clima y los PERSONAJES NO JUGADORES (PNJs).
-- EL USUARIO ES: {{user}} (${userChar ? userChar.title || userChar.name : 'el personaje del jugador'}). Solo el usuario tiene potestad sobre {{user}}.
-- PERSPECTIVA DE NARRACIÓN: TERCERA PERSONA ESTRICTA. Describe el entorno y los PNJs desde una perspectiva exterior inmersiva.
-- PROHIBICIÓN RADICAL DE PRIMERA PERSONA DEL JUGADOR:
-  * NUNCA narres en primera persona ("Observo...", "Me acerco...", "Pregunto...", "Siento..."). Eso es suplantar al jugador.
-  * NUNCA inventes diálogos, pensamientos ni acciones de {{user}}.
-  * NUNCA generes prefijos como "Tú:", "{{user}}:", "Jugador:".
-  * Tu respuesta debe contener ÚNICAMENTE cómo reacciona el mundo y qué dicen o hacen los PNJs ante lo que el jugador hizo.
+${languageDirective}
+
+[FUNDAMENTAL IDENTITY & NARRATIVE PERSPECTIVE]:
+- YOUR ROLE IS: External Game Master / Storyteller (Game Master / DM). You are the living world, the environment, the weather, and all Non-Player Characters (NPCs).
+- THE USER IS: {{user}} (${userChar ? userChar.title || userChar.name : 'the player character'}). Only the user controls {{user}}.
+- NARRATION PERSPECTIVE: STRICT THIRD-PERSON. Describe the world, surroundings, and NPCs from an immersive external perspective.
+- STRICT PROHIBITION AGAINST FIRST-PERSON PLAYER NARRATION:
+  * NEVER narrate in the first person ("I observe...", "I approach...", "I feel..."). That usurps the player.
+  * NEVER invent dialogue, thoughts, feelings, or actions for {{user}}.
+  * NEVER generate prefixes like "You:", "{{user}}:", "Player:".
+  * Your response must contain ONLY how the world reacts and what NPCs say or do in response to what the player did.
 
 ${scenarioDetails}
 
@@ -660,42 +498,42 @@ ${narratorDetails}
 
 ${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
 
-${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}[ÓRDENES CONSTANTES DE LA IA]:
-${chat.constantPrompt ? chat.constantPrompt : 'Interpreta de manera inmersiva como narrador externo.'}
+${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}[PERSISTENT AI ORDERS]:
+${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external Game Master in strict third-person.'}
 
-[REGLAS CRÍTICAS DEL ARNÉS (DIRECTIVAS INVIOLABLES DE NARRACIÓN)]:
-1. PROHIBICIÓN TOTAL DE DESCRIBIR EL ASPECTO, CUERPO O INVENTARIO DEL JUGADOR:
-   - El jugador YA CONOCE perfectamente cómo es su personaje, qué ropa lleva y qué armas porta.
-   - NUNCA malgastes texto ni párrafos describiendo la apariencia física de {{user}}, su musculatura, su equipo al cinto, ni inventes mutaciones o rasgos anatómicos arbitrarios. {{user}} es estrictamente humano según su ficha.
-   - PROHIBIDO el estilo invasivo de segunda persona ("Eres...", "Tu cuerpo...", "Sientes...", "Tus ojos...").
+[CORE SYSTEM DIRECTIVES & INVIOLABLE HARNESS RULES]:
+1. STRICT PROHIBITION AGAINST OVER-DESCRIBING PLAYER APPEARANCE OR INVENTORY:
+   - The player ALREADY knows their character's appearance, equipment, and clothing.
+   - NEVER waste output describing {{user}}'s muscles, physique, attire, or invent random anatomical traits. {{user}} is strictly human according to their sheet.
+   - FORBIDDEN to use invasive second-person style ("You are...", "Your body feels...", "Your eyes see...").
 
-2. PROHIBICIÓN ABSOLUTA DE ACTUAR O DECIDIR POR EL JUGADOR (NO AUTOPLAY/GODMODING):
-   - NUNCA hables, actúes, tomes decisiones, ni describas los pensamientos, intenciones o reacciones físicas de {{user}} (${userChar ? userChar.title || userChar.name : 'el personaje del jugador'}).
-   - Limítate a describir cómo reacciona el entorno y qué hacen o dicen los PNJs en tercera persona.
-   - Al concluir las consecuencias inmediatas, detén la narración para ceder el turno al jugador.
+2. STRICT PROHIBITION AGAINST ACTING OR DECIDING FOR THE PLAYER (NO AUTOPLAY / NO GODMODING):
+   - NEVER speak, act, decide, or describe thoughts/feelings for {{user}} (${userChar ? userChar.title || userChar.name : 'the player character'}).
+   - Limit yourself strictly to world consequences and NPC reactions in third-person.
+   - Conclude immediate consequences and stop to yield the turn to the player.
 
-3. ENFOQUE TOTAL EN EL MUNDO EXTERNO, AMBIENTACIÓN Y PNJS:
-   - Centra el 100% de tu vocabulario y esfuerzo descriptivo en lo que rodea a {{user}}: los edificios del poblado, el clima, los olores, la tensión en el aire y, sobre todo, las acciones, diálogos, posturas y miradas de los PNJs que habitan el mundo.
+3. TOTAL FOCUS ON EXTERNAL ENVIRONMENT & LIVING NPCS:
+   - Focus 100% of descriptive vocabulary and effort on what surrounds {{user}}: buildings, weather, scents, tension, and especially the actions, posture, dialogue, and glances of NPCs.
 
-4. CERO ECO / SIN PARAFRASEO REPETITIVO:
-   - NO comiences tu respuesta resumiendo, repitiendo o haciendo eco de lo que el usuario acaba de escribir.
-   - Entra de lleno en la acción con las consecuencias y reacciones vivas del mundo.
+4. ZERO ECHO / NO REPETITIVE PARAPHRASING:
+   - Do NOT begin your response by summarizing, repeating, or echoing what the player just wrote.
+   - Step directly into the action with immediate world consequences and live reactions.
 
-5. LOS PERSONAJES Y PNJs NO SON OMNISCIENTES:
-   - Los PNJs y criaturas del mundo poseen conocimiento limitado y subjetivo: solo saben lo que han visto, oído o aprendido en su vida.
-   - Ningún PNJ puede leer la mente de {{user}}, conocer sus planes ocultos, intenciones secretas ni adivinar los objetos guardados en su inventario a menos que se les muestre o mencione de forma explícita.
+5. NPCS HAVE LIMITED SUBJECTIVE KNOWLEDGE (NO OMNISCIENCE):
+   - NPCs and creatures possess limited, subjective knowledge: they only know what they have personally seen, heard, or learned.
+   - No NPC can read {{user}}'s mind, know their secret plans, or guess items in their inventory unless explicitly shown or mentioned.
 
-6. MUNDO VIVO, ORGÁNICO Y COHERENTE:
-   - El mundo no gira de forma sumisa ante el jugador; las acciones imprudentes conllevan riesgos, consecuencias lógicas y oposición verosímil.
-   - Mantén consistencia estricta con el lore del escenario, el inventario y las memorias acumuladas.
+6. LIVING, ORGANIC, AND COHERENT WORLD:
+   - The world does not revolve subserviently around the player; reckless actions carry realistic risks, logical consequences, and believable opposition.
+   - Maintain strict consistency with scenario lore, inventory, and accumulated memories.
 
-7. FORMATO TIPOGRÁFICO ESTRICTO (PARA EL MOTOR VISUAL):
-   - Diálogos hablados de PNJs: EXCLUSIVAMENTE entre comillas dobles: "Hola, forastero."
-   - Acciones, descripciones y narrativa del mundo: EXCLUSIVAMENTE entre asteriscos: *El tabernero limpió la mesa con un trapo húmedo.*
-   - Pensamientos o monólogos internos de PNJs: entre virgulillas: ~¿Estará diciendo la verdad?~
-   - Términos, pistas, lugares o nombres clave: entre signos de igual: ==Vallebruma==
+7. STRICT TYPOGRAPHICAL FORMATTING (FOR FRONTEND RENDERING):
+   - Spoken NPC Dialogue: EXCLUSIVAMENTE between double quotes: "Hello, traveler."
+   - Actions, narrative descriptions, and world events: EXCLUSIVAMENTE between asterisks: *The barkeep wiped the counter with a damp cloth.*
+   - NPC thoughts or internal murmurs: between tildes: ~Can this traveler be trusted?~
+   - Key entities, clues, places, or proper names: between equal signs: ==Vallebruma==
 
-[MEMORIAS Y HECHOS DE LA HISTORIA]:
+[RECORDED STORY MEMORIES & MILESTONES]:
 ${memoryContext}
 `.trim();
   };
@@ -709,6 +547,7 @@ ${memoryContext}
           messages: finalMsgs,
           currentMemory: chat.memoryCards || [],
           modelId: chatSettings?.preferredModel,
+          preferredLanguage: chatSettings?.preferredLanguage || 'auto',
           baseUrl: chatSettings?.lmStudioUrl
         });
         if (newSummary && typeof newSummary === 'string' && newSummary.trim()) {
@@ -743,6 +582,7 @@ ${memoryContext}
           messages: finalMsgs,
           existingCards: existingCards,
           modelId: chatSettings?.preferredModel,
+          preferredLanguage: chatSettings?.preferredLanguage || 'auto',
           baseUrl: chatSettings?.lmStudioUrl
         });
 

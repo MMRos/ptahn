@@ -1,78 +1,75 @@
 # current-dev.yaml
-# Archivo activo de desarrollo gestionado por el agente Leader.
+# Archivo activo de desarrollo gestionado por el agente Leader y sincronizado con OpenSpec.
 # Estados válidos: Waiting | In Progress | Testing Pending | Completed
-# Al completarse, cada función se mueve a story-dev.yaml.
 
 project:
   meta:
-    name: "" # Nombre del proyecto
-    language: "JavaScript/TypeScript"
-    loop_mode: "" # true | false
-    created: "" # ISO 8601
-    updated: "" # ISO 8601
+    name: "ptahn"
+    language: "JavaScript (React)"
+    loop_mode: true
+    created: "2026-08-22T09:35:00Z"
+    updated: "2026-08-22T09:57:00Z"
 
   functions:
-    F001:
-      name: "nombre_explicativo_de_la_funcion"
-      priority: 1 # 1 = más alta
-      status: "Waiting"
+    F002:
+      name: "sanitize_english_prompts_and_local_ai_studio"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/sanitize-english-prompts-and-local-ai-studio"
 
       specifications:
-        description: "Qué hace esta función"
+        description: "Saneamiento de todo el andamiaje y contexto del LLM a inglés formal y refactorización del orquestador multimodal a localAIStudio.js."
         inputs:
-          - name: ""
-            type: ""
+          - name: "buildSystemPrompt"
+            type: "function"
             required: true
-            description: ""
+            description: "Generador de contexto y reglas del Game Master"
+          - name: "localAIStudio"
+            type: "module"
+            required: true
+            description: "Orquestador unificado de IA"
         outputs:
-          - name: ""
-            type: ""
-            description: ""
-        constraints: []
-          # - Límites, reglas de negocio, condiciones de borde
-        assumptions: []
-          # - Asunciones del Specifier aprobadas por el usuario
-        ui_spec: # Opcional, si aplica UI
-          components: []
-          states: []
-          interactions: []
-          mockup_approved: false
+          - name: "systemPrompt"
+            type: "string"
+            description: "Andamiaje del sistema estructurado en inglés con directiva de idioma objetivo"
+        constraints:
+          - "Todo el andamiaje y directivas del DM deben estar en inglés profesional."
+          - "La directiva de idioma de respuesta debe asegurar que el contenido se redacte en el idioma seleccionado por el usuario."
+        assumptions:
+          - "localAIStudio.js unifica LM Studio, Pinokio / Local AI Studio (sd-vulkan), Audio.cpp y vídeo."
+          - "lmstudio.js permanece como puente de compatibilidad."
 
-      dependencies: []
-        # - IDs de funciones que deben completarse antes
-
+      dependencies: ["F001"]
       skills_required: []
-        # - Nombres de skills pertinentes que cada subagente debe revisar
 
       implementation:
-        module: ""
-        file: ""
-        notes: "Decisiones tomadas, desviaciones del flujo del Planner si las hay"
+        module: "src/utils/localAIStudio.js, src/components/ChatView.jsx, src/components/TopBar.jsx, src/components/CreateModal.jsx, src/pages/Create.jsx"
+        file: "localAIStudio.js, ChatView.jsx, TopBar.jsx, CreateModal.jsx, Create.jsx"
+        notes: "Refactorización a localAIStudio y traducción de scaffolding a inglés."
 
       tests:
-        T001-U:
+        T002-U:
           type: "unit"
-          status: "Pending" # Pass | Fail | Blocked | Pending
-          result: ""
-          name: "Nombre descriptivo"
-          scenario: "Dado X, cuando Y, entonces Z"
-          setup: "Precondiciones"
-          expected: "Resultado esperado"
+          status: "Pass"
+          result: "21/21 tests passing in jest suite"
+          name: "Test de localAIStudio y resolución de endpoints"
+          scenario: "WHEN se invocan métodos de localAIStudio THEN resuelven URLs y endpoints correctamente"
+          setup: "Invocar getBaseUrl y getAvailableModels"
+          expected: "Resolución correcta de endpoints"
           log_integration: true
-        T001-F:
+        T002-F:
           type: "functional"
-          status: "Pending"
-          result: ""
-          name: "Nombre descriptivo"
-          scenario: ""
-          setup: ""
-          expected: ""
+          status: "Pass"
+          result: "Scaffolding de prompts en inglés y salida multilingüe"
+          name: "Test de andamiaje en inglés con directiva de salida multilingüe"
+          scenario: "WHEN se construye buildSystemPrompt THEN los encabezados y directivas están en inglés y respetan el idioma de salida"
+          setup: "Ejecutar buildSystemPrompt"
+          expected: "Encabezados en inglés"
           log_integration: true
 
       error_log: []
-        # Entradas automáticas del try-catch del Implementer
 
       timestamps:
-        started: ""
-        testing_started: ""
-        completed: ""
+        started: "2026-08-22T09:55:00Z"
+        testing_started: "2026-08-22T09:57:00Z"
+        completed: "2026-08-22T09:57:45Z"

@@ -12,6 +12,7 @@ import {
   faUpload,
   faSpinner
 } from '@fortawesome/free-solid-svg-icons';
+import { calculateViewportDimensions, computeBaseFit, exportCroppedCanvas } from '../utils/imageCropUtils';
 import './scenario.css';
 
 export default function ImageCropperModal({ 
@@ -36,8 +37,7 @@ export default function ImageCropperModal({
   const viewportRef = useRef(null);
 
   // Determinar dimensiones del viewport de recorte según la relación de aspecto
-  const viewportWidth = aspectRatio >= 1 ? 480 : Math.round(360 * aspectRatio);
-  const viewportHeight = aspectRatio >= 1 ? Math.round(480 / aspectRatio) : 360;
+  const { viewportWidth, viewportHeight } = calculateViewportDimensions(aspectRatio, 480, 360);
 
   // Inicializar y centrar la imagen completa dentro del viewport cuando se carga
   const resetToFit = useCallback((natW, natH) => {
@@ -45,21 +45,10 @@ export default function ImageCropperModal({
     const h = natH || imgNatural.height;
     if (!w || !h) return;
 
-    const fitScale = Math.min(viewportWidth / w, viewportHeight / h);
-    const baseW = w * fitScale;
-    const baseH = h * fitScale;
-    const initX = (viewportWidth - baseW) / 2;
-    const initY = (viewportHeight - baseH) / 2;
-
-    setBaseFit({
-      scale: fitScale,
-      width: baseW,
-      height: baseH,
-      initX,
-      initY
-    });
+    const fit = computeBaseFit(w, h, viewportWidth, viewportHeight);
+    setBaseFit(fit);
     setZoom(1);
-    setPosition({ x: initX, y: initY });
+    setPosition({ x: fit.initX, y: fit.initY });
   }, [viewportWidth, viewportHeight, imgNatural.width, imgNatural.height]);
 
   const handleImageLoad = (e) => {
@@ -157,44 +146,18 @@ export default function ImageCropperModal({
       return;
     }
 
-    const canvas = document.createElement('canvas');
-    // Salida HD nítida
-    const targetW = aspectRatio < 1 ? 600 : 960;
-    const targetH = Math.round(targetW / aspectRatio);
-    canvas.width = targetW;
-    canvas.height = targetH;
-
-    const ctx = canvas.getContext('2d');
     const img = imgRef.current;
+    const croppedUrl = exportCroppedCanvas({
+      img,
+      position,
+      baseFit,
+      zoom,
+      viewportWidth,
+      aspectRatio
+    });
 
-    if (img && ctx) {
-      try {
-        ctx.fillStyle = '#0a0a12';
-        ctx.fillRect(0, 0, targetW, targetH);
-
-        const scaleFactor = targetW / viewportWidth;
-        const currentRenderWidth = baseFit.width * zoom;
-        const currentRenderHeight = baseFit.height * zoom;
-
-        ctx.save();
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-
-        ctx.drawImage(
-          img,
-          position.x * scaleFactor,
-          position.y * scaleFactor,
-          currentRenderWidth * scaleFactor,
-          currentRenderHeight * scaleFactor
-        );
-        ctx.restore();
-
-        const croppedUrl = canvas.toDataURL('image/jpeg', 0.94);
-        onCropComplete(croppedUrl);
-      } catch (err) {
-        console.warn('Canvas export fallback:', err);
-        onCropComplete(currentSrc || imageSrc);
-      }
+    if (croppedUrl) {
+      onCropComplete(croppedUrl);
     } else {
       onCropComplete(currentSrc || imageSrc);
     }

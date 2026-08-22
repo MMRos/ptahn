@@ -20,7 +20,8 @@ import {
   faUndo,
   faEye
 } from '@fortawesome/free-solid-svg-icons';
-import { getAvailableModels } from '../utils/lmstudio';
+import { getAvailableModels } from '../utils/localAIStudio';
+import { SUPPORTED_LANGUAGES } from '../utils/language';
 import './topbar.css';
 
 const FONT_FAMILIES = [
@@ -151,7 +152,7 @@ export default function TopBar({
   };
 
   const preferredModel = chatSettings.preferredModel || 'Precog-Magnum-31B-i1-GGUF';
-  const preferredLanguage = chatSettings.preferredLanguage || 'Español';
+  const preferredLanguage = chatSettings.preferredLanguage || 'auto';
   const responseLength = chatSettings.responseLength || 1000;
 
   return (
@@ -499,17 +500,18 @@ export default function TopBar({
                   />
                 </div>
 
-                {/* Idioma Favorito */}
+                {/* Idioma Favorito / Detección Automática */}
                 <div className="settings-group">
                   <label><FontAwesomeIcon icon={faLanguage} /> Idioma de Respuesta</label>
                   <select 
                     value={preferredLanguage}
                     onChange={(e) => onUpdateChatSettings({ ...chatSettings, preferredLanguage: e.target.value })}
                   >
-                    <option value="Español">Español</option>
-                    <option value="English">English</option>
-                    <option value="Français">Français</option>
-                    <option value="Deutsch">Deutsch</option>
+                    {SUPPORTED_LANGUAGES.map(lang => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

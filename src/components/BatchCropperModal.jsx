@@ -13,6 +13,7 @@ import {
   faArrowRight, 
   faSmile
 } from '@fortawesome/free-solid-svg-icons';
+import { calculateViewportDimensions, computeBaseFit, exportCroppedCanvas } from '../utils/imageCropUtils';
 import './scenario.css';
 
 const QUICK_LABELS = ['Normal', 'Alegre', 'Enfadado', 'Triste', 'Sorprendido', 'Armadura', 'Combate', 'Gala', 'Casual'];
@@ -35,8 +36,7 @@ export default function BatchCropperModal({
   const viewportRef = useRef(null);
 
   // Dimensiones del viewport de recorte
-  const viewportWidth = aspectRatio >= 1 ? 480 : Math.round(360 * aspectRatio);
-  const viewportHeight = aspectRatio >= 1 ? Math.round(480 / aspectRatio) : 360;
+  const { viewportWidth, viewportHeight } = calculateViewportDimensions(aspectRatio, 480, 360);
 
   // Inicializar estado cuando se abre el modal con nuevos items
   useEffect(() => {
@@ -65,20 +65,7 @@ export default function BatchCropperModal({
 
   // Calcular ajuste 100% de la imagen dentro del marco
   const computeFit = useCallback((natW, natH) => {
-    if (!natW || !natH) return null;
-    const fitScale = Math.min(viewportWidth / natW, viewportHeight / natH);
-    const baseW = natW * fitScale;
-    const baseH = natH * fitScale;
-    const initX = (viewportWidth - baseW) / 2;
-    const initY = (viewportHeight - baseH) / 2;
-
-    return {
-      scale: fitScale,
-      width: baseW,
-      height: baseH,
-      initX,
-      initY
-    };
+    return computeBaseFit(natW, natH, viewportWidth, viewportHeight);
   }, [viewportWidth, viewportHeight]);
 
   const handleImageLoad = (e) => {
@@ -249,48 +236,16 @@ export default function BatchCropperModal({
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        try {
-          const targetW = aspectRatio < 1 ? 600 : 960;
-          const targetH = Math.round(targetW / aspectRatio);
-          const canvas = document.createElement('canvas');
-          canvas.width = targetW;
-          canvas.height = targetH;
-          const ctx = canvas.getContext('2d');
-
-          if (!ctx) return resolve(item.originalSrc);
-
-          ctx.fillStyle = '#0a0a12';
-          ctx.fillRect(0, 0, targetW, targetH);
-
-          // Si el usuario no modificó la imagen, calcular fit automático
-          const baseFit = state.baseFit?.width ? state.baseFit : computeFit(img.naturalWidth, img.naturalHeight);
-          const zoom = state.zoom || 1;
-          const posX = state.position?.x ?? (baseFit ? baseFit.initX : 0);
-          const posY = state.position?.y ?? (baseFit ? baseFit.initY : 0);
-
-          const scaleFactor = targetW / viewportWidth;
-          const currentRenderWidth = (baseFit?.width || viewportWidth) * zoom;
-          const currentRenderHeight = (baseFit?.height || viewportHeight) * zoom;
-
-          ctx.save();
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-
-          ctx.drawImage(
-            img,
-            posX * scaleFactor,
-            posY * scaleFactor,
-            currentRenderWidth * scaleFactor,
-            currentRenderHeight * scaleFactor
-          );
-          ctx.restore();
-
-          const croppedUrl = canvas.toDataURL('image/jpeg', 0.94);
-          resolve(croppedUrl);
-        } catch (err) {
-          console.warn('Batch crop canvas export error:', err);
-          resolve(item.originalSrc);
-        }
+        const baseFit = state.baseFit?.width ? state.baseFit : computeFit(img.naturalWidth, img.naturalHeight);
+        const croppedUrl = exportCroppedCanvas({
+          img,
+          position: state.position || { x: baseFit?.initX || 0, y: baseFit?.initY || 0 },
+          baseFit: baseFit || { width: viewportWidth, height: viewportHeight },
+          zoom: state.zoom || 1,
+          viewportWidth,
+          aspectRatio
+        });
+        resolve(croppedUrl || item.originalSrc);
       };
       img.onerror = () => resolve(item.originalSrc);
       img.src = item.originalSrc;

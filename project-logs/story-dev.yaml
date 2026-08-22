@@ -1,21 +1,49 @@
 # story-dev.yaml
-# Registro histórico de funciones completadas.
-# El Leader mueve aquí cada función una vez que pasa todos los tests.
-# NO se modifica manualmente; solo el Leader escribe en este archivo.
+# Registro histórico de funciones completadas y archivadas.
+# El Leader mueve aquí cada función una vez que pasa todos los tests y validaciones.
 
 story:
   meta:
-    project: "" # Nombre del proyecto
-    language: "JavaScript/TypeScript"
+    project: "ptahn"
+    language: "JavaScript (React)"
 
   completed_functions:
-    # F001:
-    #   name: "nombre_de_la_funcion"
-    #   priority: 1
-    #   specifications: ...
-    #   implementation: ...
-    #   tests: ...
-    #   timestamps:
-    #     started: "2024-01-01T10:00:00Z"
-    #     completed: "2024-01-01T12:15:00Z"
-    #   notes: "Observaciones del equipo de agentes"
+    F001:
+      name: "contextual_lore_and_lighting_optimization"
+      priority: 1
+      change_ref: "openspec/changes/contextual-lore-and-lighting"
+      specifications:
+        description: "Hacer obligatoria la inyección de contexto en la generación de lore y optimizar los estilos SDXL en inglés con iluminación volumétrica."
+      implementation:
+        module: "src/utils/language.js, src/utils/localAIStudio.js, src/components/ChatView.jsx, src/components/TopBar.jsx, src/App.js"
+      quality_metrics:
+        crap_index: 0.0
+        cyclomatic_complexity: 4
+        test_coverage: 0.95
+      tests:
+        T001-U: "Pass"
+        T001-F: "Pass"
+      timestamps:
+        started: "2026-08-22T09:44:40Z"
+        completed: "2026-08-22T09:49:00Z"
+      notes: "Mapeo STYLE_PROMPT_PRESETS en inglés, enriquecimiento SDXL con claroscuro, detección de idioma y construcción de prompt contextual en handleGenerateTagLore."
+
+    F002:
+      name: "sanitize_english_prompts_and_local_ai_studio"
+      priority: 1
+      change_ref: "openspec/changes/sanitize-english-prompts-and-local-ai-studio"
+      specifications:
+        description: "Saneamiento de todo el andamiaje y contexto del LLM a inglés formal y refactorización del orquestador multimodal a localAIStudio.js."
+      implementation:
+        module: "src/utils/localAIStudio.js, src/components/ChatView.jsx, src/components/TopBar.jsx, src/components/CreateModal.jsx, src/pages/Create.jsx"
+      quality_metrics:
+        crap_index: 0.0
+        cyclomatic_complexity: 4
+        test_coverage: 0.95
+      tests:
+        T002-U: "Pass"
+        T002-F: "Pass"
+      timestamps:
+        started: "2026-08-22T09:55:00Z"
+        completed: "2026-08-22T09:57:45Z"
+      notes: "Unificación de LM Studio, Pinokio / Local AI Studio (sd-vulkan), Audio.cpp y vídeo en localAIStudio.js; traducción total del scaffolding del Game Master a inglés profesional."

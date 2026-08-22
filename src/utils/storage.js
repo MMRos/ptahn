@@ -265,6 +265,60 @@ export function clearAllLocalData() {
   } catch (err) {}
 }
 
+export const CHAT_SETTINGS_KEY = 'ptah-chat-settings';
+
+export const DEFAULT_CHAT_SETTINGS = {
+  preferredModel: 'Precog-Magnum-31B-i1-GGUF',
+  preferredLanguage: 'auto',
+  responseLength: 1000,
+  lmStudioUrl: 'http://localhost:1234',
+  imageServerUrl: 'http://127.0.0.1:42016',
+  fontFamily: 'default',
+  fontSize: 'normal',
+  textColor: '#eaeaea',
+  dialogueColor: '#ffd36b',
+  actionColor: '#6ee7b7',
+  thoughtColor: '#c084fc',
+  aiBubbleBg: 'rgba(255, 255, 255, 0.03)',
+  userBubbleBg: 'rgba(255, 211, 107, 0.1)'
+};
+
+export function loadChatSettings() {
+  if (typeof window === 'undefined') return DEFAULT_CHAT_SETTINGS;
+  try {
+    const stored = window.localStorage.getItem(CHAT_SETTINGS_KEY);
+    if (!stored) return DEFAULT_CHAT_SETTINGS;
+    const parsed = JSON.parse(stored);
+    return {
+      preferredModel: parsed.preferredModel || DEFAULT_CHAT_SETTINGS.preferredModel,
+      preferredLanguage: parsed.preferredLanguage || DEFAULT_CHAT_SETTINGS.preferredLanguage,
+      responseLength: parsed.responseLength || DEFAULT_CHAT_SETTINGS.responseLength,
+      lmStudioUrl: parsed.lmStudioUrl || DEFAULT_CHAT_SETTINGS.lmStudioUrl,
+      imageServerUrl: parsed.imageServerUrl || DEFAULT_CHAT_SETTINGS.imageServerUrl,
+      fontFamily: parsed.fontFamily || DEFAULT_CHAT_SETTINGS.fontFamily,
+      fontSize: parsed.fontSize || DEFAULT_CHAT_SETTINGS.fontSize,
+      textColor: parsed.textColor || DEFAULT_CHAT_SETTINGS.textColor,
+      dialogueColor: parsed.dialogueColor || DEFAULT_CHAT_SETTINGS.dialogueColor,
+      actionColor: parsed.actionColor || DEFAULT_CHAT_SETTINGS.actionColor,
+      thoughtColor: parsed.thoughtColor || DEFAULT_CHAT_SETTINGS.thoughtColor,
+      aiBubbleBg: parsed.aiBubbleBg || DEFAULT_CHAT_SETTINGS.aiBubbleBg,
+      userBubbleBg: parsed.userBubbleBg || DEFAULT_CHAT_SETTINGS.userBubbleBg
+    };
+  } catch (e) {
+    console.warn('[Storage]: Failed to read chatSettings from localStorage:', e);
+    return DEFAULT_CHAT_SETTINGS;
+  }
+}
+
+export function saveChatSettings(settings) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(CHAT_SETTINGS_KEY, JSON.stringify(settings));
+  } catch (error) {
+    console.warn('[Storage]: Could not save chatSettings to localStorage:', error);
+  }
+}
+
 export function loadAppData() {
   if (typeof window === 'undefined') return defaultAppData;
   try {
@@ -290,3 +344,4 @@ export function saveAppData(data) {
     console.warn('Could not save fallback data to localStorage', error);
   }
 }
+

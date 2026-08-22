@@ -12,7 +12,7 @@ import CreateModal from './components/CreateModal';
 import CharacterPopup from './components/CharacterPopup';
 import ConfirmModal from './components/ConfirmModal';
 import { getAllChats, addChat } from './utils/db';
-import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, loadAppDataFromFolder, saveAppDataToFolder, saveChatToFolder } from './utils/storage';
+import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, loadAppDataFromFolder, saveAppDataToFolder, saveChatToFolder, loadChatSettings, saveChatSettings } from './utils/storage';
 
 import Profile from './pages/Profile';
 import MusicView from './pages/MusicView';
@@ -237,57 +237,13 @@ function App() {
     openCreateModal('Escenario', scenario);
   };
 
-  // Carga inicial segura de la configuración del usuario desde localStorage.
-  // Utiliza try-catch para protegerse ante fallos de lectura o JSON corrupto.
-  const [chatSettings, setChatSettings] = useState(() => {
-    try {
-      const stored = localStorage.getItem('ptah-chat-settings');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        return {
-          preferredModel: parsed.preferredModel || 'Precog-Magnum-31B-i1-GGUF',
-          preferredLanguage: parsed.preferredLanguage || 'Español',
-          responseLength: parsed.responseLength || 1000,
-          lmStudioUrl: parsed.lmStudioUrl || 'http://localhost:1234',
-          imageServerUrl: parsed.imageServerUrl || 'http://127.0.0.1:42016',
-          fontFamily: parsed.fontFamily || 'default',
-          fontSize: parsed.fontSize || 'normal',
-          textColor: parsed.textColor || '#eaeaea',
-          dialogueColor: parsed.dialogueColor || '#ffd36b',
-          actionColor: parsed.actionColor || '#6ee7b7',
-          thoughtColor: parsed.thoughtColor || '#c084fc',
-          aiBubbleBg: parsed.aiBubbleBg || 'rgba(255, 255, 255, 0.03)',
-          userBubbleBg: parsed.userBubbleBg || 'rgba(255, 211, 107, 0.1)'
-        };
-      }
-    } catch (e) {
-      console.warn('[App Init]: Failed to load chatSettings from localStorage:', e);
-    }
-    return {
-      preferredModel: 'Precog-Magnum-31B-i1-GGUF',
-      preferredLanguage: 'Español',
-      responseLength: 1000,
-      lmStudioUrl: 'http://localhost:1234',
-      imageServerUrl: 'http://127.0.0.1:42016',
-      fontFamily: 'default',
-      fontSize: 'normal',
-      textColor: '#eaeaea',
-      dialogueColor: '#ffd36b',
-      actionColor: '#6ee7b7',
-      thoughtColor: '#c084fc',
-      aiBubbleBg: 'rgba(255, 255, 255, 0.03)',
-      userBubbleBg: 'rgba(255, 211, 107, 0.1)'
-    };
-  });
+  // Carga inicial segura de la configuración del usuario desde storage centralizado
+  const [chatSettings, setChatSettings] = useState(() => loadChatSettings());
 
   // Función para guardar y actualizar la configuración de chat del usuario (global)
   const handleUpdateChatSettings = (nextSettings) => {
     setChatSettings(nextSettings);
-    try {
-      localStorage.setItem('ptah-chat-settings', JSON.stringify(nextSettings));
-    } catch (e) {
-      console.warn('[App Update]: Failed to save chatSettings to localStorage:', e);
-    }
+    saveChatSettings(nextSettings);
   };
 
   // Función para guardar y actualizar la configuración de estilo específica de este chat
