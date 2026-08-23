@@ -22,5 +22,16 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# AI Models & Diffusion Checkpoints
+/models/
+*.gguf
+*.safetensors
+*.ckpt
+*.onnx
+*.bin
+
+# Ptahn Native Data & Generated Media
+/ptah-data/
+
 # AgentBox / forgeAB base content
 /forgeAB/

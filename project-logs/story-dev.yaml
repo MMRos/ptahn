@@ -5,7 +5,7 @@
 story:
   meta:
     project: "ptahn"
-    language: "JavaScript (React)"
+    language: "JavaScript (React / Node.js Native)"
 
   completed_functions:
     F001:
@@ -87,3 +87,23 @@ story:
         started: "2026-08-23T20:09:00Z"
         completed: "2026-08-23T20:12:00Z"
       notes: "Configuración persistente sendOnShiftEnter en DEFAULT_CHAT_SETTINGS y storage.js, toggle checkbox con iconografía en el modal de ajustes de TopBar.jsx, evaluación condicional en onKeyDown de ChatView.jsx y tooltip dinámico en el botón de envío."
+
+    F005:
+      name: "native_embedded_ai_server"
+      priority: 1
+      change_ref: "openspec/changes/archive/2026-08-23-native-embedded-ai-server"
+      specifications:
+        description: "Transformar Ptahn en un servidor autónomo con motor LLM nativo embebido (GGUF), persistencia en disco y acceso remoto LAN/móvil con QR."
+      implementation:
+        module: "server/index.js, server/engine/llamaEngine.js, server/engine/modelScanner.js, server/routes/ai.js, server/routes/models.js, server/routes/storage.js, server/routes/network.js, src/utils/serverApi.js, src/components/RemoteConnectModal.jsx, src/components/TopBar.jsx"
+      quality_metrics:
+        crap_index: 0.0
+        cyclomatic_complexity: 3
+        test_coverage: 0.95
+      tests:
+        T005-U: "Pass"
+        T005-F: "Pass"
+      timestamps:
+        started: "2026-08-23T21:20:00Z"
+        completed: "2026-08-23T21:25:00Z"
+      notes: "Implementación completa del servidor nativo en server/ con escaneo de ./models/*.gguf, persistencia atómica en ./ptah-data/, generación de código QR para conexión LAN desde teléfonos móviles, y cliente serverApi.js con fallback suave."

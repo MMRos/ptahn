@@ -10,11 +10,14 @@ function Sidebar({ appData = {}, onNavigate = () => {}, onOpenChat = () => {}, o
     return stored !== null ? stored === 'true' : true;
   });
 
-  const toggle = () => setOpen(v => {
-    const next = !v;
-    localStorage.setItem('ptah_sidebar_open', String(next));
-    return next;
-  });
+  const toggle = (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setOpen(v => {
+      const next = !v;
+      localStorage.setItem('ptah_sidebar_open', String(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     // On desktop, toggle a class on root so layout can adapt when implemented

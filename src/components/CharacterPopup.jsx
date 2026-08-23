@@ -15,7 +15,7 @@ export default function CharacterPopup({ scenario, isOpen, onClose, onStartChat 
   const coverUrl = scenario.cover || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=300&q=80';
 
   return (
-    <div className="scenario-backdrop" role="dialog" aria-modal="true" onClick={onClose} style={{ zIndex: 1100 }}>
+    <div className="scenario-backdrop" role="dialog" aria-modal="true" onClick={onClose} style={{ zIndex: 2900 }}>
       <div className="scenario-modal" onClick={e => e.stopPropagation()} style={bgStyle}>
         
         {/* Cabecera / Split Layout */}

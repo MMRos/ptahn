@@ -281,7 +281,11 @@ export const DEFAULT_CHAT_SETTINGS = {
   thoughtColor: '#c084fc',
   aiBubbleBg: 'rgba(255, 255, 255, 0.03)',
   userBubbleBg: 'rgba(255, 211, 107, 0.1)',
-  sendOnShiftEnter: true
+  sendOnShiftEnter: true,
+  showLocationBackground: true,
+  showCharacterSidebar: true,
+  chatBackgroundOpacity: 0.85,
+  preferredImageModel: 'DreamShaperXL_Lightning.safetensors'
 };
 
 export function loadChatSettings() {
@@ -296,6 +300,7 @@ export function loadChatSettings() {
       responseLength: parsed.responseLength || DEFAULT_CHAT_SETTINGS.responseLength,
       lmStudioUrl: parsed.lmStudioUrl || DEFAULT_CHAT_SETTINGS.lmStudioUrl,
       imageServerUrl: parsed.imageServerUrl || DEFAULT_CHAT_SETTINGS.imageServerUrl,
+      preferredImageModel: parsed.preferredImageModel || DEFAULT_CHAT_SETTINGS.preferredImageModel,
       fontFamily: parsed.fontFamily || DEFAULT_CHAT_SETTINGS.fontFamily,
       fontSize: parsed.fontSize || DEFAULT_CHAT_SETTINGS.fontSize,
       textColor: parsed.textColor || DEFAULT_CHAT_SETTINGS.textColor,
@@ -304,7 +309,10 @@ export function loadChatSettings() {
       thoughtColor: parsed.thoughtColor || DEFAULT_CHAT_SETTINGS.thoughtColor,
       aiBubbleBg: parsed.aiBubbleBg || DEFAULT_CHAT_SETTINGS.aiBubbleBg,
       userBubbleBg: parsed.userBubbleBg || DEFAULT_CHAT_SETTINGS.userBubbleBg,
-      sendOnShiftEnter: typeof parsed.sendOnShiftEnter === 'boolean' ? parsed.sendOnShiftEnter : DEFAULT_CHAT_SETTINGS.sendOnShiftEnter
+      sendOnShiftEnter: typeof parsed.sendOnShiftEnter === 'boolean' ? parsed.sendOnShiftEnter : DEFAULT_CHAT_SETTINGS.sendOnShiftEnter,
+      showLocationBackground: typeof parsed.showLocationBackground === 'boolean' ? parsed.showLocationBackground : DEFAULT_CHAT_SETTINGS.showLocationBackground,
+      showCharacterSidebar: typeof parsed.showCharacterSidebar === 'boolean' ? parsed.showCharacterSidebar : DEFAULT_CHAT_SETTINGS.showCharacterSidebar,
+      chatBackgroundOpacity: typeof parsed.chatBackgroundOpacity === 'number' ? parsed.chatBackgroundOpacity : DEFAULT_CHAT_SETTINGS.chatBackgroundOpacity
     };
   } catch (e) {
     console.warn('[Storage]: Failed to read chatSettings from localStorage:', e);

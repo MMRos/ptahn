@@ -19,6 +19,10 @@ describe('Storage Module Tests', () => {
     expect(settings.preferredLanguage).toBe('auto');
     expect(settings.lmStudioUrl).toBe('http://localhost:1234');
     expect(settings.sendOnShiftEnter).toBe(true);
+    expect(settings.showLocationBackground).toBe(true);
+    expect(settings.showCharacterSidebar).toBe(true);
+    expect(settings.chatBackgroundOpacity).toBe(0.85);
+    expect(settings.preferredImageModel).toBe('DreamShaperXL_Lightning.safetensors');
   });
 
   test('saveChatSettings correctly writes to localStorage and loadChatSettings retrieves it', () => {
@@ -26,7 +30,8 @@ describe('Storage Module Tests', () => {
       ...DEFAULT_CHAT_SETTINGS,
       preferredLanguage: 'Français',
       lmStudioUrl: 'http://127.0.0.1:9999',
-      sendOnShiftEnter: false
+      sendOnShiftEnter: false,
+      preferredImageModel: 'v6.safetensors'
     };
     saveChatSettings(custom);
 
@@ -34,6 +39,7 @@ describe('Storage Module Tests', () => {
     expect(loaded.preferredLanguage).toBe('Français');
     expect(loaded.lmStudioUrl).toBe('http://127.0.0.1:9999');
     expect(loaded.sendOnShiftEnter).toBe(false);
+    expect(loaded.preferredImageModel).toBe('v6.safetensors');
   });
 
   test('loadChatSettings safely recovers from corrupted JSON in localStorage', () => {

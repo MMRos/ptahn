@@ -1,6 +1,7 @@
 import { enrichImagePrompt, resolveTargetLanguage, createTranslationPrompt } from './language';
 import { loadChatSettings } from './storage';
 import { findMatchingEntity } from './textFormatter';
+import { generateNativeImage, getServerBaseUrl } from './serverApi';
 
 /**
  * Local AI Studio Multimodal Manager for Ptahn
@@ -77,6 +78,15 @@ export const RECOMMENDED_MODELS = {
     description: 'Local speech synthesis and sound effects loaded on demand.'
   }
 };
+
+export const AVAILABLE_IMAGE_MODELS = [
+  { id: 'DreamShaperXL_Lightning.safetensors', name: 'DreamShaperXL Lightning (SDXL Rápido 8-Step)' },
+  { id: 'v6.safetensors', name: 'Anime / Illustrious v6 (Personajes & Retratos)' },
+  { id: 'flux1-schnell.safetensors', name: 'Flux.1 Schnell (Ultra Detallado)' },
+  { id: 'sd_xl_base_1.0.safetensors', name: 'SDXL Base 1.0 (Realismo / Escenarios)' },
+  { id: 'juggernautXL_v9.safetensors', name: 'Juggernaut XL v9 (Fantasía Oscura)' },
+  { id: 'ponyDiffusionV6XL.safetensors', name: 'Pony Diffusion V6 XL' }
+];
 
 /**
  * Intelligent HTTP fetch for local AI endpoints.
@@ -236,28 +246,6 @@ export async function unloadModel(modelId, baseUrl) {
 }
 
 /**
- * Generates an SVG placeholder when diffusion backends are unreachable.
- */
-export function createLocalSvgPlaceholder(prompt = 'Ptahn Illustration') {
-  const cleanTitle = (prompt || 'Illustration').replace(/[<>&"]/g, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
-    <defs>
-      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#141424" />
-        <stop offset="50%" stop-color="#1e183a" />
-        <stop offset="100%" stop-color="#0a0a14" />
-      </linearGradient>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#bg)" />
-    <circle cx="480" cy="220" r="70" fill="none" stroke="#ffd36b" stroke-width="2" stroke-dasharray="6,6" opacity="0.8"/>
-    <text x="480" y="230" fill="#ffd36b" font-family="system-ui, sans-serif" font-size="34" font-weight="bold" text-anchor="middle">✨ Ptahn Local AI Studio</text>
-    <text x="480" y="340" fill="#ffffff" font-family="system-ui, sans-serif" font-size="18" font-weight="600" text-anchor="middle" opacity="0.9">${cleanTitle.substring(0, 55)}</text>
-    <text x="480" y="380" fill="#ffd36b" font-family="system-ui, sans-serif" font-size="13" text-anchor="middle" opacity="0.75">Pinokio / sd-vulkan (DreamShaperXL)</text>
-  </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-/**
  * Retrieves diffusion image models from Local AI Studio / Pinokio.
  */
 export async function getAvailableImageModels(imageServerUrl = '') {
@@ -324,23 +312,44 @@ export async function startImageBackend(model = 'v6.safetensors', imageServerUrl
 /**
  * Generates an image using Local AI Studio / Pinokio / SD WebUI with automatic English prompt enrichment.
  */
-export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Entornos', imageServerUrl = '', targetModel = '') {
+export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Entornos', imageServerUrl = '', targetModel = '', customWidth = 768, customHeight = 512) {
+  const settings = loadChatSettings();
+  const selectedModel = targetModel || settings.preferredImageModel || 'DreamShaperXL_Lightning.safetensors';
+  const isLightning = selectedModel.toLowerCase().includes('lightning') || selectedModel.toLowerCase().includes('4step');
+  const steps = isLightning ? 8 : 20;
+  const fullPrompt = enrichImagePrompt(prompt, style);
+
+  // 1. Prioritize Ptahn Native Server Diffusion Endpoint (/api/images/generate)
+  try {
+    const nativeRes = await generateNativeImage(fullPrompt, {
+      width: customWidth,
+      height: customHeight,
+      steps: steps,
+      model: selectedModel,
+      style: style
+    });
+    if (nativeRes && nativeRes.success && (nativeRes.base64 || nativeRes.url)) {
+      if (nativeRes.base64) return nativeRes.base64;
+      const origin = getServerBaseUrl();
+      return `${origin}${nativeRes.url}`;
+    }
+  } catch (nativeErr) {
+    // Soft fallback to local bridge ports if native endpoint not running
+  }
+
+  // 2. Probe local bridge ports (SD WebUI, Pinokio, ComfyUI, user custom URL)
   let serverUrls = [];
   if (imageServerUrl) {
     serverUrls.push(imageServerUrl.replace(/\/$/, ''));
-  } else {
-    const settings = loadChatSettings();
-    if (settings.imageServerUrl) {
-      serverUrls.push(settings.imageServerUrl.replace(/\/$/, ''));
-    }
-    serverUrls.push('http://127.0.0.1:42016', 'http://192.168.1.41:42016', 'http://localhost:42016');
   }
-
-  const selectedModel = targetModel || 'DreamShaperXL_Lightning.safetensors';
-  const isLightning = selectedModel.toLowerCase().includes('lightning') || selectedModel.toLowerCase().includes('4step');
-  const steps = isLightning ? 8 : 20;
-
-  const fullPrompt = enrichImagePrompt(prompt, style);
+  if (settings.imageServerUrl) {
+    const custom = settings.imageServerUrl.replace(/\/$/, '');
+    if (!serverUrls.includes(custom)) serverUrls.push(custom);
+  }
+  const defaultPorts = ['http://127.0.0.1:42016', 'http://127.0.0.1:7860', 'http://localhost:7860', 'http://127.0.0.1:8188', 'http://localhost:42016'];
+  for (const p of defaultPorts) {
+    if (!serverUrls.includes(p)) serverUrls.push(p);
+  }
 
   for (const baseUrl of serverUrls) {
     try {
@@ -350,9 +359,8 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
           const status = await statusRes.json();
           const currentModel = status?.loading?.model || status?.settings?.model || '';
           if (!status.ready || !status.running || (selectedModel && !currentModel.includes(selectedModel))) {
-            console.log(`[Local AI Studio]: Loading diffusion model "${selectedModel}"...`);
             await startImageBackend(selectedModel, baseUrl);
-            for (let i = 0; i < 8; i++) {
+            for (let i = 0; i < 6; i++) {
               await new Promise(r => setTimeout(r, 1000));
               const poll = await fetch(`${baseUrl}/api/backend-status`).then(r => r.json()).catch(() => null);
               if (poll && poll.ready && poll.running) break;
@@ -367,8 +375,8 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
         body: JSON.stringify({
           prompt: fullPrompt,
           steps: steps,
-          width: 768,
-          height: 512
+          width: customWidth,
+          height: customHeight
         })
       });
 
@@ -386,7 +394,7 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
         body: JSON.stringify({
           prompt: fullPrompt,
           n: 1,
-          size: '768x512',
+          size: `${customWidth}x${customHeight}`,
           response_format: 'b64_json'
         })
       });
@@ -397,13 +405,26 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
         if (b64) return b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
         if (data.data?.[0]?.url) return data.data[0].url;
       }
-    } catch (e) {
-      console.warn(`[Local AI Studio]: Failed to contact ${baseUrl}:`, e.message);
-    }
+    } catch (e) {}
   }
 
-  console.log('[Local AI Studio]: Image server unreachable, rendering local graphic preview.');
-  return createLocalSvgPlaceholder(prompt);
+  throw new Error('No se pudo conectar con el motor de difusión local de Ptahn ni con ningún servidor de imágenes (puertos 3001, 7860, 42016). Coloca un archivo de modelo (.safetensors / .gguf) en la carpeta ./models/ de Ptahn para generar imágenes nativas.');
+}
+
+/**
+ * Generates an on-demand portrait specifically optimized for 3:4 character sidebar and card covers.
+ */
+export async function generateCharacterPortrait(characterName, traits = [], intro = '', targetModel = '', imageServerUrl = '') {
+  const traitsText = Array.isArray(traits) ? traits.filter(Boolean).join(', ') : (traits || '');
+  const portraitPrompt = `portrait of ${characterName || 'hero character'}, ${traitsText ? `${traitsText}, ` : ''}${intro ? `${intro}, ` : ''}expressive eyes, dramatic lighting, sharp focus, 8k masterpiece character concept art, high quality vertical portrait`;
+  return generateImageLocal(
+    portraitPrompt,
+    'Anime / Ilustración Estilizada 2.5D',
+    imageServerUrl,
+    targetModel || 'v6.safetensors',
+    512,
+    768
+  );
 }
 
 /**

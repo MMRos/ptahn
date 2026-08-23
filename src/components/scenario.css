@@ -1,9 +1,45 @@
-/* Shared styles for ScenarioPopup and CharacterModal */
+/* Shared styles for ScenarioPopup, CharacterModal and Entity Popups */
 .scenario-backdrop, .char-backdrop {
-  position: fixed; inset: 0; display:flex; align-items:center; justify-content:center; background: rgba(2,4,10,0.6); z-index:120;
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(3, 4, 10, 0.88) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  z-index: 2400 !important;
 }
+
+.popup-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  background: rgba(3, 4, 10, 0.88) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 2500 !important;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.scenario-popup-card {
+  background: #14141f !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.95) !important;
+  color: #ffffff !important;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  z-index: 2501;
+  opacity: 1 !important;
+}
+
 .scenario-popup {
-  width: min(920px, 96%); background: #0d0e16; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); color: #eaeaea; display:flex; flex-direction:column;
+  width: min(920px, 96%); background: #0d0e16; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.8); color: #eaeaea; display:flex; flex-direction:column;
 }
 .scenario-popup { position: relative; }
 .scenario-cover { height: 240px; background-size: cover; background-position: center; border-radius: 14px 14px 0 0; }

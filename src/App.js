@@ -89,8 +89,17 @@ function App() {
     try {
       const data = await getAllChats();
       if (Array.isArray(data)) {
-        // sort by createdAt desc
-        const sorted = data.slice().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+        // Sort by most recent activity descending (updatedAt, latest message, or createdAt)
+        const getLatestActivity = (c) => {
+          if (c.updatedAt) return new Date(c.updatedAt).getTime();
+          if (c.messages && c.messages.length > 0) {
+            const last = c.messages[c.messages.length - 1];
+            if (last.timestamp) return new Date(last.timestamp).getTime();
+            if (last.createdAt) return new Date(last.createdAt).getTime();
+          }
+          return new Date(c.createdAt || 0).getTime();
+        };
+        const sorted = data.slice().sort((a, b) => getLatestActivity(b) - getLatestActivity(a));
         setRecentChats(sorted);
       }
     } catch (e) { console.warn('refreshChats failed', e); }
@@ -357,6 +366,7 @@ function App() {
             appData={appData}
             onUpdateAppData={updateAppData}
             chatSettings={chatSettings}
+            onUpdateChatSettings={handleUpdateChatSettings}
             onOpenCreateModal={openCreateModal}
           />
         )}

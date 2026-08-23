@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faUndo, 
@@ -17,35 +18,47 @@ import {
   faHighlighter,
   faTrashAlt,
   faMagic,
-  faSave,
-  faExternalLinkAlt,
   faLanguage,
-  faSpinner
+  faSpinner,
+  faKeyboard,
+  faEye,
+  faEyeSlash,
+  faUserCircle,
+  faExternalLinkAlt,
+  faSave
 } from '@fortawesome/free-solid-svg-icons';
-import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
+import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
 import { resolveTargetLanguage, getLanguageDirective } from '../utils/language';
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { speakBrowserUtterance, cancelBrowserSpeech } from '../utils/speechTTS';
 import { FormattedMessageText, findMatchingEntity, normalizeEntityName } from '../utils/textFormatter';
+import { detectActiveCharacter, matchCharacterExpression, resolveLocationWallpaper } from '../utils/characterMatcher';
 import { addChat } from '../utils/db';
 import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
+import CharacterSidebar from './CharacterSidebar';
 import ConfirmModal from './ConfirmModal';
 import './chats.css';
 
-export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onOpenCreateModal }) {
+export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onUpdateChatSettings = () => {}, onOpenCreateModal }) {
   const [messages, setMessages] = useState(chat?.messages || []);
   const [inputMsg, setInputMsg] = useState('');
   const [editingIndex, setEditingIndex] = useState(null);
   const [editText, setEditText] = useState('');
   const [isStagingOpen, setIsStagingOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({ percent: 0, status: 'Iniciando...' });
   const [speakingMessageId, setSpeakingMessageId] = useState(null);
   const [popupCharacter, setPopupCharacter] = useState(null);
   const [activeEntityModal, setActiveEntityModal] = useState(null);
   const [isGeneratingLore, setIsGeneratingLore] = useState(false);
+  const [isGeneratingTagCover, setIsGeneratingTagCover] = useState(false);
+  const [isGeneratingSidebarPortrait, setIsGeneratingSidebarPortrait] = useState(false);
   const [translatingMsgId, setTranslatingMsgId] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [isPeekTransparent, setIsPeekTransparent] = useState(false);
+  const [isCharacterSidebarClosed, setIsCharacterSidebarClosed] = useState(false);
+  const [manualCharacterImageId, setManualCharacterImageId] = useState(null);
   const inputRef = useRef(null);
   const chatRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -112,6 +125,7 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
       draftTitle: resolvedEntity ? (resolvedEntity.title || resolvedEntity.name || tagContent) : tagContent,
       draftIntro: resolvedEntity ? (resolvedEntity.intro || '') : '',
       draftText: resolvedEntity ? (resolvedEntity.text || resolvedEntity.desc || '') : '',
+      draftCover: resolvedEntity ? (resolvedEntity.cover || '') : '',
       draftTraits: resolvedEntity ? (resolvedEntity.traits || []) : []
     });
   };
@@ -165,6 +179,67 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     }
   };
 
+  // Generar portada o retrato para el popup de entidad
+  const handleGenerateTagCover = async () => {
+    if (!activeEntityModal || isGeneratingTagCover) return;
+    setIsGeneratingTagCover(true);
+    try {
+      const isChar = activeEntityModal.draftType === 'Personaje';
+      const promptTitle = activeEntityModal.draftTitle;
+      const promptIntro = activeEntityModal.draftIntro || activeEntityModal.draftText || '';
+      let url = '';
+      if (isChar) {
+        url = await generateCharacterPortrait(promptTitle, activeEntityModal.draftTraits || [], promptIntro, chatSettings?.preferredImageModel);
+      } else {
+        url = await generateImageLocal(`${promptTitle}, ${activeEntityModal.draftType}, ${promptIntro}`, 'Fantasía Oscura / Entornos', '', chatSettings?.preferredImageModel);
+      }
+      if (url) {
+        setActiveEntityModal(prev => ({
+          ...prev,
+          draftCover: url
+        }));
+      }
+    } catch (err) {
+      console.warn('Error generating cover for entity modal:', err);
+    } finally {
+      setIsGeneratingTagCover(false);
+    }
+  };
+
+  // Generar retrato para personaje enfocado en Zona B
+  const handleGenerateSidebarPortrait = async (char) => {
+    if (!char || isGeneratingSidebarPortrait) return;
+    setIsGeneratingSidebarPortrait(true);
+    try {
+      const portraitUrl = await generateCharacterPortrait(
+        char.title || char.name,
+        char.traits || [],
+        char.intro || char.text || '',
+        chatSettings?.preferredImageModel
+      );
+      if (portraitUrl && appData && onUpdateAppData) {
+        const newImageObj = { id: `img-${Date.now()}`, url: portraitUrl, label: 'Retrato IA', isDefault: true };
+        const existingImages = Array.isArray(char.images || char.characterImages) ? (char.images || char.characterImages) : [];
+        const nextImages = [newImageObj, ...existingImages.map(img => ({ ...img, isDefault: false }))];
+        
+        const updatedChar = {
+          ...char,
+          cover: portraitUrl,
+          characterImages: nextImages,
+          images: nextImages
+        };
+        const nextCards = (appData.cards || []).map(c => c.id === char.id ? updatedChar : c);
+        const nextData = { ...appData, cards: nextCards };
+        onUpdateAppData(nextData);
+        if (folderHandle) saveAppDataToFolder(folderHandle, nextData).catch(console.warn);
+      }
+    } catch (e) {
+      console.warn('[Sidebar Portrait Gen]: Failed to generate portrait:', e);
+    } finally {
+      setIsGeneratingSidebarPortrait(false);
+    }
+  };
+
   // Guardar la tarjeta en el compendio de appData
   const handleSaveTagCard = () => {
     if (!activeEntityModal) return;
@@ -172,12 +247,17 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     if (!title) return;
 
     if (activeEntityModal.existing) {
+      const isChar = activeEntityModal.draftType === 'Personaje';
       const updatedCard = {
         ...activeEntityModal.existing,
         type: activeEntityModal.draftType,
         title: title,
         intro: activeEntityModal.draftIntro,
-        text: activeEntityModal.draftText
+        text: activeEntityModal.draftText,
+        cover: activeEntityModal.draftCover || activeEntityModal.existing.cover || '',
+        characterImages: (isChar && activeEntityModal.draftCover) 
+          ? [{ id: `img-${Date.now()}`, url: activeEntityModal.draftCover, label: 'Principal', isDefault: true }, ...(activeEntityModal.existing.characterImages || [])]
+          : (activeEntityModal.existing.characterImages || [])
       };
       if (appData && onUpdateAppData) {
         const nextCards = (appData.cards || []).map(c => c.id === updatedCard.id ? updatedCard : c);
@@ -186,15 +266,18 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         if (folderHandle) saveAppDataToFolder(folderHandle, nextData).catch(console.warn);
       }
     } else {
+      const isChar = activeEntityModal.draftType === 'Personaje';
+      const coverUrl = activeEntityModal.draftCover || '';
       const newCard = {
         id: `card_${Date.now()}`,
         type: activeEntityModal.draftType,
         title: title,
         intro: activeEntityModal.draftIntro || (activeEntityModal.draftText ? activeEntityModal.draftText.substring(0, 80) + '...' : ''),
         text: activeEntityModal.draftText || '',
-        cover: '',
+        cover: coverUrl,
+        characterImages: (isChar && coverUrl) ? [{ id: 'img-1', url: coverUrl, label: 'Principal', isDefault: true }] : [],
         tags: [],
-        traits: [],
+        traits: activeEntityModal.draftTraits || [],
         createdAt: new Date().toISOString()
       };
       if (appData && onUpdateAppData) {
@@ -298,7 +381,12 @@ Respond directly with the descriptive lore text without introductory fluff or pr
 
   const persistMessages = async (nextMsgs) => {
     setMessages(nextMsgs);
-    const updatedChat = { ...chat, messages: nextMsgs };
+    const now = new Date().toISOString();
+    const updatedChat = { 
+      ...chat, 
+      messages: nextMsgs,
+      updatedAt: now
+    };
     try { await addChat(updatedChat); } catch(err) { console.warn('IndexedDB save err:', err); }
     if (folderHandle) {
       try { await saveChatToFolder(updatedChat, folderHandle); } catch (err) {}
@@ -506,16 +594,23 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
 `.trim();
     }
 
-    // 7.1 Format Pre-established Scenario Characters, Entities, and NPCs
+    // 7.1 Format Pre-established Scenario Characters, Entities, and NPCs (Strict Scenario Scope)
     let scenarioCharactersDetails = '';
     const allCards = appData?.cards || [];
     const scenarioCardIdsOrTitles = Array.isArray(scenario?.cards) ? scenario.cards : [];
+    const chatCharacterIdsOrTitles = Array.isArray(chat?.characters) ? chat.characters.map(c => c.id || c.name) : [];
 
     const scenarioCards = allCards.filter(c => {
+      if (!c) return false;
       if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
       if (c.type === 'Inventario' || c.type === 'Memoria') return false;
 
       const isDirectlyLinked = scenarioCardIdsOrTitles.some(idOrTitle => 
+        idOrTitle === c.id || 
+        idOrTitle === c.title || 
+        (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
+      );
+      const isChatLinked = chatCharacterIdsOrTitles.some(idOrTitle => 
         idOrTitle === c.id || 
         idOrTitle === c.title || 
         (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
@@ -531,16 +626,10 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
         (scenario?.title && c.connectedCards.some(cc => normalizeEntityName(cc) === normalizeEntityName(scenario.title)))
       );
 
-      return isDirectlyLinked || isScenarioLinked || isConnected;
+      return isDirectlyLinked || isChatLinked || isScenarioLinked || isConnected;
     });
 
-    const otherCharacters = allCards.filter(c => 
-      c.type === 'Personaje' && 
-      (!userChar || (c.id !== userChar.id && c.title !== userChar.title)) &&
-      !scenarioCards.some(sc => sc.id === c.id)
-    );
-
-    const relevantEntities = [...scenarioCards, ...otherCharacters];
+    const relevantEntities = scenarioCards;
 
     if (relevantEntities.length > 0) {
       const entityEntries = relevantEntities.map(ent => {
@@ -553,11 +642,7 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
 
       scenarioCharactersDetails = `
 [SCENARIO ROSTER: ESTABLISHED CHARACTERS, NPCS & COMPENDIUM ENTITIES]:
-The following characters and key entities exist in this scenario and world. YOU (Game Master) roleplay and control all of them.
-When {{user}} interacts with, calls, encounters, or mentions any of them:
-- RECOGNIZE THEM IMMEDIATELY without hesitation or confusion.
-- Adopt their established voice, personality, traits, and background lore.
-- Reflect their social role, faction, and relationships authentically.
+The following characters and key entities exist strictly in this scenario. YOU (Game Master) roleplay and control them:
 ${entityEntries}
 `.trim();
     }
@@ -827,6 +912,7 @@ ${languageDirective}
     await persistMessages(historyBefore);
     setMessages([...historyBefore, streamingPlaceholder]);
     setIsSending(true);
+    setGenerationProgress({ percent: 15, status: '🧠 Evaluando contexto y memorias...' });
 
     try {
       const systemPrompt = buildSystemPrompt();
@@ -837,6 +923,12 @@ ${languageDirective}
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
+          const targetLen = chatSettings?.responseLength || 1000;
+          const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
+          setGenerationProgress({
+            percent: streamPct,
+            status: `⚡ Redactando respuesta (${streamPct}%)...`
+          });
           setMessages(prev => {
             const copy = [...prev];
             if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
@@ -867,6 +959,7 @@ ${languageDirective}
       await persistMessages([...historyBefore, errorMsg]);
     } finally {
       setIsSending(false);
+      setGenerationProgress({ percent: 100, status: 'Completado' });
     }
   };
 
@@ -886,6 +979,7 @@ ${languageDirective}
     
     if (overrideText === null) setInputMsg('');
     setIsSending(true);
+    setGenerationProgress({ percent: 15, status: '🧠 Evaluando contexto y memorias...' });
 
     try {
       const systemPrompt = buildSystemPrompt();
@@ -897,6 +991,12 @@ ${languageDirective}
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
+          const targetLen = chatSettings?.responseLength || 1000;
+          const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
+          setGenerationProgress({
+            percent: streamPct,
+            status: `⚡ Redactando respuesta (${streamPct}%)...`
+          });
           setMessages(prev => {
             const copy = [...prev];
             if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
@@ -921,6 +1021,7 @@ ${languageDirective}
       await persistMessages([...nextMsgs, errorMsg]);
     } finally {
       setIsSending(false);
+      setGenerationProgress({ percent: 100, status: 'Completado' });
     }
   };
 
@@ -931,6 +1032,7 @@ ${languageDirective}
     const streamingAiMsg = { from: 'ai', text: '', timestamp: new Date().toISOString() };
     setMessages([...messages, streamingAiMsg]);
     setIsSending(true);
+    setGenerationProgress({ percent: 15, status: '🧠 Evaluando continuación...' });
 
     try {
       const basePrompt = buildSystemPrompt();
@@ -943,6 +1045,12 @@ ${languageDirective}
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
+          const targetLen = chatSettings?.responseLength || 1000;
+          const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
+          setGenerationProgress({
+            percent: streamPct,
+            status: `⚡ Redactando respuesta (${streamPct}%)...`
+          });
           setMessages(prev => {
             const copy = [...prev];
             if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
@@ -967,6 +1075,7 @@ ${languageDirective}
       await persistMessages([...messages, errorMsg]);
     } finally {
       setIsSending(false);
+      setGenerationProgress({ percent: 100, status: 'Completado' });
     }
   };
 
@@ -998,6 +1107,53 @@ ${languageDirective}
     xlarge: '1.38rem'
   };
 
+  // Personaje del jugador
+  const userChar = (appData?.cards || []).find(c => 
+    (c.type === 'Personaje' || c.type === 'User') && 
+    (c.id === chat?.userCharacterId || (c.title && c.title === chat?.userCharacterName))
+  );
+
+  // Escenario activo
+  const scenario = (appData?.scenarios || []).find(s => 
+    s.id === chat?.scenarioId || s.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
+  ) || (appData?.cards || []).find(c => 
+    c.id === chat?.scenarioId || c.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
+  );
+
+  // Personajes del compendio asociados estrictamente a este escenario
+  const scenarioCardIds = Array.isArray(scenario?.cards) ? scenario.cards : [];
+  const chatCharIds = Array.isArray(chat?.characters) ? chat.characters.map(c => c.id || c.name) : [];
+
+  const scenarioCharacters = (appData?.cards || []).filter(c => {
+    if (!c || c.type !== 'Personaje') return false;
+    if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
+    const isScenarioLinked = c.linkedScenario === chat.scenarioId || 
+                             c.linkedScenario === scenario?.title || 
+                             c.linkedScenario === scenario?.id;
+    const isDirectlyLinked = scenarioCardIds.includes(c.id) || scenarioCardIds.includes(c.title);
+    const isChatChar = chatCharIds.includes(c.id) || chatCharIds.includes(c.title);
+    return isScenarioLinked || isDirectlyLinked || isChatChar;
+  });
+
+  // Detección del personaje activo dentro del escenario (sin cruzar personajes de otros chats)
+  const defaultScenarioChar = scenarioCharacters[0] || null;
+  const activeCharacter = detectActiveCharacter(
+    messages, 
+    scenarioCharacters.length > 0 ? scenarioCharacters : (appData?.cards || []).filter(c => c && c.type === 'Personaje'), 
+    userChar, 
+    defaultScenarioChar
+  );
+
+  // Último mensaje para matching de expresión
+  const lastMessageText = messages.length > 0 ? (messages[messages.length - 1]?.text || '') : '';
+  const matchedExpression = matchCharacterExpression(activeCharacter, lastMessageText);
+
+  // Fondo de localización dinámico
+  const wallpaperUrl = resolveLocationWallpaper(messages, scenario, appData?.cards || [], chatSettings);
+  const chatOpacity = chatSettings.chatBackgroundOpacity ?? 0.85;
+
+  const isSidebarVisible = (chatSettings.showCharacterSidebar !== false) && !isCharacterSidebarClosed && Boolean(activeCharacter);
+
   const containerStyle = {
     '--chat-font-family': fontFamiliesMap[effectiveFontFamily] || fontFamiliesMap.default,
     '--chat-font-size': fontSizesMap[effectiveFontSize] || fontSizesMap.normal,
@@ -1007,12 +1163,33 @@ ${languageDirective}
     '--chat-thought-color': effectiveThoughtColor,
     '--chat-ai-bubble-bg': effectiveAiBubbleBg,
     '--chat-user-bubble-bg': effectiveUserBubbleBg,
+    '--chat-bg-opacity': isPeekTransparent ? '0' : String(chatOpacity),
   };
 
   return (
-    <div className="chat-container" style={containerStyle}>
-      {/* Historial de Mensajes Principal (Ocupa todo el alto disponible) */}
-      <div className="chat-messages" ref={chatRef}>
+    <div className="chat-dual-layout" style={containerStyle}>
+      {/* Fondo de pantalla de localización con overlay */}
+      {wallpaperUrl && (
+        <div 
+          className="chat-wallpaper-backdrop" 
+          style={{ backgroundImage: `url(${wallpaperUrl})` }}
+        >
+          <div className="chat-wallpaper-overlay" />
+        </div>
+      )}
+
+      {/* Zona A: Flujo Principal de Chat */}
+      <div 
+        className={`chat-zone-a ${isPeekTransparent ? 'transparent-peek' : ''}`}
+        style={{
+          background: wallpaperUrl 
+            ? `rgba(13, 14, 22, ${isPeekTransparent ? 0 : chatOpacity})` 
+            : 'transparent',
+          backdropFilter: wallpaperUrl && !isPeekTransparent ? 'blur(8px)' : 'none'
+        }}
+      >
+        {/* Historial de Mensajes Principal */}
+        <div className="chat-messages" ref={chatRef}>
         {messages.length === 0 && (
           <div className="chat-empty-intro">
             <h3>{chat.scenario || 'Escenario'}</h3>
@@ -1106,11 +1283,54 @@ ${languageDirective}
               ) : (
                 <div className="msg-body">
                   {!m.text && isSending && idx === messages.length - 1 ? (
-                    <span className="typing-dots" style={{ fontStyle: 'italic', color: 'rgba(255, 211, 107, 0.8)' }}>
-                      *El narrador procesa y redacta su respuesta...*
-                    </span>
+                    <div className="ai-thinking-box" style={{
+                      background: 'rgba(255, 211, 107, 0.05)',
+                      border: '1px solid rgba(255, 211, 107, 0.25)',
+                      borderRadius: '8px',
+                      padding: '12px 16px',
+                      margin: '4px 0',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.84rem', color: '#ffd36b', fontWeight: '600' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                          <FontAwesomeIcon icon={faBrain} className="fa-pulse" />
+                          <span>{generationProgress.status || 'La IA está pensando...'}</span>
+                        </span>
+                        <span style={{ fontFamily: 'monospace', fontSize: '0.88rem', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(255,211,107,0.2)' }}>
+                          {generationProgress.percent}%
+                        </span>
+                      </div>
+                      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${generationProgress.percent}%`,
+                          height: '100%',
+                          background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                          borderRadius: '3px',
+                          transition: 'width 0.25s ease-out'
+                        }} />
+                      </div>
+                    </div>
                   ) : (
                     <>
+                      {isSending && idx === messages.length - 1 && (
+                        <div style={{ 
+                          marginBottom: '8px', 
+                          padding: '4px 8px',
+                          background: 'rgba(255,211,107,0.06)',
+                          borderRadius: '4px',
+                          border: '1px solid rgba(255,211,107,0.15)',
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'space-between', 
+                          fontSize: '0.74rem', 
+                          color: '#ffd36b'
+                        }}>
+                          <span><FontAwesomeIcon icon={faBrain} className="fa-pulse" /> {generationProgress.status}</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{generationProgress.percent}%</span>
+                        </div>
+                      )}
                       <FormattedMessageText text={m.text} onTagClick={handleTagClick} appData={appData} />
                       {isSending && idx === messages.length - 1 && (
                         <span className="streaming-cursor" style={{ display: 'inline-block', width: '7px', height: '14px', background: '#ffd36b', marginLeft: '4px', verticalAlign: '-1px', borderRadius: '1px', opacity: 0.8 }} />
@@ -1295,6 +1515,85 @@ ${languageDirective}
                 {isSelectingForCard ? 'Cancelar creación' : 'Crear tarjeta'}
               </button>
             )}
+
+            {/* Conmutador Rápido Shift+Enter para enviar */}
+            <button 
+              type="button" 
+              onClick={() => {
+                const nextVal = chatSettings?.sendOnShiftEnter === false ? true : false;
+                onUpdateChatSettings({ ...chatSettings, sendOnShiftEnter: nextVal });
+              }}
+              style={{ 
+                marginLeft: '10px', 
+                background: chatSettings?.sendOnShiftEnter !== false ? 'rgba(255, 211, 107, 0.12)' : 'rgba(255, 255, 255, 0.05)', 
+                border: chatSettings?.sendOnShiftEnter !== false ? '1px solid rgba(255, 211, 107, 0.35)' : '1px solid rgba(255, 255, 255, 0.15)', 
+                color: chatSettings?.sendOnShiftEnter !== false ? '#ffd36b' : 'rgba(255, 255, 255, 0.45)', 
+                borderRadius: '4px', 
+                padding: '3px 8px', 
+                fontSize: '0.74rem', 
+                fontWeight: 'bold', 
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+              title={chatSettings?.sendOnShiftEnter !== false ? "Shift+Enter para enviar: ACTIVADO (clic para desactivar)" : "Shift+Enter para enviar: DESACTIVADO (clic para activar)"}
+            >
+              <FontAwesomeIcon icon={faKeyboard} />
+              <span>Shift+↵ {chatSettings?.sendOnShiftEnter !== false ? 'ON' : 'OFF'}</span>
+            </button>
+
+            {/* Botón de Transparencia Total / Ver Fondo */}
+            {wallpaperUrl && (
+              <button
+                type="button"
+                onClick={() => setIsPeekTransparent(prev => !prev)}
+                style={{
+                  marginLeft: '8px',
+                  background: isPeekTransparent ? 'rgba(255, 211, 107, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                  border: isPeekTransparent ? '1px solid #ffd36b' : '1px solid rgba(255, 255, 255, 0.15)',
+                  color: isPeekTransparent ? '#ffd36b' : 'rgba(255, 255, 255, 0.7)',
+                  borderRadius: '4px',
+                  padding: '3px 8px',
+                  fontSize: '0.74rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}
+                title={isPeekTransparent ? "Restaurar vista del chat" : "Ocultar chat para contemplar el fondo de pantalla"}
+              >
+                <FontAwesomeIcon icon={isPeekTransparent ? faEyeSlash : faEye} />
+                <span>{isPeekTransparent ? 'Chat Oculto' : 'Ver Fondo'}</span>
+              </button>
+            )}
+
+            {/* Botón para reabrir el panel de personaje si se cerró */}
+            {chatSettings.showCharacterSidebar !== false && isCharacterSidebarClosed && activeCharacter && (
+              <button
+                type="button"
+                onClick={() => setIsCharacterSidebarClosed(false)}
+                style={{
+                  marginLeft: '8px',
+                  background: 'rgba(255, 211, 107, 0.12)',
+                  border: '1px solid rgba(255, 211, 107, 0.35)',
+                  color: '#ffd36b',
+                  borderRadius: '4px',
+                  padding: '3px 8px',
+                  fontSize: '0.74rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}
+                title="Mostrar panel de personaje (Zona B)"
+              >
+                <FontAwesomeIcon icon={faUserCircle} />
+                <span>Retrato</span>
+              </button>
+            )}
           </div>
 
           <div className="tools-right">
@@ -1323,10 +1622,17 @@ ${languageDirective}
             onChange={(e) => setInputMsg(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                const canSendWithShift = chatSettings?.sendOnShiftEnter !== false;
-                if (e.shiftKey && canSendWithShift) {
-                  e.preventDefault();
-                  handleSend();
+                const sendWithShift = chatSettings?.sendOnShiftEnter !== false;
+                if (sendWithShift) {
+                  if (e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                } else {
+                  if (!e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
                 }
               }
             }}
@@ -1334,7 +1640,7 @@ ${languageDirective}
           />
           <button 
             className="chat-send-btn" 
-            title={chatSettings?.sendOnShiftEnter !== false ? "Enviar (Shift + Enter)" : "Enviar"} 
+            title={chatSettings?.sendOnShiftEnter !== false ? "Enviar (Shift + Enter)" : "Enviar (Enter)"} 
             onClick={() => handleSend()} 
             disabled={isSending}
           >
@@ -1342,6 +1648,21 @@ ${languageDirective}
           </button>
         </div>
       </div>
+      </div>
+
+      {/* Zona B: Panel Lateral de Personajes (Retrato & Expresiones Contextuales) */}
+      {isSidebarVisible && (
+        <CharacterSidebar
+          character={activeCharacter}
+          matchedImage={matchedExpression}
+          manualImageId={manualCharacterImageId}
+          onSelectManualImage={setManualCharacterImageId}
+          onInspectCharacter={(c) => setActiveEntityModal({ draftTitle: c.title || c.name, existing: c })}
+          onGeneratePortrait={handleGenerateSidebarPortrait}
+          isGeneratingPortrait={isGeneratingSidebarPortrait}
+          onClose={() => setIsCharacterSidebarClosed(true)}
+        />
+      )}
 
       <StagingModal 
         isOpen={isStagingOpen}
@@ -1367,10 +1688,18 @@ ${languageDirective}
         onClose={() => setPopupCharacter(null)}
       />
 
-      {/* MODAL DE ENTIDAD O TÉRMINO CLAVE CLICKEADO (COMPENDIO / LORE) */}
-      {activeEntityModal && (
-        <div className="popup-overlay" style={{ zIndex: 1200 }}>
-          <div className="scenario-popup-card" style={{ maxWidth: '520px', width: '90%', animation: 'fadeIn 0.2s ease-out', padding: '24px', boxSizing: 'border-box' }}>
+      {/* MODAL DE ENTIDAD O TÉRMINO CLAVE CLICKEADO (COMPENDIO / LORE) - POPUP CENTRADO CON PORTAL */}
+      {activeEntityModal && createPortal(
+        <div 
+          className="char-backdrop" 
+          role="dialog" 
+          aria-modal="true" 
+          style={{ zIndex: 2900 }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveEntityModal(null);
+          }}
+        >
+          <div className="char-modal" style={{ maxWidth: '580px', width: '92%', maxHeight: '88vh', overflowY: 'auto', animation: 'fadeIn 0.2s ease-out', padding: '24px', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ 
@@ -1395,6 +1724,21 @@ ${languageDirective}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Previsualización de Portada / Retrato si existe */}
+              {(activeEntityModal.draftCover || activeEntityModal.existing?.cover) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255, 255, 255, 0.03)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <img 
+                    src={activeEntityModal.draftCover || activeEntityModal.existing?.cover} 
+                    alt={activeEntityModal.draftTitle} 
+                    style={{ width: '56px', height: '56px', objectFit: 'cover', borderRadius: '6px', border: '1px solid rgba(255, 211, 107, 0.35)' }} 
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#6ee7b7', fontWeight: 'bold' }}>✓ Ilustración / Portada Asignada</span>
+                    <span style={{ fontSize: '0.72rem', color: 'rgba(255, 255, 255, 0.6)' }}>Se guardará en la ficha del compendio.</span>
+                  </div>
+                </div>
+              )}
+
               {activeEntityModal.existing ? (
                 <div>
                   <div style={{ fontSize: '0.8rem', color: '#ffd36b', marginBottom: '6px', fontWeight: '600' }}>
@@ -1426,8 +1770,8 @@ ${languageDirective}
                     El narrador ha resaltado este elemento clave. Puedes registrarlo como tarjeta para que forme parte del compendio de tu mundo y la IA mantenga su coherencia.
                   </p>
                   
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                    <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 180px' }}>
                       <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Tipo de Tarjeta</label>
                       <select 
                         value={activeEntityModal.draftType}
@@ -1443,7 +1787,8 @@ ${languageDirective}
                         <option value="Criatura">🐉 Bestia / Criatura</option>
                       </select>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+
+                    <div style={{ display: 'flex', gap: '6px' }}>
                       <button
                         type="button"
                         onClick={handleGenerateTagLore}
@@ -1452,18 +1797,42 @@ ${languageDirective}
                           background: 'rgba(192, 132, 252, 0.15)',
                           border: '1px solid rgba(192, 132, 252, 0.35)',
                           color: '#c084fc',
-                          padding: '7px 12px',
+                          padding: '7px 11px',
                           borderRadius: '6px',
-                          fontSize: '0.78rem',
-                          cursor: 'pointer',
+                          fontSize: '0.76rem',
+                          cursor: isGeneratingLore ? 'wait' : 'pointer',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '6px',
+                          gap: '5px',
                           fontWeight: '600'
                         }}
                         title="Generar lore con IA para este término"
                       >
-                        <FontAwesomeIcon icon={faMagic} /> {isGeneratingLore ? 'Generando...' : 'Generar Lore'}
+                        <FontAwesomeIcon icon={isGeneratingLore ? faSpinner : faMagic} spin={isGeneratingLore} />
+                        <span>{isGeneratingLore ? 'Lore...' : 'Generar Lore'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleGenerateTagCover}
+                        disabled={isGeneratingTagCover}
+                        style={{
+                          background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                          border: 'none',
+                          color: '#0d0e16',
+                          padding: '7px 11px',
+                          borderRadius: '6px',
+                          fontSize: '0.76rem',
+                          cursor: isGeneratingTagCover ? 'wait' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          fontWeight: '700'
+                        }}
+                        title="Generar portada o retrato con IA"
+                      >
+                        <FontAwesomeIcon icon={isGeneratingTagCover ? faSpinner : faImage} spin={isGeneratingTagCover} />
+                        <span>{isGeneratingTagCover ? 'Ilustrando...' : 'Generar Portada'}</span>
                       </button>
                     </div>
                   </div>
@@ -1491,7 +1860,8 @@ ${languageDirective}
                           title: activeEntityModal.draftTitle,
                           type: activeEntityModal.draftType,
                           intro: activeEntityModal.draftIntro,
-                          text: activeEntityModal.draftText
+                          text: activeEntityModal.draftText,
+                          cover: activeEntityModal.draftCover || ''
                         };
                         onOpenCreateModal(activeEntityModal.draftType, itemToEdit);
                         setActiveEntityModal(null);
@@ -1547,7 +1917,8 @@ ${languageDirective}
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {confirmDialog && (

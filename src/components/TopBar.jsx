@@ -18,11 +18,18 @@ import {
   faRobot,
   faScroll,
   faUndo,
-  faEye,
-  faKeyboard
+  faKeyboard,
+  faMobileAlt,
+  faImage,
+  faServer,
+  faMicrochip,
+  faSyncAlt,
+  faPalette
 } from '@fortawesome/free-solid-svg-icons';
-import { getAvailableModels } from '../utils/localAIStudio';
+import { getAvailableModels, AVAILABLE_IMAGE_MODELS } from '../utils/localAIStudio';
 import { SUPPORTED_LANGUAGES } from '../utils/language';
+import { fetchServerStatus, fetchAvailableModels, loadModelOnServer } from '../utils/serverApi';
+import RemoteConnectModal from './RemoteConnectModal';
 import './topbar.css';
 
 const FONT_FAMILIES = [
@@ -70,9 +77,42 @@ export default function TopBar({
   const [showMemoryInput, setShowMemoryInput] = useState(false);
   const [newMemoryText, setNewMemoryText] = useState('');
   const [availableLmModels, setAvailableLmModels] = useState([]);
+  const [remoteModalOpen, setRemoteModalOpen] = useState(false);
+  const [serverInfo, setServerInfo] = useState({ online: false });
+  const [nativeGgufModels, setNativeGgufModels] = useState([]);
+  const [loadingModel, setLoadingModel] = useState(false);
   const dropdownRef = useRef(null);
 
   const toggleSettings = () => setSettingsOpen(prev => !prev);
+
+  const refreshServerInfo = () => {
+    fetchServerStatus()
+      .then(st => setServerInfo(st))
+      .catch(() => setServerInfo({ online: false }));
+    fetchAvailableModels()
+      .then(res => {
+        if (res.success && Array.isArray(res.models)) {
+          setNativeGgufModels(res.models);
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshServerInfo();
+  }, [settingsOpen]);
+
+  const handleSwitchNativeModel = async (modelName) => {
+    setLoadingModel(true);
+    try {
+      await loadModelOnServer(modelName);
+      refreshServerInfo();
+    } catch (e) {
+      console.warn('Failed to switch native model:', e);
+    } finally {
+      setLoadingModel(false);
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -127,10 +167,6 @@ export default function TopBar({
   const currentThoughtColor = isEditingSpecific 
     ? (custom.thoughtColor || global.thoughtColor || '#c084fc')
     : (global.thoughtColor || '#c084fc');
-
-  const currentAiBubbleBg = isEditingSpecific 
-    ? (custom.aiBubbleBg || global.aiBubbleBg || 'rgba(255, 255, 255, 0.03)')
-    : (global.aiBubbleBg || 'rgba(255, 255, 255, 0.03)');
 
   const updateStyleProp = (prop, value) => {
     if (isEditingSpecific) {
@@ -226,6 +262,15 @@ export default function TopBar({
             </button>
           </>
         )}
+
+        <button 
+          className="top-bar-btn" 
+          title="Conectar Móvil / Código QR" 
+          aria-label="Conectar Móvil"
+          onClick={() => setRemoteModalOpen(true)}
+        >
+          <FontAwesomeIcon icon={faMobileAlt} />
+        </button>
 
         <button 
           className={`top-bar-btn ${settingsOpen ? 'active' : ''}`} 
@@ -428,26 +473,77 @@ export default function TopBar({
                   </div>
                 </div>
 
-                {/* Previsualización en Vivo */}
-                <div style={{
-                  background: currentAiBubbleBg,
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  borderRadius: '8px',
-                  padding: '8px 10px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px'
-                }}>
-                  <div style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <FontAwesomeIcon icon={faEye} /> Previsualización en vivo:
-                  </div>
-                  <div style={{ color: currentTextColor, fontSize: '0.84rem' }}>
-                    <span style={{ color: currentActionColor, fontStyle: 'italic' }}>*El tabernero asiente.*</span>
-                    {' '}
-                    <span style={{ color: currentDialogueColor, fontWeight: '500' }}>"Bienvenido forastero."</span>
-                    {' '}
-                    <span style={{ color: currentThoughtColor, fontStyle: 'italic' }}>~Parece tranquilo.~</span>
-                  </div>
+                {/* Fondos Dinámicos & Zona B (Panel de Personajes) */}
+                <div className="settings-group" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: '0 0 6px 0', fontWeight: '500', color: '#ffffff' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={chatSettings.showLocationBackground !== false}
+                      onChange={(e) => onUpdateChatSettings({ ...chatSettings, showLocationBackground: e.target.checked })}
+                      style={{ cursor: 'pointer', accentColor: '#ffd36b', width: '16px', height: '16px' }}
+                    />
+                    <span><FontAwesomeIcon icon={faImage} /> Fondo de Localización Dinámico</span>
+                  </label>
+                  <small style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.74rem', display: 'block', lineHeight: 1.4, marginBottom: '8px' }}>
+                    Muestra ilustraciones de fondo coherentes con el escenario o lugar actual.
+                  </small>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: '6px 0', fontWeight: '500', color: '#ffffff' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={chatSettings.showCharacterSidebar !== false}
+                      onChange={(e) => onUpdateChatSettings({ ...chatSettings, showCharacterSidebar: e.target.checked })}
+                      style={{ cursor: 'pointer', accentColor: '#ffd36b', width: '16px', height: '16px' }}
+                    />
+                    <span><FontAwesomeIcon icon={faUserAstronaut} /> Retrato de Personaje Lateral (Zona B)</span>
+                  </label>
+                  <small style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.74rem', display: 'block', lineHeight: 1.4, marginBottom: '10px' }}>
+                    Muestra el retrato vertical del personaje activo y adapta su expresión según el texto.
+                  </small>
+
+                  {/* Slider de Opacidad del Chat */}
+                  {chatSettings.showLocationBackground !== false && (
+                    <div style={{ marginTop: '6px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#ffd36b', fontWeight: '600' }}>
+                          Opacidad del Chat sobre el Fondo:
+                        </span>
+                        <span style={{ fontSize: '0.78rem', color: '#ffffff', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                          {Math.round((chatSettings.chatBackgroundOpacity ?? 0.85) * 100)}%
+                        </span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0.20" 
+                        max="1.0" 
+                        step="0.05"
+                        value={chatSettings.chatBackgroundOpacity ?? 0.85}
+                        onChange={(e) => onUpdateChatSettings({ ...chatSettings, chatBackgroundOpacity: parseFloat(e.target.value) })}
+                        style={{ width: '100%', cursor: 'pointer', accentColor: '#ffd36b' }}
+                      />
+                      <small style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.72rem', display: 'block', marginTop: '2px' }}>
+                        Ajusta la transparencia para facilitar la lectura sobre la imagen de fondo.
+                      </small>
+                    </div>
+                  )}
+                </div>
+
+                {/* Comportamiento del Teclado / Entrada */}
+                <div className="settings-group" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, fontWeight: '500', color: '#ffffff' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={chatSettings.sendOnShiftEnter !== false}
+                      onChange={(e) => onUpdateChatSettings({ ...chatSettings, sendOnShiftEnter: e.target.checked })}
+                      style={{ cursor: 'pointer', accentColor: '#ffd36b', width: '16px', height: '16px' }}
+                    />
+                    <span><FontAwesomeIcon icon={faKeyboard} /> Enviar con Shift + Enter</span>
+                  </label>
+                  <small style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.74rem', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
+                    {chatSettings.sendOnShiftEnter !== false 
+                      ? 'Activado: Shift + Enter envía el mensaje, Enter añade una línea.' 
+                      : 'Desactivado: Shift + Enter añade una línea. Solo se envía con el botón.'}
+                  </small>
                 </div>
               </div>
             )}
@@ -455,9 +551,69 @@ export default function TopBar({
             {/* PESTAÑA 2: MOTOR IA & CONEXIÓN */}
             {settingsTab === 'ai' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* Modelo Favorito */}
+                {/* Banner de Motor Nativo */}
+                <div style={{
+                  background: serverInfo.online ? 'rgba(110, 231, 183, 0.08)' : 'rgba(255, 211, 107, 0.06)',
+                  border: `1px solid ${serverInfo.online ? 'rgba(110, 231, 183, 0.3)' : 'rgba(255, 211, 107, 0.25)'}`,
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', fontSize: '0.82rem', color: serverInfo.online ? '#6ee7b7' : '#ffd36b' }}>
+                      <FontAwesomeIcon icon={serverInfo.online ? faServer : faMicrochip} />
+                      <span>{serverInfo.online ? '🟢 Servidor Nativo Ptahn Activo' : '⚪ Servidor Local Standalone'}</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={refreshServerInfo} 
+                      style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', fontSize: '0.8rem' }}
+                      title="Refrescar estado del servidor"
+                    >
+                      <FontAwesomeIcon icon={faSyncAlt} />
+                    </button>
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
+                    {serverInfo.online 
+                      ? `Hardware: ${serverInfo.gpu || 'Auto'} | Modelo en VRAM: ${serverInfo.activeModel || 'Ninguno'}`
+                      : 'Inicia el servidor con "npm run server" para inferencia nativa y conexión LAN/móvil.'}
+                  </div>
+                </div>
+
+                {/* Acceso Remoto / QR */}
+                <button
+                  type="button"
+                  className="dropdown-action-btn"
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setRemoteModalOpen(true);
+                  }}
+                  style={{ background: 'rgba(255, 211, 107, 0.12)', border: '1px solid rgba(255, 211, 107, 0.3)', color: '#ffd36b', fontWeight: 'bold' }}
+                >
+                  <FontAwesomeIcon icon={faMobileAlt} /> Conectar Móvil / Ver Código QR
+                </button>
+
+                {/* Selector de Modelos GGUF Nativos en ./models/ */}
+                {nativeGgufModels.length > 0 && (
+                  <div className="settings-group">
+                    <label><FontAwesomeIcon icon={faMicrochip} /> Modelo GGUF Nativo (en ./models/)</label>
+                    <select 
+                      value={serverInfo.activeModel || ''}
+                      onChange={(e) => handleSwitchNativeModel(e.target.value)}
+                      disabled={loadingModel}
+                    >
+                      {nativeGgufModels.map(m => (
+                        <option key={m.id} value={m.filename}>{m.filename} ({m.formattedSize})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Modelo Favorito (LM Studio / Fallback) */}
                 <div className="settings-group">
-                  <label><FontAwesomeIcon icon={faSlidersH} /> Modelo de Narración & Rol</label>
+                  <label><FontAwesomeIcon icon={faSlidersH} /> Modelo de Narración & Rol (Externo)</label>
                   <select 
                     value={preferredModel}
                     onChange={(e) => onUpdateChatSettings({ ...chatSettings, preferredModel: e.target.value })}
@@ -479,26 +635,19 @@ export default function TopBar({
                   </select>
                 </div>
 
-                {/* URL del Servidor LM Studio */}
+                {/* Selector de Modelo de Difusión / Generación de Imágenes */}
                 <div className="settings-group">
-                  <label>🌐 URL LM Studio</label>
-                  <input 
-                    type="text" 
-                    value={chatSettings.lmStudioUrl || 'http://localhost:1234'}
-                    onChange={(e) => onUpdateChatSettings({ ...chatSettings, lmStudioUrl: e.target.value })}
-                    placeholder="http://localhost:1234"
-                  />
-                </div>
-
-                {/* URL del Servidor de Imágenes */}
-                <div className="settings-group">
-                  <label>🎨 URL Generador de Imágenes (Pinokio)</label>
-                  <input 
-                    type="text" 
-                    value={chatSettings.imageServerUrl || 'http://127.0.0.1:42016'}
-                    onChange={(e) => onUpdateChatSettings({ ...chatSettings, imageServerUrl: e.target.value })}
-                    placeholder="http://127.0.0.1:42016"
-                  />
+                  <label><FontAwesomeIcon icon={faPalette} /> Modelo de Generación de Imágenes (Difusión)</label>
+                  <select 
+                    value={chatSettings.preferredImageModel || 'DreamShaperXL_Lightning.safetensors'}
+                    onChange={(e) => onUpdateChatSettings({ ...chatSettings, preferredImageModel: e.target.value })}
+                  >
+                    {AVAILABLE_IMAGE_MODELS.map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Idioma Favorito / Detección Automática */}
@@ -626,6 +775,11 @@ export default function TopBar({
           </div>
         )}
       </div>
+
+      <RemoteConnectModal 
+        isOpen={remoteModalOpen} 
+        onClose={() => setRemoteModalOpen(false)} 
+      />
     </header>
   );
 }
