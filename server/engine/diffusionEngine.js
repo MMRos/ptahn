@@ -9,6 +9,7 @@ class DiffusionEngine {
     this.imagesDir = path.join(DATA_DIR, 'generated_images');
     this.activeModel = null;
     this.isGenerating = false;
+    this.pythonPath = null;
     this.ensureDirectories();
   }
 
@@ -16,6 +17,32 @@ class DiffusionEngine {
     if (!fs.existsSync(this.imagesDir)) {
       fs.mkdirSync(this.imagesDir, { recursive: true });
     }
+  }
+
+  /**
+   * Discovers available Python runtime with torch/diffusers
+   */
+  findPythonExecutable() {
+    if (this.pythonPath && fs.existsSync(this.pythonPath)) {
+      return this.pythonPath;
+    }
+    const candidates = [
+      'C:\\pinokio\\api\\comfy.git\\app\\env\\Scripts\\python.exe',
+      'C:\\pinokio\\api\\ai-toolkit.git\\app\\env\\Scripts\\python.exe',
+      'C:\\pinokio\\bin\\miniconda\\python.exe',
+      'python',
+      'py'
+    ];
+    for (const cand of candidates) {
+      try {
+        if (path.isAbsolute(cand) && fs.existsSync(cand)) {
+          this.pythonPath = cand;
+          return cand;
+        }
+      } catch (e) {}
+    }
+    this.pythonPath = 'python';
+    return 'python';
   }
 
   /**
@@ -35,16 +62,16 @@ class DiffusionEngine {
       isGenerating: this.isGenerating,
       activeModel: this.activeModel || (models[0]?.filename || null),
       availableModelsCount: models.length,
-      models: models.map(m => ({ id: m.id, name: m.filename, size: m.formattedSize })),
+      models: models.map(m => ({ id: m.id, name: m.filename, size: m.formattedSize, type: m.subType || 'diffusion' })),
+      pythonRuntime: this.findPythonExecutable(),
       storageDir: this.imagesDir
     };
   }
 
   /**
-   * Generates a raw fallback 1x1 PNG or procedural canvas if binary execution is building
+   * Generates a raw fallback 1x1 PNG for test suites
    */
   createMinimalPngBuffer(width = 512, height = 768) {
-    // 1x1 transparent PNG buffer fallback
     return Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
       'base64'
@@ -52,10 +79,82 @@ class DiffusionEngine {
   }
 
   /**
+   * Executes the standalone native Python diffusion worker subprocess
+   */
+  async runNativeWorker(prompt, options = {}) {
+    const {
+      width = 512,
+      height = 768,
+      steps = 20,
+      cfgScale = 7.0,
+      seed = -1,
+      modelPath,
+      outputPath,
+      negativePrompt = 'blurry, low quality, deformed, distorted, text, watermark, bad anatomy'
+    } = options;
+
+    const pythonExe = this.findPythonExecutable();
+    const workerScript = path.join(__dirname, 'nativeDiffusionWorker.py');
+
+    const args = [
+      '-u',
+      workerScript,
+      '--prompt', prompt,
+      '--negative_prompt', negativePrompt,
+      '--model_path', modelPath,
+      '--output_path', outputPath,
+      '--width', String(width),
+      '--height', String(height),
+      '--steps', String(steps),
+      '--cfg_scale', String(cfgScale),
+      '--seed', String(seed)
+    ];
+
+    return new Promise((resolve, reject) => {
+      const child = spawn(pythonExe, args, {
+        cwd: __dirname,
+        env: { ...process.env, PYTHONUNBUFFERED: '1' }
+      });
+
+      let stdoutData = '';
+      let stderrData = '';
+
+      child.stdout.on('data', (data) => {
+        stdoutData += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        stderrData += data.toString();
+      });
+
+      child.on('error', (err) => {
+        reject(new Error(`Failed to spawn Python diffusion worker: ${err.message}`));
+      });
+
+      child.on('close', (code) => {
+        if (code !== 0) {
+          try {
+            const parsed = JSON.parse(stdoutData.trim());
+            if (parsed.error) return reject(new Error(parsed.error));
+          } catch (e) {}
+          return reject(new Error(`Diffusion worker exited with code ${code}. ${stderrData || stdoutData || ''}`));
+        }
+
+        try {
+          const parsed = JSON.parse(stdoutData.trim());
+          resolve(parsed);
+        } catch (jsonErr) {
+          reject(new Error(`Failed to parse worker output: ${stdoutData}`));
+        }
+      });
+    });
+  }
+
+  /**
    * Generates an image natively given prompt and generation options
    * @param {string} prompt
    * @param {object} options
-   * @returns {Promise<{success: boolean, url: string, base64: string, filename: string}>}
+   * @returns {Promise<{success: boolean, url: string, base64: string, filename: string, model: string}>}
    */
   async generateImage(prompt, options = {}) {
     this.ensureDirectories();
@@ -63,9 +162,10 @@ class DiffusionEngine {
       width = 512,
       height = 768,
       steps = 20,
+      cfgScale = 7.0,
       seed = Math.floor(Math.random() * 1000000),
       model = null,
-      negativePrompt = 'blurry, low quality, deformed, distorted, text, watermark'
+      negativePrompt = 'blurry, low quality, deformed, distorted, text, watermark, bad anatomy'
     } = options;
 
     this.isGenerating = true;
@@ -74,71 +174,96 @@ class DiffusionEngine {
 
     try {
       const models = this.getAvailableModels();
-      const targetModel = model || this.activeModel || (models[0]?.filename || null);
-
-      // 1. Check if external local bridge is active (Automatic1111 / Forge / Pinokio)
-      const localBridgeUrls = ['http://127.0.0.1:42016', 'http://127.0.0.1:7860', 'http://127.0.0.1:8188'];
-      let generatedBase64 = null;
-
-      for (const bridgeUrl of localBridgeUrls) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 1200);
-          const testRes = await fetch(`${bridgeUrl}/sdapi/v1/txt2img`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: prompt,
-              negative_prompt: negativePrompt,
-              steps: steps,
-              width: width,
-              height: height,
-              seed: seed
-            }),
-            signal: controller.signal
-          }).catch(() => null);
-          clearTimeout(timeoutId);
-
-          if (testRes && testRes.ok) {
-            const data = await testRes.json();
-            if (data.images && data.images[0]) {
-              generatedBase64 = data.images[0].startsWith('data:') 
-                ? data.images[0] 
-                : `data:image/png;base64,${data.images[0]}`;
-              const pureB64 = data.images[0].replace(/^data:image\/[a-z]+;base64,/, '');
-              fs.writeFileSync(outputPath, Buffer.from(pureB64, 'base64'));
-              break;
-            }
-          }
-        } catch (bridgeErr) {}
+      if (!models || models.length === 0) {
+        throw new Error('No se encontraron modelos de difusión (.safetensors / .gguf) en ./models/. Coloca un modelo en ./models/ para generar imágenes.');
       }
 
-      // 2. In test environment, generate synthetic test image buffer
-      if (!generatedBase64 && process.env.NODE_ENV === 'test') {
+      // Prioritize selected checkpoint or find best checkpoint file in models
+      let targetModelObj = models.find(m => m.filename === model || m.id === model);
+      if (!targetModelObj) {
+        // Find largest .safetensors (likely base model e.g. v6 or malaAnimeMix)
+        targetModelObj = models.slice().sort((a, b) => b.size - a.size)[0];
+      }
+
+      const modelPath = path.isAbsolute(targetModelObj.filename)
+        ? targetModelObj.filename
+        : path.join(MODELS_DIR, targetModelObj.filename);
+
+      let generatedBase64 = null;
+
+      // 1. In test environment, generate synthetic test image buffer
+      if (process.env.NODE_ENV === 'test') {
         const imageBuffer = this.createMinimalPngBuffer(width, height);
         fs.writeFileSync(outputPath, imageBuffer);
         generatedBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
-      }
+      } else {
+        // 2. Primary: Execute Native Subprocess Worker via GPU PyTorch + Diffusers
+        try {
+          const workerRes = await this.runNativeWorker(prompt, {
+            width,
+            height,
+            steps,
+            cfgScale,
+            seed,
+            modelPath,
+            outputPath,
+            negativePrompt
+          });
+          if (workerRes && workerRes.success && workerRes.base64) {
+            generatedBase64 = workerRes.base64;
+          }
+        } catch (workerErr) {
+          console.warn('[Native Diffusion Worker Error]:', workerErr.message);
+          
+          // 3. Fallback: probe local bridge if running
+          const localBridgeUrls = ['http://127.0.0.1:42016', 'http://127.0.0.1:7860', 'http://127.0.0.1:8188'];
+          for (const bridgeUrl of localBridgeUrls) {
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 1200);
+              const testRes = await fetch(`${bridgeUrl}/sdapi/v1/txt2img`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prompt,
+                  negative_prompt: negativePrompt,
+                  steps,
+                  width,
+                  height,
+                  seed
+                }),
+                signal: controller.signal
+              }).catch(() => null);
+              clearTimeout(timeoutId);
 
-      // 3. If no bridge, throw descriptive error with models found
-      if (!generatedBase64) {
-        if (!models || models.length === 0) {
-          throw new Error('No se encontraron modelos de difusión (.safetensors / .gguf) en el directorio ./models/. Coloca un archivo de modelo para habilitar la generación de imágenes.');
+              if (testRes && testRes.ok) {
+                const data = await testRes.json();
+                if (data.images && data.images[0]) {
+                  generatedBase64 = data.images[0].startsWith('data:') 
+                    ? data.images[0] 
+                    : `data:image/png;base64,${data.images[0]}`;
+                  const pureB64 = data.images[0].replace(/^data:image\/[a-z]+;base64,/, '');
+                  fs.writeFileSync(outputPath, Buffer.from(pureB64, 'base64'));
+                  break;
+                }
+              }
+            } catch (bridgeErr) {}
+          }
+
+          if (!generatedBase64) {
+            throw workerErr;
+          }
         }
-
-        throw new Error(
-          `Motor de difusión no accesible. Se han detectado ${models.length} modelos en ./models/ (${models.map(m => m.filename).slice(0, 3).join(', ')}), pero se requiere tener activo un backend de difusión (Pinokio Uncensored Studio en puerto 42016, Stable Diffusion WebUI / Forge en puerto 7860, o ComfyUI en puerto 8188) para ejecutar la inferencia por GPU.`
-        );
       }
 
-      this.activeModel = targetModel;
+      this.activeModel = targetModelObj.filename;
       return {
         success: true,
         url: `/api/images/files/${filename}`,
         base64: generatedBase64,
         filename,
         outputPath,
-        model: targetModel
+        model: targetModelObj.filename
       };
     } finally {
       this.isGenerating = false;
