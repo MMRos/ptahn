@@ -1,5 +1,6 @@
-import { enrichImagePrompt, resolveTargetLanguage } from './language';
+import { enrichImagePrompt, resolveTargetLanguage, createTranslationPrompt } from './language';
 import { loadChatSettings } from './storage';
+import { findMatchingEntity } from './textFormatter';
 
 /**
  * Local AI Studio Multimodal Manager for Ptahn
@@ -581,8 +582,8 @@ export async function sendChatMessage({
           try {
             const parsed = JSON.parse(dataStr);
             const deltaObj = parsed.choices?.[0]?.delta;
-            const contentDelta = deltaObj?.content || '';
-            const reasoningDelta = deltaObj?.reasoning_content || deltaObj?.reasoning || '';
+            const contentDelta = deltaObj?.content ?? deltaObj?.text ?? parsed.choices?.[0]?.text ?? '';
+            const reasoningDelta = deltaObj?.reasoning_content ?? deltaObj?.reasoning ?? '';
 
             if (reasoningDelta) {
               if (!isReasoning && !fullContent.includes('<think>')) {
@@ -689,6 +690,8 @@ Respond ONLY with a short, evocative sentence to add to memory, or the word NONE
 export async function sendExtractCardsTask({
   messages = [],
   existingCards = [],
+  existingScenarios = [],
+  activeScenario = null,
   modelId = '',
   preferredLanguage = 'auto',
   baseUrl
@@ -699,18 +702,24 @@ export async function sendExtractCardsTask({
     if (!recentStory || recentStory.trim().length < 20) return [];
 
     const targetLang = resolveTargetLanguage(preferredLanguage, recentStory);
-    const existingNames = existingCards.map(c => (c.title || c.name || '').trim().toLowerCase()).filter(Boolean);
+    const allExisting = [...existingCards, ...existingScenarios];
+    if (activeScenario && !allExisting.some(x => x && (x.id === activeScenario.id || x.title === activeScenario.title))) {
+      allExisting.push(activeScenario);
+    }
+
+    const existingNames = allExisting.map(c => (c.title || c.name || '').trim()).filter(Boolean);
 
     const systemInstruction = `You are the Compendium Archivist of a tabletop RPG.
 Your task is to analyze the recent game messages and extract significant NEW characters, creatures, locations, or items that deserve a compendium card.
 
 CRITICAL RULES FOR CHARACTER LORE:
-1. Grounding in the scene: The "intro" and "text" fields MUST accurately reflect the entity's current condition, physical state, social role, and situation as described in the story (e.g. an enslaved wolfkin being whipped in a town square MUST be described as an enslaved captive suffering in that plaza, NOT a mythical free guardian).
+1. Grounding in the scene: The "intro" and "text" fields MUST accurately reflect the entity's current condition, physical state, social role, and situation as described in the story.
 2. Never invent contradictory, generic mythological archetypes that contradict the ongoing scene.
 3. Language: All "title", "intro", "text", "tags", and "traits" MUST be written strictly in ${targetLang.name} (${targetLang.code}).
 4. "imagePrompt" must be in English for SDXL image generation with appropriate lighting and aesthetic modifiers.
 
-Registered names to IGNORE: ${existingNames.join(', ') || 'None'}.
+Registered entities already in the compendium (DO NOT EXTRACT THESE OR CREATE DUPLICATES FOR THEM):
+${existingNames.join(', ') || 'None'}.
 
 If new entities are found, reply ONLY with a valid JSON array matching this exact schema:
 [
@@ -770,14 +779,71 @@ Do not add any explanation or text outside the JSON.`;
     if (Array.isArray(parsed)) {
       return parsed.filter(item => {
         if (!item || !item.title || typeof item.title !== 'string') return false;
-        const cleanName = item.title.trim().toLowerCase();
-        if (!cleanName || existingNames.includes(cleanName)) return false;
-        return true;
+        // Strict duplicate check against all existing entities using findMatchingEntity
+        const duplicate = findMatchingEntity(item.title, allExisting);
+        return !duplicate;
       });
     }
     return [];
   } catch (error) {
     console.warn('[Local AI Studio Extraction Error]:', error.message);
     return [];
+  }
+}
+
+/**
+ * Translates a chat message or narrative text to the specified target language using the local LLM.
+ * Preserves all formatting tokens ("...", *...*, ~...~, ==...==, <think>...).
+ * 
+ * @param {object} params
+ * @param {string} params.text - The message text to translate.
+ * @param {string} [params.targetLanguage='es'] - The target language preference.
+ * @param {string} [params.modelId] - The LLM model ID.
+ * @param {string} [params.baseUrl] - Base server URL.
+ * @returns {Promise<string>} The translated text.
+ */
+export async function translateChatMessage({
+  text,
+  targetLanguage = 'es',
+  modelId,
+  baseUrl
+}) {
+  if (!text || typeof text !== 'string' || !text.trim()) return text;
+  const finalBaseUrl = getBaseUrl(baseUrl);
+  try {
+    const resolvedLang = resolveTargetLanguage(targetLanguage, text);
+    const { system, user } = createTranslationPrompt(text, resolvedLang);
+
+    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
+    const resolvedModelId = currentlyLoaded || (await resolveModelId(modelId, finalBaseUrl)) || modelId || 'default';
+
+    const response = await apiFetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: resolvedModelId,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        temperature: 0.2,
+        stream: false
+      })
+    }, finalBaseUrl);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => response.statusText);
+      throw new Error(`Translation API error: ${errText || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const translated = data.choices?.[0]?.message?.content?.trim();
+    if (translated) {
+      return translated;
+    }
+    return text;
+  } catch (err) {
+    console.warn('[Local AI Studio Translation Error]:', err.message);
+    throw err;
   }
 }

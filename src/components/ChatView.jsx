@@ -18,13 +18,15 @@ import {
   faTrashAlt,
   faMagic,
   faSave,
-  faExternalLinkAlt
+  faExternalLinkAlt,
+  faLanguage,
+  faSpinner
 } from '@fortawesome/free-solid-svg-icons';
-import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask } from '../utils/localAIStudio';
+import { sendChatMessage, generateImageLocal, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
 import { resolveTargetLanguage, getLanguageDirective } from '../utils/language';
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { speakBrowserUtterance, cancelBrowserSpeech } from '../utils/speechTTS';
-import { FormattedMessageText } from '../utils/textFormatter';
+import { FormattedMessageText, findMatchingEntity, normalizeEntityName } from '../utils/textFormatter';
 import { addChat } from '../utils/db';
 import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
@@ -42,6 +44,7 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
   const [popupCharacter, setPopupCharacter] = useState(null);
   const [activeEntityModal, setActiveEntityModal] = useState(null);
   const [isGeneratingLore, setIsGeneratingLore] = useState(false);
+  const [translatingMsgId, setTranslatingMsgId] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const inputRef = useRef(null);
   const chatRef = useRef(null);
@@ -56,11 +59,15 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
     }
   };
 
-  // Scroll instantáneo al montar o cambiar de chat
+  // Scroll instantáneo y sincronización de mensajes al montar o cambiar de chat
   useEffect(() => {
+    if (chat?.messages) {
+      setMessages(chat.messages);
+    }
     scrollToBottom('auto');
     const timer = setTimeout(() => scrollToBottom('auto'), 80);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat?.id]);
 
   // Scroll dinámico cuando cambian los mensajes o durante el streaming
@@ -97,14 +104,15 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
 
   // Manejar clic en etiquetas doradas/verdes ==texto==
   const handleTagClick = (tagContent, existingEntity) => {
+    const resolvedEntity = existingEntity || findMatchingEntity(tagContent, appData);
     setActiveEntityModal({
       tagName: tagContent,
-      existing: existingEntity || null,
-      draftType: existingEntity ? (existingEntity.type || 'Lugar') : 'Personaje',
-      draftTitle: tagContent,
-      draftIntro: existingEntity ? (existingEntity.intro || '') : '',
-      draftText: existingEntity ? (existingEntity.text || existingEntity.desc || '') : '',
-      draftTraits: existingEntity ? (existingEntity.traits || []) : []
+      existing: resolvedEntity || null,
+      draftType: resolvedEntity ? (resolvedEntity.type || 'Lugar') : 'Personaje',
+      draftTitle: resolvedEntity ? (resolvedEntity.title || resolvedEntity.name || tagContent) : tagContent,
+      draftIntro: resolvedEntity ? (resolvedEntity.intro || '') : '',
+      draftText: resolvedEntity ? (resolvedEntity.text || resolvedEntity.desc || '') : '',
+      draftTraits: resolvedEntity ? (resolvedEntity.traits || []) : []
     });
   };
 
@@ -113,7 +121,9 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
     if (!activeEntityModal || isGeneratingLore) return;
     setIsGeneratingLore(true);
     try {
-      const scenario = appData?.scenarios?.find(s => s.id === chat?.scenarioId || s.title === chat?.scenario);
+      const scenario = (appData?.scenarios || []).find(s => s.id === chat?.scenarioId || s.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()) ||
+                       (appData?.cards || []).find(c => c.id === chat?.scenarioId || c.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()) ||
+                       findMatchingEntity(chat?.scenario, appData);
       const recentHistory = messages.slice(-8).map(m => (m.from === 'user' ? 'Jugador: ' : 'Narrador: ') + m.text).join('\n');
       const scenarioContext = scenario ? `[Escenario: ${scenario.title}. Lore base: ${scenario.baseContext || scenario.intro || 'Sin contexto adicional'}]` : `[Escenario: ${chat?.scenario || 'Fantasía'}]`;
       const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, [recentHistory, scenario?.baseContext, activeEntityModal.draftTitle]);
@@ -367,15 +377,45 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     }
   };
 
+  // Traducción a demanda del mensaje al idioma predeterminado
+  const handleTranslateMessage = async (m, idx) => {
+    if (translatingMsgId !== null || !m?.text) return;
+    const msgId = `${m.from}-${idx}`;
+    setTranslatingMsgId(msgId);
+    try {
+      const targetLang = chatSettings?.preferredLanguage || 'es';
+      const translated = await translateChatMessage({
+        text: m.text,
+        targetLanguage: targetLang,
+        modelId: chatSettings?.preferredModel,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+      if (translated && translated.trim()) {
+        const next = [...messages];
+        next[idx] = { ...next[idx], text: translated.trim() };
+        setMessages(next);
+        await persistMessages(next);
+      }
+    } catch (err) {
+      console.warn('[Translate Message Error]:', err);
+      alert('No se pudo traducir el mensaje. Comprueba que el servidor de IA local esté activo.');
+    } finally {
+      setTranslatingMsgId(null);
+    }
+  };
+
   // Construcción unificada y estructurada del systemPrompt (arnés de contexto).
-  // Consolida los detalles del escenario, narrador, herramientas del taller, jugador, inventario y memorias.
+  // Consolida los detalles del escenario, personajes/PNJs preestablecidos, narrador, herramientas del taller, jugador, inventario y memorias.
   const buildSystemPrompt = () => {
     // 1. Resolve linked scenario and narrator
-    const scenario = appData?.scenarios?.find(s => s.id === chat.scenarioId);
+    const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId || s.title?.toLowerCase() === (chat.scenario || '').toLowerCase()) ||
+                     (appData?.cards || []).find(c => c.id === chat.scenarioId || c.title?.toLowerCase() === (chat.scenario || '').toLowerCase()) ||
+                     findMatchingEntity(chat.scenario, appData);
     const narrator = (appData?.narrators || []).find(n => n.id === scenario?.narrator);
 
     // 2. Resolve player character sheet
-    const userChar = (appData?.cards || []).find(c => c.id === chat.characterId);
+    const userChar = (appData?.cards || []).find(c => c.id === chat.characterId || c.title?.toLowerCase() === (chat.character || '').toLowerCase()) ||
+                     findMatchingEntity(chat.character, appData?.cards);
 
     // 3. Format Narrator/DM Profile
     let narratorDetails = '';
@@ -466,6 +506,62 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
 `.trim();
     }
 
+    // 7.1 Format Pre-established Scenario Characters, Entities, and NPCs
+    let scenarioCharactersDetails = '';
+    const allCards = appData?.cards || [];
+    const scenarioCardIdsOrTitles = Array.isArray(scenario?.cards) ? scenario.cards : [];
+
+    const scenarioCards = allCards.filter(c => {
+      if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
+      if (c.type === 'Inventario' || c.type === 'Memoria') return false;
+
+      const isDirectlyLinked = scenarioCardIdsOrTitles.some(idOrTitle => 
+        idOrTitle === c.id || 
+        idOrTitle === c.title || 
+        (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
+      );
+      const isScenarioLinked = c.linkedScenario === chat.scenarioId || 
+                               c.linkedScenario === scenario?.title || 
+                               c.linkedScenario === scenario?.id || 
+                               (scenario?.title && c.linkedScenario && normalizeEntityName(c.linkedScenario) === normalizeEntityName(scenario.title));
+      const isConnected = Array.isArray(c.connectedCards) && (
+        c.connectedCards.includes(chat.scenarioId) || 
+        c.connectedCards.includes(scenario?.title) || 
+        (scenario?.id && c.connectedCards.includes(scenario.id)) ||
+        (scenario?.title && c.connectedCards.some(cc => normalizeEntityName(cc) === normalizeEntityName(scenario.title)))
+      );
+
+      return isDirectlyLinked || isScenarioLinked || isConnected;
+    });
+
+    const otherCharacters = allCards.filter(c => 
+      c.type === 'Personaje' && 
+      (!userChar || (c.id !== userChar.id && c.title !== userChar.title)) &&
+      !scenarioCards.some(sc => sc.id === c.id)
+    );
+
+    const relevantEntities = [...scenarioCards, ...otherCharacters];
+
+    if (relevantEntities.length > 0) {
+      const entityEntries = relevantEntities.map(ent => {
+        const traitsStr = ent.traits && ent.traits.length > 0 ? `  * Personality & Traits: ${ent.traits.join(', ')}\n` : '';
+        const tagsStr = ent.tags && ent.tags.length > 0 ? `  * Tags/Role: ${ent.tags.join(', ')}\n` : '';
+        const introStr = ent.intro ? `  * Summary: ${ent.intro}\n` : '';
+        const bioStr = ent.text ? `  * Background & Lore: ${ent.text}\n` : '';
+        return `--- [NPC / ENTITY: ${ent.title || ent.name} (${ent.type || 'Personaje'})] ---\n${introStr}${bioStr}${traitsStr}${tagsStr}`.trim();
+      }).join('\n\n');
+
+      scenarioCharactersDetails = `
+[SCENARIO ROSTER: ESTABLISHED CHARACTERS, NPCS & COMPENDIUM ENTITIES]:
+The following characters and key entities exist in this scenario and world. YOU (Game Master) roleplay and control all of them.
+When {{user}} interacts with, calls, encounters, or mentions any of them:
+- RECOGNIZE THEM IMMEDIATELY without hesitation or confusion.
+- Adopt their established voice, personality, traits, and background lore.
+- Reflect their social role, faction, and relationships authentically.
+${entityEntries}
+`.trim();
+    }
+
     // 8. Format Memories & Milestones
     const inChatMemories = (chat.memoryCards || []).map(m => `* ${m}`);
     const cardMemories = (appData?.cards || []).filter(c => c.type === 'Memoria' && (
@@ -494,7 +590,7 @@ ${languageDirective}
 
 ${scenarioDetails}
 
-${narratorDetails}
+${scenarioCharactersDetails ? `${scenarioCharactersDetails}\n\n` : ''}${narratorDetails}
 
 ${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
 
@@ -527,14 +623,21 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external G
    - The world does not revolve subserviently around the player; reckless actions carry realistic risks, logical consequences, and believable opposition.
    - Maintain strict consistency with scenario lore, inventory, and accumulated memories.
 
-7. STRICT TYPOGRAPHICAL FORMATTING (FOR FRONTEND RENDERING):
-   - Spoken NPC Dialogue: EXCLUSIVAMENTE between double quotes: "Hello, traveler."
-   - Actions, narrative descriptions, and world events: EXCLUSIVAMENTE between asterisks: *The barkeep wiped the counter with a damp cloth.*
-   - NPC thoughts or internal murmurs: between tildes: ~Can this traveler be trusted?~
-   - Key entities, clues, places, or proper names: between equal signs: ==Vallebruma==
+7. STRICT TYPOGRAPHICAL FORMATTING & DIALOGUE VS THOUGHT RULES:
+   - SPOKEN NPC DIALOGUE (ALOUD): MUST be wrapped EXCLUSIVELY in double quotes: "Hello, traveler."
+     * Any vocal speech, conversation, shouting, verbal apology (e.g. "¡Dueño!", "¡Lo siento mucho!", "¡Perdón!"), or reply directed to {{user}} or other characters MUST be inside quotes ("...").
+     * FORBIDDEN to put vocal speech or conversational apologies in tildes (~...~).
+   - SILENT INTERNAL THOUGHTS (UNSPOKEN): MUST be wrapped EXCLUSIVELY in tildes: ~What a strange presence this newcomer has...~
+     * Tildes (~...~) are ONLY for silent, private inner monologues inside an NPC's mind that NO ONE ELSE can hear.
+     * Never use tildes for talking to someone out loud.
+   - NARRATIVE ACTIONS & DESCRIPTIONS: MUST be wrapped in asterisks: *She took a step back, blushing deeply as she adjusted her collar.*
+     * Wrap all physical movements, gestures, expressions, and environmental changes between asterisks (*...*).
+   - KEY ENTITIES & PROPER NAMES: Wrap key compendium items, locations, and characters between equal signs: ==La Forja==, ==Eelyt==, ==Mari==.
 
 [RECORDED STORY MEMORIES & MILESTONES]:
 ${memoryContext}
+
+${languageDirective}
 `.trim();
   };
 
@@ -577,10 +680,15 @@ ${memoryContext}
     if (!autoGenCards) return;
     setTimeout(async () => {
       try {
+        const scenario = (appData?.scenarios || []).find(s => s.id === chat?.scenarioId || s.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()) ||
+                         (appData?.cards || []).find(c => c.id === chat?.scenarioId || c.title?.toLowerCase() === (chat?.scenario || '').toLowerCase());
         const existingCards = appData?.cards || [];
+        const existingScenarios = appData?.scenarios || [];
         const extractedEntities = await sendExtractCardsTask({
           messages: finalMsgs,
           existingCards: existingCards,
+          existingScenarios: existingScenarios,
+          activeScenario: scenario,
           modelId: chatSettings?.preferredModel,
           preferredLanguage: chatSettings?.preferredLanguage || 'auto',
           baseUrl: chatSettings?.lmStudioUrl
@@ -959,6 +1067,17 @@ ${memoryContext}
                   >
                     <FontAwesomeIcon icon={speakingMessageId === `${m.from}-${idx}` ? faTimes : faVolumeUp} />
                   </button>
+                  <button 
+                    title="Traducir al idioma predeterminado" 
+                    onClick={() => handleTranslateMessage(m, idx)}
+                    disabled={translatingMsgId === `${m.from}-${idx}`}
+                    style={{ color: translatingMsgId === `${m.from}-${idx}` ? '#ffd36b' : 'inherit' }}
+                  >
+                    <FontAwesomeIcon 
+                      icon={translatingMsgId === `${m.from}-${idx}` ? faSpinner : faLanguage} 
+                      className={translatingMsgId === `${m.from}-${idx}` ? 'fa-pulse' : ''} 
+                    />
+                  </button>
                   <button title="Editar mensaje" onClick={() => { setEditingIndex(idx); setEditText(m.text); }}><FontAwesomeIcon icon={faEdit} /></button>
                   <button title="Bifurcar chat aquí (Branch)" onClick={() => onBranchChat && onBranchChat(chat, messages.slice(0, idx + 1))}><FontAwesomeIcon icon={faCodeBranch} /></button>
                   <button title="Rebobinar hasta aquí (Rewind)" onClick={() => handleRewindToMessage(idx)}><FontAwesomeIcon icon={faHistory} /></button>
@@ -1204,7 +1323,8 @@ ${memoryContext}
             onChange={(e) => setInputMsg(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                if (e.shiftKey) {
+                const canSendWithShift = chatSettings?.sendOnShiftEnter !== false;
+                if (e.shiftKey && canSendWithShift) {
                   e.preventDefault();
                   handleSend();
                 }
@@ -1212,7 +1332,12 @@ ${memoryContext}
             }}
             rows={2}
           />
-          <button className="chat-send-btn" title="Enviar (Shift + Enter)" onClick={() => handleSend()} disabled={isSending}>
+          <button 
+            className="chat-send-btn" 
+            title={chatSettings?.sendOnShiftEnter !== false ? "Enviar (Shift + Enter)" : "Enviar"} 
+            onClick={() => handleSend()} 
+            disabled={isSending}
+          >
             <FontAwesomeIcon icon={faPaperPlane} />
           </button>
         </div>

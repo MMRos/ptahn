@@ -1,4 +1,4 @@
-import { getBaseUrl, resolveModelId, RECOMMENDED_MODELS } from './localAIStudio';
+import { getBaseUrl, resolveModelId, translateChatMessage, RECOMMENDED_MODELS } from './localAIStudio';
 
 describe('Local AI Studio Tests', () => {
   beforeEach(() => {
@@ -54,5 +54,30 @@ describe('Local AI Studio Tests', () => {
     expect(RECOMMENDED_MODELS.chat).toBeDefined();
     expect(RECOMMENDED_MODELS.image).toBeDefined();
     expect(RECOMMENDED_MODELS.image.id).toContain('DreamShaper');
+  });
+
+  test('should translate message using local completions endpoint', async () => {
+    const mockTranslatedText = '"Saludos viajero," *dijo el guerrero con voz grave.*';
+    global.fetch = jest.fn().mockImplementation((url) => {
+      if (url.includes('/api/v0/models') || url.includes('/v1/models')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: [{ id: 'mock-llm', state: 'loaded' }] })
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{ message: { content: mockTranslatedText } }]
+        })
+      });
+    });
+
+    const res = await translateChatMessage({
+      text: '"Greetings traveler," *said the warrior in a deep voice.*',
+      targetLanguage: 'es'
+    });
+
+    expect(res).toBe(mockTranslatedText);
   });
 });

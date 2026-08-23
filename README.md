@@ -1,70 +1,75 @@
-# Getting Started with Create React App
+# 🌌 Ptahn — Interactive AI Roleplay & Storytelling Studio
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Ptahn es una aplicación web de vanguardia para narrativa interactiva, rol de mesa (TTRPG) asistido por IA y creación de mundos, diseñada con un enfoque **100% soberano y local**.
 
-## Available Scripts
+---
 
-In the project directory, you can run:
+## 🌟 Características Principales
 
-### `npm start`
+- 🎭 **Game Master Contextual y Riguroso:** Arnés de directivas que inyecta automáticamente escenario, narrador, inventario y memorias sin alucinaciones de contexto.
+- 💬 **Sintaxis Tipográfica Dinámica:** Formateo en tiempo real de diálogos (`"..."`), acciones (`*...*`), pensamientos (`~...~`), negritas (`**...**`) y entidades interactivas del compendio (`==...==`).
+- 🧠 **Visualizador de Razonamiento (`<think>`):** Aislamiento y colapso de pensamientos de modelos como DeepSeek-R1.
+- 🎨 **Estudio Multimodal Local:** Conexión fluida con **LM Studio**, **Pinokio / Local AI Studio (sd-vulkan)**, **Audio.cpp** y vídeo local.
+- 🎙️ **Síntesis de Voz Inteligente:** Lectura de mensajes mediante voces locales o el motor de síntesis del navegador.
+- 🖼️ **Editor y Recortador Canvas 2D:** Ajuste y encuadre individual y por lotes (*Batch Cropper*) para retratos (3:4) y paisajes (16:9).
+- 💾 **Persistencia Dual Soberana:** Guardado automático en IndexedDB y sincronización directa con carpetas del sistema de archivos local (*File System Access API*).
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+---
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## 📚 Documentación y Manuales
 
-### `npm test`
+- 📖 **[Manual de Uso Completo (Guía de Usuario)](./MANUAL_DE_USO.md):** Manual detallado paso a paso sobre configuración de motores locales, creación de personajes, mecánicas de chat y atajos.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+---
 
-### `npm run build`
+## 🚀 Inicio Rápido
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+### Prerrequisitos
+- Node.js 18+ y npm.
+- Un servidor local de inferencia compatible con OpenAI API (recomendado: [LM Studio](https://lmstudio.ai/) ejecutándose en `http://localhost:1234`).
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### Instalación y Ejecución
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```bash
+# 1. Clonar el repositorio
+git clone https://github.com/MMRos/ptahn.git
+cd ptahn
 
-### `npm run eject`
+# 2. Instalar dependencias
+npm install
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+# 3. Iniciar el servidor de desarrollo
+npm start
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+La aplicación estará disponible en [http://localhost:3000](http://localhost:3000).
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+---
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## 🧪 Pruebas y Compilación
 
-## Learn More
+```bash
+# Ejecutar todas las pruebas unitarias
+npm test -- --watchAll=false
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+# Generar reporte de cobertura
+npm test -- --coverage --watchAll=false
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+# Compilar para producción
+npm run build
+```
 
-### Code Splitting
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+## 🏗️ Estructura del Proyecto
 
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```
+ptahn/
+├── src/
+│   ├── components/      # Componentes UI de React (ChatView, TopBar, Modales, Canvas Croppers)
+│   ├── data/            # Plantillas predeterminadas de escenarios y activos
+│   ├── pages/           # Vistas principales (Home, Create, MusicView, Profile)
+│   └── utils/           # Módulos de lógica y utilidades (TTS, localAIStudio, storage, textFormatter, etc.)
+├── MANUAL_DE_USO.md     # Guía integral del usuario y manual operativo
+└── README.md            # Este archivo
+```

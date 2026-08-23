@@ -280,7 +280,8 @@ export const DEFAULT_CHAT_SETTINGS = {
   actionColor: '#6ee7b7',
   thoughtColor: '#c084fc',
   aiBubbleBg: 'rgba(255, 255, 255, 0.03)',
-  userBubbleBg: 'rgba(255, 211, 107, 0.1)'
+  userBubbleBg: 'rgba(255, 211, 107, 0.1)',
+  sendOnShiftEnter: true
 };
 
 export function loadChatSettings() {
@@ -302,7 +303,8 @@ export function loadChatSettings() {
       actionColor: parsed.actionColor || DEFAULT_CHAT_SETTINGS.actionColor,
       thoughtColor: parsed.thoughtColor || DEFAULT_CHAT_SETTINGS.thoughtColor,
       aiBubbleBg: parsed.aiBubbleBg || DEFAULT_CHAT_SETTINGS.aiBubbleBg,
-      userBubbleBg: parsed.userBubbleBg || DEFAULT_CHAT_SETTINGS.userBubbleBg
+      userBubbleBg: parsed.userBubbleBg || DEFAULT_CHAT_SETTINGS.userBubbleBg,
+      sendOnShiftEnter: typeof parsed.sendOnShiftEnter === 'boolean' ? parsed.sendOnShiftEnter : DEFAULT_CHAT_SETTINGS.sendOnShiftEnter
     };
   } catch (e) {
     console.warn('[Storage]: Failed to read chatSettings from localStorage:', e);

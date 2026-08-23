@@ -18,7 +18,8 @@ import {
   faRobot,
   faScroll,
   faUndo,
-  faEye
+  faEye,
+  faKeyboard
 } from '@fortawesome/free-solid-svg-icons';
 import { getAvailableModels } from '../utils/localAIStudio';
 import { SUPPORTED_LANGUAGES } from '../utils/language';
@@ -580,6 +581,26 @@ export default function TopBar({
                 <button className="dropdown-action-btn" onClick={onOpenCharModal}>
                   <FontAwesomeIcon icon={faUserAstronaut} /> Editar Personaje Interpretado
                 </button>
+
+                <div className="dropdown-divider" />
+
+                {/* Comportamiento del Teclado / Entrada */}
+                <div className="settings-group" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, fontWeight: '500', color: '#ffffff' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={chatSettings.sendOnShiftEnter !== false}
+                      onChange={(e) => onUpdateChatSettings({ ...chatSettings, sendOnShiftEnter: e.target.checked })}
+                      style={{ cursor: 'pointer', accentColor: '#ffd36b', width: '16px', height: '16px' }}
+                    />
+                    <span><FontAwesomeIcon icon={faKeyboard} /> Enviar con Shift + Enter</span>
+                  </label>
+                  <small style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.74rem', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
+                    {chatSettings.sendOnShiftEnter !== false 
+                      ? 'Activado: Shift + Enter envía el mensaje, Enter añade una línea.' 
+                      : 'Desactivado: Shift + Enter añade una línea. Solo se envía con el botón.'}
+                  </small>
+                </div>
 
                 <div className="dropdown-divider" />
 

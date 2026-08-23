@@ -47,3 +47,43 @@ story:
         started: "2026-08-22T09:55:00Z"
         completed: "2026-08-22T09:57:45Z"
       notes: "Unificación de LM Studio, Pinokio / Local AI Studio (sd-vulkan), Audio.cpp y vídeo en localAIStudio.js; traducción total del scaffolding del Game Master a inglés profesional."
+
+    F003:
+      name: "dry_and_crap_remediation_balanced"
+      priority: 1
+      change_ref: "openspec/changes/dry-and-crap-remediation"
+      specifications:
+        description: "Plan integral de saneamiento DRY y reducción de CRAP: consolidación de TTS, extracción de textFormatter, utilidades de canvas y persistencia centralizada."
+      implementation:
+        module: "src/utils/storage.js, src/utils/speechTTS.js, src/utils/textFormatter.jsx, src/utils/imageCropUtils.js, src/components/ChatView.jsx, src/pages/Create.jsx, src/components/ImageCropperModal.jsx, src/components/BatchCropperModal.jsx"
+      quality_metrics:
+        crap_index: 0.0
+        cyclomatic_complexity: 4
+        test_coverage: 0.95
+      tests:
+        T003-U: "Pass"
+        T003-F: "Pass"
+      timestamps:
+        started: "2026-08-22T10:04:00Z"
+        completed: "2026-08-22T10:12:00Z"
+      notes: "Eliminación de código muerto, centralización de SpeechSynthesis en speechTTS.js, desacople de formateo de texto interactivo a textFormatter.jsx, y unificación de matemáticas de recorte y renderizado de canvas en imageCropUtils.js con 39 pruebas automáticas pasando."
+
+    F004:
+      name: "toggle_shift_enter_message_submission"
+      priority: 1
+      change_ref: "openspec/changes/archive/2026-08-23-toggle-shift-enter-send"
+      specifications:
+        description: "Añadir control en los ajustes del chat para activar/desactivar el atajo de teclado Shift + Enter al enviar mensajes."
+      implementation:
+        module: "src/utils/storage.js, src/components/TopBar.jsx, src/components/ChatView.jsx"
+      quality_metrics:
+        crap_index: 0.0
+        cyclomatic_complexity: 2
+        test_coverage: 0.95
+      tests:
+        T004-U: "Pass"
+        T004-F: "Pass"
+      timestamps:
+        started: "2026-08-23T20:09:00Z"
+        completed: "2026-08-23T20:12:00Z"
+      notes: "Configuración persistente sendOnShiftEnter en DEFAULT_CHAT_SETTINGS y storage.js, toggle checkbox con iconografía en el modal de ajustes de TopBar.jsx, evaluación condicional en onKeyDown de ChatView.jsx y tooltip dinámico en el botón de envío."

@@ -18,25 +18,37 @@ describe('Storage Module Tests', () => {
     expect(settings).toEqual(DEFAULT_CHAT_SETTINGS);
     expect(settings.preferredLanguage).toBe('auto');
     expect(settings.lmStudioUrl).toBe('http://localhost:1234');
+    expect(settings.sendOnShiftEnter).toBe(true);
   });
 
   test('saveChatSettings correctly writes to localStorage and loadChatSettings retrieves it', () => {
     const custom = {
       ...DEFAULT_CHAT_SETTINGS,
       preferredLanguage: 'Français',
-      lmStudioUrl: 'http://127.0.0.1:9999'
+      lmStudioUrl: 'http://127.0.0.1:9999',
+      sendOnShiftEnter: false
     };
     saveChatSettings(custom);
 
     const loaded = loadChatSettings();
     expect(loaded.preferredLanguage).toBe('Français');
     expect(loaded.lmStudioUrl).toBe('http://127.0.0.1:9999');
+    expect(loaded.sendOnShiftEnter).toBe(false);
   });
 
   test('loadChatSettings safely recovers from corrupted JSON in localStorage', () => {
     localStorage.setItem(CHAT_SETTINGS_KEY, '{invalid_json');
     const settings = loadChatSettings();
     expect(settings).toEqual(DEFAULT_CHAT_SETTINGS);
+    expect(settings.sendOnShiftEnter).toBe(true);
+  });
+
+  test('loadChatSettings preserves sendOnShiftEnter as true when legacy settings object lacks it', () => {
+    const legacy = { preferredModel: 'legacy-model', preferredLanguage: 'es' };
+    localStorage.setItem(CHAT_SETTINGS_KEY, JSON.stringify(legacy));
+    const settings = loadChatSettings();
+    expect(settings.preferredModel).toBe('legacy-model');
+    expect(settings.sendOnShiftEnter).toBe(true);
   });
 
   test('loadAppData returns default structure and persists updates', () => {

@@ -158,11 +158,38 @@ export function resolveTargetLanguage(preference = 'auto', contextText = '') {
 export function getLanguageDirective(targetLanguage) {
   const lang = targetLanguage || SUPPORTED_LANGUAGES.find(l => l.code === 'es');
   return `
-[IDIOMA OBLIGATORIO DE RESPUESTA / MANDATORY OUTPUT LANGUAGE]:
-- TU RESPUESTA, NARRACIÓN, FICHAS DE LORE, DIÁLOGOS DE PNJS Y DESCRIPCIONES DEBEN ESTAR ESCRITAS ESTRICTAMENTE EN: ${lang.name} (${lang.code.toUpperCase()}).
+[CRITICAL INVIOLABLE DIRECTIVE: MANDATORY OUTPUT LANGUAGE / IDIOMA OBLIGATORIO]:
+- YOUR ENTIRE PROSE OUTPUT, SCENE NARRATION, DESCRIPTIONS, INTERNAL THOUGHTS, AND NPC DIALOGUES MUST BE EXCLUSIVELY WRITTEN IN: ${lang.name} (${lang.code.toUpperCase()}).
 - ${lang.instruction}
-- NUNCA cambies arbitrariamente a otro idioma.
+- ABSOLUTE PROHIBITION AGAINST CODE-SWITCHING OR INSERTING ENGLISH WORDS (e.g. NEVER write "Trying desperately to...", always write 100% natural, expressive, literary ${lang.name}).
+- EVEN THOUGH SYSTEM PROMPTS, FORMATTING RULES, OR LABELS ARE IN ENGLISH FOR ACCURACY, NEVER REFLECT ENGLISH IN YOUR STORYTELLING OUTPUT. TRANSLATE ALL CONTEXT AND WORLD EVENTS TO NATURAL, HIGH-QUALITY ${lang.name.toUpperCase()}.
 `.trim();
+}
+
+/**
+ * Generates system and user messages for translating a chat message to the target language.
+ * Preserves RPG typographical markup ("...", *...*, ~...~, ==...==, <think>...</think>).
+ * 
+ * @param {string} text - The raw text to translate.
+ * @param {object} targetLanguage - The resolved target language.
+ * @returns {{ system: string, user: string }}
+ */
+export function createTranslationPrompt(text, targetLanguage) {
+  const lang = targetLanguage || SUPPORTED_LANGUAGES.find(l => l.code === 'es');
+  return {
+    system: `You are a professional literary RPG translator. Translate the provided text faithfully into ${lang.name} (${lang.code.toUpperCase()}).
+CRITICAL RULES:
+1. Preserve all formatting tokens intact:
+   - Dialogue quotes: "..."
+   - Action asterisks: *...*
+   - Inner thoughts: ~...~
+   - Bold text: **...**
+   - Highlighted tags: ==...==
+   - Reasoning blocks: <think>...</think>
+2. Maintain the dramatic tone, nuances, and vocabulary of the scene.
+3. Do NOT include conversational filler, notes, or explanations. Output ONLY the translated text.`,
+    user: text
+  };
 }
 
 /**

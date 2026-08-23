@@ -3,6 +3,7 @@ import {
   resolveTargetLanguage,
   getLanguageDirective,
   enrichImagePrompt,
+  createTranslationPrompt,
   SUPPORTED_LANGUAGES
 } from './language';
 
@@ -47,6 +48,14 @@ describe('Language Detection & Multilingual Management Tests', () => {
     const directive = getLanguageDirective(lang);
     expect(directive).toContain('Español');
     expect(directive).toContain('MANDATORY OUTPUT LANGUAGE');
+  });
+
+  test('should generate translation prompt correctly preserving format instructions', () => {
+    const lang = SUPPORTED_LANGUAGES.find(l => l.code === 'es');
+    const { system, user } = createTranslationPrompt('"Hello warrior," *he said softly.*', lang);
+    expect(system).toContain('Español');
+    expect(system).toContain('Preserve all formatting tokens');
+    expect(user).toBe('"Hello warrior," *he said softly.*');
   });
 
   test('should enrich Dark Fantasy image prompt with volumetric lighting in English', () => {
