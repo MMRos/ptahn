@@ -113,16 +113,22 @@ class DiffusionEngine {
         } catch (bridgeErr) {}
       }
 
-      // 2. If no bridge, check local binary in models / server bin
-      if (!generatedBase64) {
-        if (!models || models.length === 0) {
-          throw new Error('No diffusion models (.safetensors / .gguf) found in ./models/. Place a diffusion checkpoint file (e.g. DreamShaperXL_Lightning.safetensors) inside the ./models/ directory to enable native image generation.');
-        }
-
-        // Generate synthetic high-quality test image buffer for native testing
+      // 2. In test environment, generate synthetic test image buffer
+      if (!generatedBase64 && process.env.NODE_ENV === 'test') {
         const imageBuffer = this.createMinimalPngBuffer(width, height);
         fs.writeFileSync(outputPath, imageBuffer);
         generatedBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+      }
+
+      // 3. If no bridge, throw descriptive error with models found
+      if (!generatedBase64) {
+        if (!models || models.length === 0) {
+          throw new Error('No se encontraron modelos de difusión (.safetensors / .gguf) en el directorio ./models/. Coloca un archivo de modelo para habilitar la generación de imágenes.');
+        }
+
+        throw new Error(
+          `Motor de difusión no accesible. Se han detectado ${models.length} modelos en ./models/ (${models.map(m => m.filename).slice(0, 3).join(', ')}), pero se requiere tener activo un backend de difusión (Pinokio Uncensored Studio en puerto 42016, Stable Diffusion WebUI / Forge en puerto 7860, o ComfyUI en puerto 8188) para ejecutar la inferencia por GPU.`
+        );
       }
 
       this.activeModel = targetModel;

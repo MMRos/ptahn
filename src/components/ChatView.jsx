@@ -235,6 +235,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       }
     } catch (e) {
       console.warn('[Sidebar Portrait Gen]: Failed to generate portrait:', e);
+      alert(`[Generador de Imágenes]: ${e.message || 'No se pudo generar la ilustración. Verifica que el servidor de difusión esté activo.'}`);
     } finally {
       setIsGeneratingSidebarPortrait(false);
     }
