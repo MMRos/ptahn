@@ -11,14 +11,23 @@ import Create from './pages/Create';
 import CreateModal from './components/CreateModal';
 import CharacterPopup from './components/CharacterPopup';
 import ConfirmModal from './components/ConfirmModal';
+import AuthModal from './components/AuthModal';
+
 import { getAllChats, addChat } from './utils/db';
-import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, loadAppDataFromFolder, saveAppDataToFolder, saveChatToFolder, loadChatSettings, saveChatSettings } from './utils/storage';
+import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, loadAppDataFromFolder, saveAppDataToFolder, saveChatToFolder, loadChatSettings, saveChatSettings, DEFAULT_CHAT_SETTINGS } from './utils/storage';
+
+import { fetchCurrentUser, logoutUser, updateUserProfile as apiUpdateUserProfile } from './utils/authApi';
+import { fetchAppDataFromServer, saveAppDataToServer, getServerBaseUrl } from './utils/serverApi';
 
 import Profile from './pages/Profile';
 import MusicView from './pages/MusicView';
 
 function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState('login');
   const [createModalOpen, setCreateModalOpen] = useState(false);
+
   const [scenarioOpen, setScenarioOpen] = useState(false);
   const [charOpen, setCharOpen] = useState(false);
   const [popupScenario, setPopupScenario] = useState(null);
@@ -27,10 +36,15 @@ function App() {
   const [editItem, setEditItem] = useState(null);
 
   const openCreateModal = (type = 'Historia', item = null) => {
+    if (!currentUser) {
+      handleOpenAuthModal('login');
+      return;
+    }
     setInitialModalType(type);
     setEditItem(item);
     setCreateModalOpen(true);
   };
+
 
   const openScenario = (scenario) => { setPopupScenario(scenario); setScenarioOpen(true); };
   const closeScenario = () => { setScenarioOpen(false); setPopupScenario(null); };
@@ -120,17 +134,124 @@ function App() {
   }, [view, selectedChat, recentChats]);
 
 
+  // Restore user session on mount and auto-attribute legacy creations
   useEffect(() => {
-    // Al montar, guardar appData si localStorage estaba vacío
-    const stored = loadAppData();
-    if (stored) setAppData(stored);
+    fetchCurrentUser().then(res => {
+      if (res && res.user) {
+        setCurrentUser(res.user);
+        setAppData(prevData => {
+          const { relinkAllCreationsToUser } = require('./utils/storage');
+          const { data: relinked, modifiedCount } = relinkAllCreationsToUser(prevData, res.user);
+          if (modifiedCount > 0) {
+            saveAppData(relinked);
+            saveAppDataToServer(relinked).catch(() => {});
+          }
+          return relinked;
+        });
+      }
+    }).catch(() => {});
   }, []);
+
+  // Restore linked folder handle from IndexedDB on startup
+  useEffect(() => {
+    loadDirectoryHandle().then(async (handle) => {
+      if (handle) {
+        setFolderHandle(handle);
+        try {
+          const folderData = await loadAppDataFromFolder(handle);
+          if (folderData) {
+            setAppData(prev => {
+              const mergeLists = (a = [], b = []) => {
+                const map = new Map();
+                for (const item of [...a, ...b]) {
+                  if (item && item.id) {
+                    map.set(item.id, { ...(map.get(item.id) || {}), ...item });
+                  }
+                }
+                return Array.from(map.values());
+              };
+              const combined = {
+                scenarios: mergeLists(prev.scenarios, folderData.scenarios),
+                cards: mergeLists(prev.cards, folderData.cards),
+                narrators: mergeLists(prev.narrators, folderData.narrators),
+                tools: mergeLists(prev.tools, folderData.tools)
+              };
+              saveAppData(combined);
+              saveAppDataToServer(combined).catch(() => {});
+              return combined;
+            });
+            setStorageStatus('Carpeta local de datos conectada.');
+          }
+        } catch (e) {
+          console.warn('Auto-read from folder handle failed', e);
+        }
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Synchronize appData and chats with server storage (ptah-data/) on boot
+  useEffect(() => {
+    const syncWithServer = async () => {
+      try {
+        const sRes = await fetchAppDataFromServer();
+        const localData = loadAppData();
+        const mergeLists = (a = [], b = []) => {
+          const map = new Map();
+          for (const item of [...a, ...b]) {
+            if (item && item.id) {
+              map.set(item.id, { ...(map.get(item.id) || {}), ...item });
+            }
+          }
+          return Array.from(map.values());
+        };
+
+        const sData = (sRes && sRes.success && sRes.data) ? sRes.data : { scenarios: [], cards: [], narrators: [], tools: [] };
+        const merged = {
+          scenarios: mergeLists(sData.scenarios, localData.scenarios),
+          cards: mergeLists(sData.cards, localData.cards),
+          narrators: mergeLists(sData.narrators, localData.narrators),
+          tools: mergeLists(sData.tools, localData.tools)
+        };
+
+        setAppData(merged);
+        saveAppData(merged);
+        saveAppDataToServer(merged).catch(() => {});
+
+        // Sync chats with server
+        const baseUrl = getServerBaseUrl();
+        const chatsRes = await fetch(`${baseUrl}/api/storage/chats`).then(r => r.json()).catch(() => ({}));
+        if (chatsRes.success && Array.isArray(chatsRes.chats)) {
+          if (chatsRes.chats.length > 0) {
+            for (const c of chatsRes.chats) {
+              await addChat(c).catch(() => {});
+            }
+            refreshChats();
+          } else {
+            const localChats = await getAllChats();
+            if (localChats.length > 0) {
+              fetch(`${baseUrl}/api/storage/chats`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chats: localChats })
+              }).catch(() => {});
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Sync with server disk storage failed', e);
+      }
+    };
+    syncWithServer();
+  }, []);
+
+
   const [folderHandle, setFolderHandle] = useState(null);
   const [storageStatus, setStorageStatus] = useState('');
 
   const updateAppData = async (nextData) => {
     setAppData(nextData);
     saveAppData(nextData);
+    saveAppDataToServer(nextData).catch(() => {});
     if (folderHandle) {
       try {
         await saveAppDataToFolder(nextData, folderHandle);
@@ -141,6 +262,24 @@ function App() {
       }
     }
   };
+
+  const handleOpenAuthModal = (mode = 'login') => {
+    setAuthModalMode(mode);
+    setAuthModalOpen(true);
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setCurrentUser(null);
+  };
+
+  const handleUpdateUser = async (updates) => {
+    const res = await apiUpdateUserProfile(updates);
+    if (res.user) {
+      setCurrentUser(res.user);
+    }
+  };
+
 
   const navigate = (v) => {
     setSelectedChat(null);
@@ -249,11 +388,31 @@ function App() {
   // Carga inicial segura de la configuración del usuario desde storage centralizado
   const [chatSettings, setChatSettings] = useState(() => loadChatSettings());
 
-  // Función para guardar y actualizar la configuración de chat del usuario (global)
+  // Sincronizar preferencias del perfil del usuario cuando inicia sesión o se carga
+  useEffect(() => {
+    if (currentUser && currentUser.preferences && currentUser.preferences.chatSettings) {
+      const userSettings = {
+        ...DEFAULT_CHAT_SETTINGS,
+        ...currentUser.preferences.chatSettings
+      };
+      setChatSettings(userSettings);
+      saveChatSettings(userSettings);
+    }
+  }, [currentUser]);
+
+  // Función para guardar y actualizar la configuración de chat del usuario (global y en perfil)
   const handleUpdateChatSettings = (nextSettings) => {
     setChatSettings(nextSettings);
     saveChatSettings(nextSettings);
+    if (currentUser) {
+      const updatedPrefs = {
+        ...(currentUser.preferences || {}),
+        chatSettings: nextSettings
+      };
+      handleUpdateUser({ preferences: updatedPrefs });
+    }
   };
+
 
   // Función para guardar y actualizar la configuración de estilo específica de este chat
   const handleUpdateChatCustomStyle = async (newStyle) => {
@@ -288,6 +447,9 @@ function App() {
           onNavigate={navigate} 
           onChooseFolder={chooseFolder} 
           storageStatus={storageStatus}
+          currentUser={currentUser}
+          onOpenAuthModal={handleOpenAuthModal}
+          onLogout={handleLogout}
           chatSettings={chatSettings}
           onUpdateChatSettings={handleUpdateChatSettings}
           onUpdateChatCustomStyle={handleUpdateChatCustomStyle}
@@ -378,6 +540,8 @@ function App() {
               onUpdateAppData={updateAppData} 
               onOpenScenario={openScenario} 
               onOpenCreateModal={openCreateModal}
+              currentUser={currentUser}
+              onOpenAuthModal={handleOpenAuthModal}
             />
           </div>
         )}
@@ -386,15 +550,22 @@ function App() {
           <div className="page-container">
             <Profile 
               appData={appData} 
+              currentUser={currentUser}
+              onOpenAuthModal={handleOpenAuthModal}
+              onLogout={handleLogout}
+              onUpdateUser={handleUpdateUser}
+              onUpdateAppData={updateAppData}
               folderHandle={folderHandle} 
               storageStatus={storageStatus} 
               onNavigate={navigate} 
               onOpenChat={openChat} 
               onOpenScenario={openScenario}
             />
+
           </div>
         )}
       </main>
+
 
       {popupScenario && (popupScenario.type?.toLowerCase() === 'personaje' || popupScenario.category === 'Personaje') ? (
         <CharacterPopup 
@@ -418,8 +589,10 @@ function App() {
         onSelect={handleSelectChar} 
         onOpenCreateCard={() => openCreateModal('Personaje')}
         userCards={appData.cards || []}
-        scenarioCharacters={popupScenario?.characters || []}
+        scenarioCharacters={popupScenario?.characters || popupScenario?.cards || []}
+        allCards={appData.cards || []}
       />
+
       <CreateModal 
         isOpen={createModalOpen}
         onClose={() => {
@@ -429,8 +602,14 @@ function App() {
         initialType={initialModalType}
         editItem={editItem}
         appData={appData}
-        onSaveItem={({ type, data: newItem, createScenarioAlso }) => {
+        onSaveItem={({ type, data: rawItem, createScenarioAlso }) => {
           let nextData = { ...appData };
+          const newItem = currentUser ? {
+            ...rawItem,
+            creatorId: rawItem.creatorId || currentUser.id,
+            creatorName: rawItem.creatorName || currentUser.username,
+            creatorKey: rawItem.creatorKey || currentUser.userKey
+          } : rawItem;
 
           if (type === 'scenario') {
             const exists = (appData.scenarios || []).some(s => s.id === newItem.id);
@@ -455,13 +634,20 @@ function App() {
               : [newItem, ...(appData.cards || [])];
 
             if (createScenarioAlso) {
-              nextData.scenarios = [createScenarioAlso, ...(appData.scenarios || [])];
+              const enrichedScenario = currentUser ? {
+                ...createScenarioAlso,
+                creatorId: createScenarioAlso.creatorId || currentUser.id,
+                creatorName: createScenarioAlso.creatorName || currentUser.username,
+                creatorKey: createScenarioAlso.creatorKey || currentUser.userKey
+              } : createScenarioAlso;
+              nextData.scenarios = [enrichedScenario, ...(appData.scenarios || [])];
             }
           }
 
           updateAppData(nextData);
         }}
       />
+
 
       {confirmModal && (
         <ConfirmModal
@@ -475,8 +661,18 @@ function App() {
           onCancel={confirmModal.onCancel}
         />
       )}
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        initialMode={authModalMode}
+        onAuthSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+      />
     </div>
   );
 }
 
 export default App;
+

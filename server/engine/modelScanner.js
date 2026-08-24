@@ -51,13 +51,21 @@ function scanModelsDirectory(directoryPath) {
       .map(file => {
         const fullPath = path.join(directoryPath, file);
         const stats = fs.statSync(fullPath);
+        const modelType = detectModelType(file);
+        let subType = modelType;
+        if (modelType === 'diffusion') {
+          // Base checkpoints (SD1.5, SDXL, Flux) are typically >= 1.5GB
+          subType = stats.size >= 1.5 * 1024 * 1024 * 1024 ? 'checkpoint' : 'lora';
+        }
+
         return {
           id: file,
           filename: file,
           fullPath,
           sizeBytes: stats.size,
           formattedSize: formatBytes(stats.size),
-          type: detectModelType(file)
+          type: modelType,
+          subType
         };
       });
   } catch (error) {
@@ -68,9 +76,15 @@ function scanModelsDirectory(directoryPath) {
 
 /**
  * Scans exclusively for diffusion models (.safetensors, .onnx, etc.)
+ * Checkpoint base models (>= 1.5GB) are placed first before LoRAs
  */
 function scanDiffusionModels(directoryPath) {
-  return scanModelsDirectory(directoryPath).filter(m => m.type === 'diffusion');
+  const models = scanModelsDirectory(directoryPath).filter(m => m.type === 'diffusion');
+  return models.sort((a, b) => {
+    if (a.subType === 'checkpoint' && b.subType !== 'checkpoint') return -1;
+    if (b.subType === 'checkpoint' && a.subType !== 'checkpoint') return 1;
+    return b.sizeBytes - a.sizeBytes;
+  });
 }
 
 /**

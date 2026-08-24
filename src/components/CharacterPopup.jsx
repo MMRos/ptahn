@@ -36,9 +36,25 @@ export default function CharacterPopup({ scenario, isOpen, onClose, onStartChat 
 
           {/* Columna Derecha: Nombre, Categoría e Introducción */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <div style={{ color: '#ffd36b', fontSize: '0.85rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
-              Personaje
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <div style={{ color: '#ffd36b', fontSize: '0.85rem', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                Personaje
+              </div>
+              {(scenario.isPlayable || scenario.characterRole === 'playable') ? (
+                <span style={{ fontSize: '0.72rem', fontWeight: '700', padding: '2px 8px', borderRadius: '4px', background: 'rgba(110, 231, 183, 0.2)', color: '#6ee7b7', border: '1px solid rgba(110, 231, 183, 0.4)' }}>
+                  🎮 Jugable (PJ)
+                </span>
+              ) : (scenario.characterRole === 'npc') ? (
+                <span style={{ fontSize: '0.72rem', fontWeight: '700', padding: '2px 8px', borderRadius: '4px', background: 'rgba(147, 197, 253, 0.2)', color: '#93c5fd', border: '1px solid rgba(147, 197, 253, 0.4)' }}>
+                  👥 PNJ (No Jugador)
+                </span>
+              ) : (
+                <span style={{ fontSize: '0.72rem', fontWeight: '700', padding: '2px 8px', borderRadius: '4px', background: 'rgba(255, 211, 107, 0.2)', color: '#ffd36b', border: '1px solid rgba(255, 211, 107, 0.4)' }}>
+                  🎭 Persona Habitual
+                </span>
+              )}
             </div>
+
             <h2 style={{ fontSize: '2rem', margin: '0 0 10px 0', color: '#fff', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
               {scenario.title || scenario.name}
             </h2>

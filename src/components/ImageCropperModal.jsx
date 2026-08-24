@@ -168,8 +168,9 @@ export default function ImageCropperModal({
   const renderedHeight = baseFit.height ? baseFit.height * zoom : 'auto';
 
   return (
-    <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 1600 }}>
+    <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 20000 }}>
       <div className="char-modal" style={{ maxWidth: '580px', width: '92%', background: '#14141f', padding: '22px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.12)' }}>
+
         
         {/* Encabezado */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>

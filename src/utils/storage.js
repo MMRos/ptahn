@@ -282,10 +282,14 @@ export const DEFAULT_CHAT_SETTINGS = {
   aiBubbleBg: 'rgba(255, 255, 255, 0.03)',
   userBubbleBg: 'rgba(255, 211, 107, 0.1)',
   sendOnShiftEnter: true,
+  nsfwAllowed: false,
   showLocationBackground: true,
   showCharacterSidebar: true,
   chatBackgroundOpacity: 0.85,
-  preferredImageModel: 'DreamShaperXL_Lightning.safetensors'
+  preferredImageModel: 'DreamShaperXL_Lightning.safetensors',
+  orchestratorModel: '', // Lightweight SLM assistant
+  autoCardCreation: 'auto', // 'auto' | 'manual' | 'off'
+  autoImageDiffusion: 'manual' // 'auto' | 'manual' | 'off'
 };
 
 export function loadChatSettings() {
@@ -296,6 +300,9 @@ export function loadChatSettings() {
     const parsed = JSON.parse(stored);
     return {
       preferredModel: parsed.preferredModel || DEFAULT_CHAT_SETTINGS.preferredModel,
+      orchestratorModel: parsed.orchestratorModel || DEFAULT_CHAT_SETTINGS.orchestratorModel,
+      autoCardCreation: parsed.autoCardCreation || DEFAULT_CHAT_SETTINGS.autoCardCreation,
+      autoImageDiffusion: parsed.autoImageDiffusion || DEFAULT_CHAT_SETTINGS.autoImageDiffusion,
       preferredLanguage: parsed.preferredLanguage || DEFAULT_CHAT_SETTINGS.preferredLanguage,
       responseLength: parsed.responseLength || DEFAULT_CHAT_SETTINGS.responseLength,
       lmStudioUrl: parsed.lmStudioUrl || DEFAULT_CHAT_SETTINGS.lmStudioUrl,
@@ -310,15 +317,18 @@ export function loadChatSettings() {
       aiBubbleBg: parsed.aiBubbleBg || DEFAULT_CHAT_SETTINGS.aiBubbleBg,
       userBubbleBg: parsed.userBubbleBg || DEFAULT_CHAT_SETTINGS.userBubbleBg,
       sendOnShiftEnter: typeof parsed.sendOnShiftEnter === 'boolean' ? parsed.sendOnShiftEnter : DEFAULT_CHAT_SETTINGS.sendOnShiftEnter,
+      nsfwAllowed: typeof parsed.nsfwAllowed === 'boolean' ? parsed.nsfwAllowed : DEFAULT_CHAT_SETTINGS.nsfwAllowed,
       showLocationBackground: typeof parsed.showLocationBackground === 'boolean' ? parsed.showLocationBackground : DEFAULT_CHAT_SETTINGS.showLocationBackground,
       showCharacterSidebar: typeof parsed.showCharacterSidebar === 'boolean' ? parsed.showCharacterSidebar : DEFAULT_CHAT_SETTINGS.showCharacterSidebar,
       chatBackgroundOpacity: typeof parsed.chatBackgroundOpacity === 'number' ? parsed.chatBackgroundOpacity : DEFAULT_CHAT_SETTINGS.chatBackgroundOpacity
     };
   } catch (e) {
+
     console.warn('[Storage]: Failed to read chatSettings from localStorage:', e);
     return DEFAULT_CHAT_SETTINGS;
   }
 }
+
 
 export function saveChatSettings(settings) {
   if (typeof window === 'undefined') return;
@@ -354,4 +364,40 @@ export function saveAppData(data) {
     console.warn('Could not save fallback data to localStorage', error);
   }
 }
+
+/**
+ * Relinks legacy or unassigned creations to the authenticated user account
+ */
+export function relinkAllCreationsToUser(currentData, user) {
+  if (!user) return { data: currentData, modifiedCount: 0 };
+  const userId = user.id;
+  const username = user.username || 'Azgael';
+  const userKey = user.userKey || '';
+
+  let modifiedCount = 0;
+
+  const relinkItem = (item) => {
+    if (!item.creatorId || item.creatorId === 'usr-master-admin' || !item.creatorName || item.creatorName === 'Creador Ptah') {
+      modifiedCount++;
+      return { ...item, creatorId: userId, creatorName: username, creatorKey: userKey };
+    }
+    return item;
+  };
+
+  const scenarios = (currentData?.scenarios || []).map(relinkItem);
+  const cards = (currentData?.cards || []).map(relinkItem);
+  const narrators = (currentData?.narrators || []).map(relinkItem);
+  const tools = (currentData?.tools || []).map(relinkItem);
+
+  const updatedData = {
+    ...currentData,
+    scenarios,
+    cards,
+    narrators,
+    tools
+  };
+
+  return { data: updatedData, modifiedCount };
+}
+
 

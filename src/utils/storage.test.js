@@ -74,4 +74,39 @@ describe('Storage Module Tests', () => {
     expect(loaded.scenarios.length).toBe(1);
     expect(loaded.scenarios[0].title).toBe('Test Scenario');
   });
+
+  test('relinkAllCreationsToUser correctly attributes unassigned and legacy creations to active user', () => {
+    const { relinkAllCreationsToUser } = require('./storage');
+    const mockUser = {
+      id: 'usr-azgael',
+      username: 'Azgael',
+      userKey: 'PTAH-34FA-2C91-422F-98A1'
+    };
+
+    const initialData = {
+      scenarios: [
+        { id: 'sc-1', title: 'World 1' }, // No creator
+        { id: 'sc-2', title: 'World 2', creatorName: 'Creador Ptah' }, // Legacy name
+        { id: 'sc-3', title: 'World 3', creatorId: 'other-user', creatorName: 'Other' } // Different user
+      ],
+      cards: [
+        { id: 'c-1', name: 'Char 1', type: 'Personaje' }
+      ],
+      narrators: [
+        { id: 'n-1', name: 'Narrator 1' }
+      ],
+      tools: []
+    };
+
+    const { data: updated, modifiedCount } = relinkAllCreationsToUser(initialData, mockUser);
+    expect(modifiedCount).toBe(4);
+    expect(updated.scenarios[0].creatorId).toBe('usr-azgael');
+    expect(updated.scenarios[0].creatorName).toBe('Azgael');
+    expect(updated.scenarios[0].creatorKey).toBe('PTAH-34FA-2C91-422F-98A1');
+    expect(updated.scenarios[1].creatorName).toBe('Azgael');
+    expect(updated.scenarios[2].creatorId).toBe('other-user'); // Preserved
+    expect(updated.cards[0].creatorName).toBe('Azgael');
+    expect(updated.narrators[0].creatorName).toBe('Azgael');
+  });
 });
+

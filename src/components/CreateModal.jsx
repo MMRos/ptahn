@@ -227,8 +227,25 @@ export default function CreateModal({
   const [newNestedImageUrl, setNewNestedImageUrl] = useState('');
   const [nestedEditingImageId, setNestedEditingImageId] = useState(null);
 
+  // Role / Playability states for Character
+  const [characterRole, setCharacterRole] = useState('user_persona'); // 'user_persona' | 'playable' | 'npc'
+  const [nestedCharacterRole, setNestedCharacterRole] = useState('playable');
+
+  // Context & Weight controls
+  const [importance, setImportance] = useState(5); // 1 to 10
+  const [isPinned, setIsPinned] = useState(false);
+  const [activationMode, setActivationMode] = useState('dynamic'); // 'dynamic' | 'strict_mention'
+
+  // Nested card context controls
+  const [nestedImportance, setNestedImportance] = useState(5);
+  const [nestedIsPinned, setNestedIsPinned] = useState(false);
+  const [nestedActivationMode, setNestedActivationMode] = useState('dynamic');
+
   // Sincronizar estados cuando se abre el modal o cambia el item a editar
   useEffect(() => {
+
+
+
     if (isOpen) {
       if (editItem) {
         // Determinamos el modo a partir del tipo del item o la estructura
@@ -303,6 +320,19 @@ export default function CreateModal({
             setInventoryCapacity('20 kg / 10 slots');
           }
 
+          // Campos especializados de Personaje
+          if (editItem.type === 'Personaje') {
+            const role = editItem.characterRole || (editItem.isPlayable ? 'playable' : (editItem.isUserPersona ? 'user_persona' : 'user_persona'));
+            setCharacterRole(role);
+          } else {
+            setCharacterRole('user_persona');
+          }
+
+          // Campos de Peso e Importancia de Contexto
+          setImportance(typeof editItem.importance === 'number' ? editItem.importance : 5);
+          setIsPinned(Boolean(editItem.isPinned));
+          setActivationMode(editItem.activationMode || 'dynamic');
+
           // Cargar galería de imágenes / expresiones
           if (Array.isArray(editItem.images) && editItem.images.length > 0) {
             setCharacterImages(editItem.images);
@@ -318,6 +348,18 @@ export default function CreateModal({
         // Nuevo elemento
         setItemType(initialType);
         setTitle('');
+        const defaultRole = initialType === 'Escenario' ? 'playable' : 'user_persona';
+        setCharacterRole(defaultRole);
+        setNestedCharacterRole('playable');
+        setImportance(5);
+        setIsPinned(false);
+        setActivationMode('dynamic');
+        setNestedImportance(5);
+        setNestedIsPinned(false);
+        setNestedActivationMode('dynamic');
+
+
+
         setCategory('');
         setCategoryQuery('');
         setIntro('');
@@ -449,7 +491,15 @@ export default function CreateModal({
         tags: selectedTags,
         connectedCards: selectedCards,
         traits: itemType === 'Personaje' ? selectedTraits : [],
+        characterRole: itemType === 'Personaje' ? characterRole : undefined,
+        isPlayable: itemType === 'Personaje' ? (characterRole === 'playable') : undefined,
+        isUserPersona: itemType === 'Personaje' ? (characterRole === 'user_persona') : undefined,
+        importance: typeof importance === 'number' ? importance : 5,
+        isPinned: Boolean(isPinned),
+        activationMode: activationMode || 'dynamic',
         public: isPublic,
+
+
         // Propiedades de Memoria
         ...(itemType === 'Memoria' ? {
           summary: memorySummary.trim() || intro.trim(),
@@ -659,7 +709,15 @@ export default function CreateModal({
         tags: [],
         connectedCards: [],
         traits: nestedCardType === 'Personaje' ? nestedCardTraits : [],
+        characterRole: nestedCardType === 'Personaje' ? nestedCharacterRole : undefined,
+        isPlayable: nestedCardType === 'Personaje' ? (nestedCharacterRole === 'playable') : undefined,
+        isUserPersona: nestedCardType === 'Personaje' ? (nestedCharacterRole === 'user_persona') : undefined,
+        importance: typeof nestedImportance === 'number' ? nestedImportance : 5,
+        isPinned: Boolean(nestedIsPinned),
+        activationMode: nestedActivationMode || 'dynamic',
         // Campos de Memoria
+
+
         summary: nestedCardType === 'Memoria' ? (nestedCardIntro.trim() || nestedCardText.trim()) : undefined,
         impact: nestedCardType === 'Memoria' ? 'Medio' : undefined,
         linkedCharacters: nestedCardType === 'Memoria' && itemType === 'Personaje' ? [(editItem?.id || title)] : [],
@@ -1027,7 +1085,119 @@ export default function CreateModal({
         {/* Formularios de Tarjeta y Escenario */}
         {itemType !== 'Narrador' && itemType !== 'Herramienta' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            
+            {/* Rol y Jugabilidad del Personaje */}
+            {itemType === 'Personaje' && (
+              <div style={{
+                background: 'rgba(255, 211, 107, 0.04)',
+                border: '1px solid rgba(255, 211, 107, 0.25)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                marginBottom: '10px'
+              }}>
+                <label style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                  🎭 Rol del Personaje
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  <label
+                    title="Persona: Tu alter-ego preferido para interpretar en historias y chats"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      background: characterRole === 'user_persona' ? 'rgba(255, 211, 107, 0.18)' : 'rgba(255,255,255,0.03)',
+                      border: characterRole === 'user_persona' ? '1px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                      color: characterRole === 'user_persona' ? '#ffd36b' : 'rgba(255,255,255,0.85)',
+                      fontWeight: characterRole === 'user_persona' ? '700' : '500',
+                      transition: 'all 0.15s ease',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="charRoleMainGroup"
+                      checked={characterRole === 'user_persona'}
+                      onChange={() => {
+                        setCharacterRole('user_persona');
+                        setIsDirty(true);
+                      }}
+                      style={{ cursor: 'pointer', margin: 0 }}
+                    />
+                    <span>🎭 Persona</span>
+                  </label>
+
+                  <label
+                    title="Jugable: Personaje predefinido disponible para que cualquier usuario lo elija al jugar este escenario"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      background: characterRole === 'playable' ? 'rgba(110, 231, 183, 0.18)' : 'rgba(255,255,255,0.03)',
+                      border: characterRole === 'playable' ? '1px solid #6ee7b7' : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                      color: characterRole === 'playable' ? '#6ee7b7' : 'rgba(255,255,255,0.85)',
+                      fontWeight: characterRole === 'playable' ? '700' : '500',
+                      transition: 'all 0.15s ease',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="charRoleMainGroup"
+                      checked={characterRole === 'playable'}
+                      onChange={() => {
+                        setCharacterRole('playable');
+                        setIsDirty(true);
+                      }}
+                      style={{ cursor: 'pointer', margin: 0 }}
+                    />
+                    <span>🎮 Jugable</span>
+                  </label>
+
+                  <label
+                    title="No Jugable: Personaje no jugador (PNJ / NPC) interpretado por la IA o Narrador"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      background: characterRole === 'npc' ? 'rgba(147, 197, 253, 0.18)' : 'rgba(255,255,255,0.03)',
+                      border: characterRole === 'npc' ? '1px solid #93c5fd' : '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                      color: characterRole === 'npc' ? '#93c5fd' : 'rgba(255,255,255,0.85)',
+                      fontWeight: characterRole === 'npc' ? '700' : '500',
+                      transition: 'all 0.15s ease',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="charRoleMainGroup"
+                      checked={characterRole === 'npc'}
+                      onChange={() => {
+                        setCharacterRole('npc');
+                        setIsDirty(true);
+                      }}
+                      style={{ cursor: 'pointer', margin: 0 }}
+                    />
+                    <span>👥 No Jugable</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+
             {/* 1. Imagen de portada / Galería de Expresiones AL INICIO */}
             {itemType === 'Personaje' ? (
               <div className="field-group" style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -1036,6 +1206,7 @@ export default function CreateModal({
                     <label style={{ fontSize: '0.85rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <FontAwesomeIcon icon={faImage} /> Imágenes y Expresiones del Personaje ({characterImages.length})
                     </label>
+
                     <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'block', marginTop: '2px' }}>
                       Añade múltiples retratos y nómbralos (ej: Normal, Alegre, Enfadado, Con armadura). La IA los identificará para ilustrar reacciones y generar nuevas imágenes.
                     </span>
@@ -2273,12 +2444,89 @@ export default function CreateModal({
               )
             )}
 
+            {/* Panel de Importancia y Presencia en Contexto de Chat (F023) */}
+            {itemType !== 'Escenario' && itemType !== 'Herramienta' && itemType !== 'Narrador' && (
+              <div style={{
+                background: 'rgba(255, 211, 107, 0.04)',
+                border: '1px solid rgba(255, 211, 107, 0.2)',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginTop: '12px',
+                marginBottom: '14px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', margin: 0 }}>
+                    ⚖️ Peso y Presencia en el Contexto del Chat
+                  </label>
+                  <span style={{ fontSize: '0.72rem', color: isPinned ? '#ffd36b' : 'rgba(255,255,255,0.7)', fontWeight: 'bold' }}>
+                    {isPinned ? '📌 Anclado Permanente' : `Prioridad Base: ${importance}/10`}
+                  </span>
+                </div>
+
+                {/* Slider de Importancia Base */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', minWidth: '75px' }}>Importancia:</span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    disabled={isPinned}
+                    value={importance}
+                    onChange={(e) => handleFieldChange(setImportance, Number(e.target.value))}
+                    style={{ flex: 1, accentColor: '#ffd36b', cursor: isPinned ? 'not-allowed' : 'pointer' }}
+                  />
+                  <span style={{ fontSize: '0.76rem', color: '#ffd36b', fontWeight: 'bold', minWidth: '25px', textAlign: 'right' }}>
+                    {importance}
+                  </span>
+                </div>
+
+                {/* Checkbox Anclado & Modo de Activación */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', color: isPinned ? '#ffd36b' : 'rgba(255,255,255,0.85)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={isPinned}
+                      onChange={(e) => handleFieldChange(setIsPinned, e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span>📌 Anclado (Siempre en contexto)</span>
+                  </label>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.72rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', color: activationMode === 'dynamic' ? '#6ee7b7' : 'rgba(255,255,255,0.6)', cursor: isPinned ? 'not-allowed' : 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="cardActivationMode"
+                        disabled={isPinned}
+                        checked={activationMode === 'dynamic'}
+                        onChange={() => handleFieldChange(setActivationMode, 'dynamic')}
+                      />
+                      <span>⚡ Dinámico</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', color: activationMode === 'strict_mention' ? '#93c5fd' : 'rgba(255,255,255,0.6)', cursor: isPinned ? 'not-allowed' : 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="cardActivationMode"
+                        disabled={isPinned}
+                        checked={activationMode === 'strict_mention'}
+                        onChange={() => handleFieldChange(setActivationMode, 'strict_mention')}
+                      />
+                      <span>🎯 Solo mención</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Etiquetas para Tarjetas (Ubicadas al final) */}
             {itemType !== 'Escenario' && (
               <div style={{ marginTop: '4px', marginBottom: '4px' }}>
                 {renderTagsInput()}
               </div>
             )}
+
 
             {/* Selector de Conexiones / Lore Pieces Grid (FictionLab style) */}
             {itemType === 'Escenario' ? (
@@ -2553,8 +2801,116 @@ export default function CreateModal({
                 Crear Nuevo {nestedCardType} (In-Situ)
               </h4>
 
+              {/* Rol del Personaje In-Situ */}
+              {nestedCardType === 'Personaje' && (
+                <div style={{
+                  background: 'rgba(255, 211, 107, 0.05)',
+                  border: '1px solid rgba(255, 211, 107, 0.25)',
+                  borderRadius: '8px',
+                  padding: '8px 10px',
+                  marginBottom: '10px'
+                }}>
+                  <label style={{ fontSize: '0.76rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '6px' }}>
+                    🎭 Rol del Personaje
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                    <label
+                      title="Persona: Tu alter-ego preferido para interpretar en historias y chats"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        background: nestedCharacterRole === 'user_persona' ? 'rgba(255, 211, 107, 0.18)' : 'rgba(255,255,255,0.03)',
+                        border: nestedCharacterRole === 'user_persona' ? '1px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '6px',
+                        padding: '6px 4px',
+                        cursor: 'pointer',
+                        fontSize: '0.74rem',
+                        color: nestedCharacterRole === 'user_persona' ? '#ffd36b' : 'rgba(255,255,255,0.85)',
+                        fontWeight: nestedCharacterRole === 'user_persona' ? '700' : '500',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="nestedCharRoleGroup"
+                        checked={nestedCharacterRole === 'user_persona'}
+                        onChange={() => {
+                          setNestedCharacterRole('user_persona');
+                        }}
+                        style={{ cursor: 'pointer', margin: 0 }}
+                      />
+                      <span>🎭 Persona</span>
+                    </label>
+
+                    <label
+                      title="Jugable: Personaje predefinido disponible para que cualquier usuario lo elija al jugar este escenario"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        background: nestedCharacterRole === 'playable' ? 'rgba(110, 231, 183, 0.18)' : 'rgba(255,255,255,0.03)',
+                        border: nestedCharacterRole === 'playable' ? '1px solid #6ee7b7' : '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '6px',
+                        padding: '6px 4px',
+                        cursor: 'pointer',
+                        fontSize: '0.74rem',
+                        color: nestedCharacterRole === 'playable' ? '#6ee7b7' : 'rgba(255,255,255,0.85)',
+                        fontWeight: nestedCharacterRole === 'playable' ? '700' : '500',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="nestedCharRoleGroup"
+                        checked={nestedCharacterRole === 'playable'}
+                        onChange={() => {
+                          setNestedCharacterRole('playable');
+                        }}
+                        style={{ cursor: 'pointer', margin: 0 }}
+                      />
+                      <span>🎮 Jugable</span>
+                    </label>
+
+                    <label
+                      title="No Jugable: Personaje no jugador (PNJ / NPC) interpretado por la IA o Narrador"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        background: nestedCharacterRole === 'npc' ? 'rgba(147, 197, 253, 0.18)' : 'rgba(255,255,255,0.03)',
+                        border: nestedCharacterRole === 'npc' ? '1px solid #93c5fd' : '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '6px',
+                        padding: '6px 4px',
+                        cursor: 'pointer',
+                        fontSize: '0.74rem',
+                        color: nestedCharacterRole === 'npc' ? '#93c5fd' : 'rgba(255,255,255,0.85)',
+                        fontWeight: nestedCharacterRole === 'npc' ? '700' : '500',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="nestedCharRoleGroup"
+                        checked={nestedCharacterRole === 'npc'}
+                        onChange={() => {
+                          setNestedCharacterRole('npc');
+                        }}
+                        style={{ cursor: 'pointer', margin: 0 }}
+                      />
+                      <span>👥 No Jugable</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+
               {/* Portada / Galería de Expresiones In-Situ */}
               {nestedCardType === 'Personaje' ? (
+
                 <div style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
                   <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
                     <FontAwesomeIcon icon={faImage} /> Imágenes y Expresiones del Personaje ({nestedCharacterImages.length})
@@ -3022,8 +3378,81 @@ export default function CreateModal({
                 );
               })()}
 
+              {/* Panel de Importancia y Presencia In-Situ (F023) */}
+              <div style={{
+                background: 'rgba(255, 211, 107, 0.04)',
+                border: '1px solid rgba(255, 211, 107, 0.2)',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                marginTop: '10px',
+                marginBottom: '10px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontSize: '0.74rem', color: '#ffd36b', fontWeight: '700', margin: 0 }}>
+                    ⚖️ Peso y Presencia en el Contexto
+                  </label>
+                  <span style={{ fontSize: '0.68rem', color: nestedIsPinned ? '#ffd36b' : 'rgba(255,255,255,0.7)', fontWeight: 'bold' }}>
+                    {nestedIsPinned ? '📌 Anclado' : `Prioridad: ${nestedImportance}/10`}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.6)' }}>Importancia:</span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    disabled={nestedIsPinned}
+                    value={nestedImportance}
+                    onChange={(e) => setNestedImportance(Number(e.target.value))}
+                    style={{ flex: 1, accentColor: '#ffd36b', cursor: nestedIsPinned ? 'not-allowed' : 'pointer' }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: '#ffd36b', fontWeight: 'bold', minWidth: '20px', textAlign: 'right' }}>
+                    {nestedImportance}
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem', color: nestedIsPinned ? '#ffd36b' : 'rgba(255,255,255,0.85)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={nestedIsPinned}
+                      onChange={(e) => setNestedIsPinned(e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span>📌 Anclado</span>
+                  </label>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.68rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '3px', color: nestedActivationMode === 'dynamic' ? '#6ee7b7' : 'rgba(255,255,255,0.6)', cursor: nestedIsPinned ? 'not-allowed' : 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="nestedActivationMode"
+                        disabled={nestedIsPinned}
+                        checked={nestedActivationMode === 'dynamic'}
+                        onChange={() => setNestedActivationMode('dynamic')}
+                      />
+                      <span>⚡ Dinámico</span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '3px', color: nestedActivationMode === 'strict_mention' ? '#93c5fd' : 'rgba(255,255,255,0.6)', cursor: nestedIsPinned ? 'not-allowed' : 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="nestedActivationMode"
+                        disabled={nestedIsPinned}
+                        checked={nestedActivationMode === 'strict_mention'}
+                        onChange={() => setNestedActivationMode('strict_mention')}
+                      />
+                      <span>🎯 Mención</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               {/* Botones */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '20px' }}>
+
                 <button
                   type="button"
                   onClick={() => setNestedCardType(null)}

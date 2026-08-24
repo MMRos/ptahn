@@ -24,13 +24,27 @@ import {
   faServer,
   faMicrochip,
   faSyncAlt,
-  faPalette
+  faPalette,
+  faPlay,
+  faStop,
+  faRedo,
+  faSpinner
 } from '@fortawesome/free-solid-svg-icons';
+
 import { getAvailableModels, AVAILABLE_IMAGE_MODELS } from '../utils/localAIStudio';
 import { SUPPORTED_LANGUAGES } from '../utils/language';
-import { fetchServerStatus, fetchAvailableModels, loadModelOnServer } from '../utils/serverApi';
+import { 
+  fetchServerStatus, 
+  fetchAvailableModels, 
+  loadModelOnServer,
+  startServerService,
+  stopServerService,
+  restartServerService,
+  pollServerOnline
+} from '../utils/serverApi';
 import RemoteConnectModal from './RemoteConnectModal';
 import './topbar.css';
+
 
 const FONT_FAMILIES = [
   { id: 'default', name: 'Inter (Estándar Moderna)' },
@@ -68,8 +82,12 @@ export default function TopBar({
   onChangeConstantPrompt = () => {},
   memoryCards = [],
   onAddMemory = () => {},
-  onRemoveMemory = () => {}
+  onRemoveMemory = () => {},
+  currentUser = null,
+  onOpenAuthModal,
+  onLogout
 }) {
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('appearance'); // 'appearance' | 'ai' | 'chat'
   const [styleScope, setStyleScope] = useState('specific'); // 'specific' | 'global'
@@ -81,22 +99,69 @@ export default function TopBar({
   const [serverInfo, setServerInfo] = useState({ online: false });
   const [nativeGgufModels, setNativeGgufModels] = useState([]);
   const [loadingModel, setLoadingModel] = useState(false);
+  const [lifecycleStatus, setLifecycleStatus] = useState('idle'); // 'idle' | 'starting' | 'stopping' | 'restarting'
+  const [serverNotice, setServerNotice] = useState(null);
   const dropdownRef = useRef(null);
 
   const toggleSettings = () => setSettingsOpen(prev => !prev);
 
-  const refreshServerInfo = () => {
-    fetchServerStatus()
-      .then(st => setServerInfo(st))
-      .catch(() => setServerInfo({ online: false }));
-    fetchAvailableModels()
-      .then(res => {
-        if (res.success && Array.isArray(res.models)) {
-          setNativeGgufModels(res.models);
-        }
-      })
-      .catch(() => {});
+  const refreshServerInfo = async () => {
+    try {
+      const st = await fetchServerStatus();
+      setServerInfo(st);
+      if (st && st.online) {
+        setServerNotice(null);
+      }
+    } catch (e) {
+      setServerInfo({ online: false });
+    }
+
+    try {
+      const res = await fetchAvailableModels();
+      if (res && res.success && Array.isArray(res.models)) {
+        setNativeGgufModels(res.models);
+      }
+    } catch (e) {}
   };
+
+  const handleStartServer = async () => {
+    setLifecycleStatus('starting');
+    setServerNotice(null);
+    try {
+      await startServerService('all');
+    } catch (e) {}
+    const isOnline = await pollServerOnline({ intervalMs: 600, maxRetries: 4 });
+    await refreshServerInfo();
+    setLifecycleStatus('idle');
+    if (!isOnline) {
+      setServerNotice('Servidor no detectado en el puerto 3001. Inícialo ejecutando "npm start" o haciendo doble clic en "iniciar-ptahn.bat".');
+    } else {
+      setServerNotice(null);
+    }
+  };
+
+
+  const handleStopServer = async () => {
+    setLifecycleStatus('stopping');
+    setServerNotice(null);
+    try {
+      await stopServerService('all');
+    } catch (e) {}
+    await refreshServerInfo();
+    setLifecycleStatus('idle');
+  };
+
+  const handleRestartServer = async () => {
+    setLifecycleStatus('restarting');
+    setServerNotice(null);
+    try {
+      await restartServerService('all');
+    } catch (e) {}
+    await refreshServerInfo();
+    setLifecycleStatus('idle');
+  };
+
+
 
   useEffect(() => {
     refreshServerInfo();
@@ -113,6 +178,7 @@ export default function TopBar({
       setLoadingModel(false);
     }
   };
+
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -242,26 +308,31 @@ export default function TopBar({
             </button>
           </>
         ) : (
-          <>
-            <button 
-              className="top-bar-btn" 
-              title="Notificaciones" 
-              aria-label="Notificaciones"
-              onClick={() => alert('No hay notificaciones pendientes')}
-            >
-              <FontAwesomeIcon icon={faBell} />
-            </button>
-
-            <button 
-              className="top-bar-btn" 
-              title="Perfil" 
-              aria-label="Perfil"
-              onClick={() => onNavigate('profile')}
-            >
-              <FontAwesomeIcon icon={faUser} />
-            </button>
-          </>
+          <button 
+            className="top-bar-btn" 
+            title="Notificaciones" 
+            aria-label="Notificaciones"
+            onClick={() => alert('No hay notificaciones pendientes')}
+          >
+            <FontAwesomeIcon icon={faBell} />
+          </button>
         )}
+
+        <button 
+          className={`top-bar-btn ${currentUser ? 'active' : ''}`} 
+          title={currentUser ? `Identificado como: ${currentUser.username}` : "Iniciar Sesión / Identificarse"} 
+          aria-label="Perfil de Usuario"
+          onClick={() => {
+            if (currentUser) {
+              onNavigate('profile');
+            } else if (onOpenAuthModal) {
+              onOpenAuthModal('login');
+            }
+          }}
+          style={currentUser ? { color: '#ffd36b', background: 'rgba(255, 211, 107, 0.12)' } : {}}
+        >
+          <FontAwesomeIcon icon={faUser} />
+        </button>
 
         <button 
           className="top-bar-btn" 
@@ -271,6 +342,8 @@ export default function TopBar({
         >
           <FontAwesomeIcon icon={faMobileAlt} />
         </button>
+
+
 
         <button 
           className={`top-bar-btn ${settingsOpen ? 'active' : ''}`} 
@@ -545,26 +618,42 @@ export default function TopBar({
                       : 'Desactivado: Shift + Enter añade una línea. Solo se envía con el botón.'}
                   </small>
                 </div>
+
+                {/* Control de Contenido Maduro / NSFW */}
+                <div className="settings-group" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, fontWeight: '500', color: '#ffffff' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={chatSettings.nsfwAllowed === true}
+                      onChange={(e) => onUpdateChatSettings({ ...chatSettings, nsfwAllowed: e.target.checked })}
+                      style={{ cursor: 'pointer', accentColor: '#ffd36b', width: '16px', height: '16px' }}
+                    />
+                    <span>🔞 Contenido Adulto / NSFW Permitido</span>
+                  </label>
+                  <small style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.74rem', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
+                    {chatSettings.nsfwAllowed === true 
+                      ? 'Activado: Se permiten temas maduros y narrativas sin censura en tus historias.' 
+                      : 'Desactivado: Modo apto para todo público y narrativas estándar.'}
+                  </small>
+                </div>
               </div>
             )}
+
 
             {/* PESTAÑA 2: MOTOR IA & CONEXIÓN */}
             {settingsTab === 'ai' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* Banner de Motor Nativo */}
-                <div style={{
-                  background: serverInfo.online ? 'rgba(110, 231, 183, 0.08)' : 'rgba(255, 211, 107, 0.06)',
-                  border: `1px solid ${serverInfo.online ? 'rgba(110, 231, 183, 0.3)' : 'rgba(255, 211, 107, 0.25)'}`,
-                  borderRadius: '8px',
-                  padding: '10px 12px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', fontSize: '0.82rem', color: serverInfo.online ? '#6ee7b7' : '#ffd36b' }}>
+                {/* Panel de Control de Ciclo de Vida del Servidor */}
+                <div className={`server-lifecycle-card ${serverInfo.online ? 'online' : 'offline'} ${lifecycleStatus !== 'idle' ? 'transitioning' : ''}`}>
+                  <div className="server-lifecycle-header">
+                    <div className="server-lifecycle-status-badge" style={{ color: serverInfo.online ? '#6ee7b7' : '#ffd36b' }}>
                       <FontAwesomeIcon icon={serverInfo.online ? faServer : faMicrochip} />
-                      <span>{serverInfo.online ? '🟢 Servidor Nativo Ptahn Activo' : '⚪ Servidor Local Standalone'}</span>
+                      <span>
+                        {lifecycleStatus === 'starting' && '🟡 Iniciando Servidor...'}
+                        {lifecycleStatus === 'stopping' && '🟠 Deteniendo Motores...'}
+                        {lifecycleStatus === 'restarting' && '🔄 Reiniciando Servidor...'}
+                        {lifecycleStatus === 'idle' && (serverInfo.online ? '🟢 Servidor Nativo En Línea' : '⚪ Servidor Standalone (Offline)')}
+                      </span>
                     </div>
                     <button 
                       type="button" 
@@ -572,15 +661,82 @@ export default function TopBar({
                       style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', fontSize: '0.8rem' }}
                       title="Refrescar estado del servidor"
                     >
-                      <FontAwesomeIcon icon={faSyncAlt} />
+                      <FontAwesomeIcon icon={faSyncAlt} spin={lifecycleStatus !== 'idle'} />
                     </button>
                   </div>
+
                   <div style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
                     {serverInfo.online 
                       ? `Hardware: ${serverInfo.gpu || 'Auto'} | Modelo en VRAM: ${serverInfo.activeModel || 'Ninguno'}`
-                      : 'Inicia el servidor con "npm run server" para inferencia nativa y conexión LAN/móvil.'}
+                      : 'Activa el servidor nativo para habilitar inferencia GPU y acceso LAN/móvil.'}
                   </div>
+
+                  {(currentUser?.role === 'user' || currentUser?.role === 'guest') ? (
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '6px',
+                      padding: '7px 10px',
+                      fontSize: '0.73rem',
+                      color: 'rgba(255, 255, 255, 0.65)'
+                    }}>
+                      🔒 <strong>Modo {currentUser?.role === 'guest' ? 'Invitado (Solo Chats)' : 'Usuario'}:</strong> El control de activación, detención y reinicio del servidor está reservado a Administrador e IT.
+                    </div>
+                  ) : (
+
+                    <div className="server-lifecycle-actions">
+                      {!serverInfo.online ? (
+                        <button
+                          type="button"
+                          className="server-btn-primary"
+                          onClick={handleStartServer}
+                          disabled={lifecycleStatus !== 'idle'}
+                        >
+                          <FontAwesomeIcon icon={lifecycleStatus === 'starting' ? faSpinner : faPlay} spin={lifecycleStatus === 'starting'} />
+                          <span>{lifecycleStatus === 'starting' ? 'Iniciando...' : 'Activar Servidor'}</span>
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="server-btn-danger"
+                            onClick={handleStopServer}
+                            disabled={lifecycleStatus !== 'idle'}
+                          >
+                            <FontAwesomeIcon icon={lifecycleStatus === 'stopping' ? faSpinner : faStop} spin={lifecycleStatus === 'stopping'} />
+                            <span>{lifecycleStatus === 'stopping' ? 'Deteniendo...' : 'Detener Servidor'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="server-btn-secondary"
+                            onClick={handleRestartServer}
+                            disabled={lifecycleStatus !== 'idle'}
+                          >
+                            <FontAwesomeIcon icon={lifecycleStatus === 'restarting' ? faSpinner : faRedo} spin={lifecycleStatus === 'restarting'} />
+                            <span>{lifecycleStatus === 'restarting' ? 'Reiniciando...' : 'Reiniciar'}</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {serverNotice && !serverInfo.online && currentUser?.role !== 'user' && (
+                    <div style={{
+                      background: 'rgba(255, 211, 107, 0.1)',
+                      border: '1px solid rgba(255, 211, 107, 0.25)',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      fontSize: '0.74rem',
+                      color: '#ffd36b',
+                      lineHeight: '1.4'
+                    }}>
+                      💡 {serverNotice}
+                    </div>
+                  )}
                 </div>
+
+
+
 
                 {/* Acceso Remoto / QR */}
                 <button
@@ -635,6 +791,70 @@ export default function TopBar({
                   </select>
                 </div>
 
+                {/* Modelo Intermediario / Orquestador SLM (F023) */}
+                <div className="settings-group">
+                  <label><FontAwesomeIcon icon={faBrain} /> Modelo Intermediario / Orquestador (Pipeline SLM)</label>
+                  <select 
+                    value={chatSettings.orchestratorModel || ''}
+                    onChange={(e) => onUpdateChatSettings({ ...chatSettings, orchestratorModel: e.target.value })}
+                  >
+                    <option value="">⚡ Automático (Usar modelo principal o SLM rápido)</option>
+                    {availableLmModels.length > 0 && (
+                      <optgroup label="🟢 Detectados en LM Studio">
+                        {availableLmModels.map(m => (
+                          <option key={`orch-${m.id}`} value={m.id}>{m.id}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label="⚡ Modelos Ligeros Recomendados (0.5B - 3B)">
+                      <option value="Qwen2.5-1.5B-Instruct-GGUF">Qwen 2.5 1.5B Instruct (Ultra Rápido)</option>
+                      <option value="Llama-3.2-1B-Instruct-GGUF">Llama 3.2 1B Instruct</option>
+                      <option value="Llama-3.2-3B-Instruct-GGUF">Llama 3.2 3B Instruct</option>
+                      <option value="gemma-2-2b-it-GGUF">Gemma 2 2B IT</option>
+                    </optgroup>
+                  </select>
+                  <small style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.72rem', display: 'block', marginTop: '3px' }}>
+                    Se encarga de pre-filtrar lore, traducir, formatear diálogos/acciones y preparar prompts de difusión.
+                  </small>
+                </div>
+
+                {/* Automatización: Creación de Tarjetas y Difusión */}
+                <div className="settings-group" style={{ background: 'rgba(255, 211, 107, 0.03)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 211, 107, 0.15)' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', marginBottom: '8px' }}>
+                    🤖 Automatizaciones del Asistente
+                  </div>
+
+                  <div style={{ marginBottom: '8px' }}>
+                    <label style={{ fontSize: '0.74rem', color: '#ffffff', display: 'block', marginBottom: '4px' }}>
+                      🗂️ Creación de Tarjetas de Lore:
+                    </label>
+                    <select
+                      value={chatSettings.autoCardCreation || 'auto'}
+                      onChange={(e) => onUpdateChatSettings({ ...chatSettings, autoCardCreation: e.target.value })}
+                      style={{ width: '100%', padding: '6px 8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '5px', color: '#fff', fontSize: '0.76rem' }}
+                    >
+                      <option value="auto">✨ Automática (Crea tarjetas al descubrir entidades)</option>
+                      <option value="manual">🔘 Manual (Sugerir con botón de 1 clic)</option>
+                      <option value="off">🚫 Desactivada</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.74rem', color: '#ffffff', display: 'block', marginBottom: '4px' }}>
+                      🎨 Generación de Ilustraciones (Difusor):
+                    </label>
+                    <select
+                      value={chatSettings.autoImageDiffusion || 'manual'}
+                      onChange={(e) => onUpdateChatSettings({ ...chatSettings, autoImageDiffusion: e.target.value })}
+                      style={{ width: '100%', padding: '6px 8px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '5px', color: '#fff', fontSize: '0.76rem' }}
+                    >
+                      <option value="manual">🔘 Manual (Prepara prompt y muestra botón de ilustrar)</option>
+                      <option value="auto">⚡ Automática (Dispara difusor si no existe imagen)</option>
+                      <option value="off">🚫 Desactivada</option>
+                    </select>
+                  </div>
+                </div>
+
                 {/* Selector de Modelo de Difusión / Generación de Imágenes */}
                 <div className="settings-group">
                   <label><FontAwesomeIcon icon={faPalette} /> Modelo de Generación de Imágenes (Difusión)</label>
@@ -679,6 +899,7 @@ export default function TopBar({
                 </div>
               </div>
             )}
+
 
             {/* PESTAÑA 3: PARTIDA & LORE */}
             {settingsTab === 'chat' && isChatView && (

@@ -209,35 +209,137 @@ export const STYLE_PROMPT_PRESETS = {
 };
 
 // Multilingual common scenery and subject translation dictionary for SDXL diffusion prompts
-const VISUAL_DICTIONARY = {
-  // Entornos y arquitectura
-  'ruinas': 'ancient stone ruins',
-  'ruina': 'ancient ruins',
-  'templo': 'sacred temple',
-  'castillo': 'gothic castle fortress',
-  'plaza': 'town square cobblestone plaza',
-  'pueblo': 'fantasy village settlement',
-  'ciudad': 'sprawling medieval fantasy city',
-  'bosque': 'dense enchanted forest, tall trees',
-  'montaña': 'rugged mountain peaks',
-  'cueva': 'subterranean cavern, glowing crystals',
-  'calabozo': 'dungeon stone prison corridor',
-  'torre': 'tall gothic tower',
-  'acantilado': 'sheer coastal cliff',
-  'mercado': 'busy marketplace alley',
-
-  // Personajes y condición
-  'esclavo': 'enslaved captive in iron shackles and worn rags',
-  'esclava': 'enslaved captive in iron shackles and worn rags',
-  'azotado': 'weathered, bearing whip scars and battle-worn marks',
-  'guerrero': 'armored warrior',
-  'caballero': 'knight in plate armor',
-  'mago': 'arcane sorcerer casting magic',
+export const VISUAL_DICTIONARY = {
+  // Razas, especies y criaturas
+  'équido': 'anthro horse, equine humanoid',
+  'équida': 'anthro horse, equine humanoid',
+  'caballo': 'horse, equine',
+  'alfa équido': 'muscular anthro horse stallion, equine humanoid',
+  'centauro': 'centaur, half horse half human',
   'lobo': 'wolf creature, fierce lupine traits',
   'humanoide con rasgos lobunos': 'humanoid wolfkin beastfolk with lupine ears and fur features',
   'lobo humanoide': 'anthropomorphic wolf warrior with detailed fur',
   'hombre lobo': 'werewolf beastfolk creature',
+  'felino': 'feline beastfolk, cat ears',
+  'hombre gato': 'catfolk warrior with feline ears and tail',
+  'mujer gato': 'catgirl, feline ears, tail',
+  'elfo': 'elf male with pointed ears',
+  'elfa': 'elf female with pointed ears',
+  'enano': 'stout dwarf warrior, rugged beard',
+  'enana': 'dwarf woman, braided hair',
+  'orco': 'muscular green-skinned orc warrior',
+  'draconiano': 'dragonkin warrior with reptilian scales and horns',
+  'dragón': 'colossal scaled dragon beast',
+  'demonio': 'demon with dark horns and glowing eyes',
+  'súcubo': 'succubus with demonic wings and horns',
+  'ángel': 'angelic warrior with radiant feathery wings',
+
+  // Fisionomía, anatomía y complexión
+  'bipedo': 'bipedal stance',
+  'bipeda': 'bipedal stance',
+  'bípedo': 'bipedal stance',
+  'bípeda': 'bipedal stance',
+  'colosal': 'towering colossal muscular build',
+  'su torso': 'broad muscular torso',
+  'torso': 'muscular broad torso',
+  'masa de músculo': 'dense defined muscles',
+  'musculoso': 'heavily muscular build',
+  'músculo': 'dense defined muscles',
+  'espesa': 'thick',
+  'melena': 'thick wild mane hair',
+  'melena castaña': 'thick brown mane hair',
+  'orejas alerta': 'alert animal ears',
+  'orejas': 'ears',
+  'rostro humanoide': 'humanoid face features',
+  'rostro': 'facial features',
+  'humanoide': 'humanoid',
+  'ojos oscuros e inteligentes': 'sharp dark intelligent eyes',
+  'ojos oscuros': 'sharp dark intelligent eyes',
+  'ojos inteligentes': 'keen intelligent eyes',
+  'ojos ámbar': 'glowing amber eyes',
+  'ojos dorados': 'striking golden eyes',
+  'pelo castaño': 'brown hair',
+  'pelo plateado': 'silver white hair',
+  'pelo negro': 'jet black hair',
+  'pelo rubio': 'golden blonde hair',
+  'pelirrojo': 'vibrant crimson red hair',
+  'cicatrices': 'battle scars across skin',
+
+  // Atuendos, armaduras y equipo
+  'taparrabos': 'leather loincloth',
+  'taparrabos de cuero': 'rugged leather loincloth',
+  'armadura': 'armor',
+  'armadura de placas': 'heavy metal plate armor',
+  'armadura de placas mal ajustadas': 'mismatched weathered plate armor pieces',
+  'malla': 'chainmail armor',
+  'cota de malla': 'chainmail armor',
+  'cuero': 'worn leather straps and belts',
+  'túnica': 'flowing medieval robe',
+  'capa': 'weathered dark cape',
+  'harapos': 'tattered cloth rags',
+  'esclavo': 'enslaved captive in iron shackles and worn rags',
+  'esclava': 'enslaved captive in iron shackles and worn rags',
+  'grilletes': 'iron shackles around wrists',
+  'azotado': 'weathered, bearing whip scars and battle-worn marks',
+
+  // Armas y combate
+  'maza de pinchos desgastada': 'weathered battle-worn spiked mace',
+  'maza de pinchos': 'lethal spiked iron mace weapon',
+  'maza desgastada': 'weathered battle-worn spiked mace',
+  'maza': 'heavy battle mace',
+  'desgastada': 'weathered battle-worn',
+  'desgastado': 'weathered battle-worn',
+  'espada': 'steel longsword blade',
+  'mandoble': 'massive greatsword',
+  'daga': 'sharp steel dagger',
+  'dagas': 'twin throwing daggers',
+  'hacha': 'heavy battle axe',
+  'arco': 'recurve wooden bow',
+  'escudo': 'sturdy defensive shield',
+  'báculo': 'magical arcane staff',
+  'guerrero': 'battle-hardened warrior',
+  'caballero': 'knight in plate armor',
+  'mago': 'arcane sorcerer casting magic',
   'guardiana': 'guardian protector',
+  'pícaro': 'stealthy rogue assassin with daggers',
+
+  // Entornos y arquitectura (Zona A Wallpapers)
+  'forja': 'blacksmith forge, glowing molten metal embers, anvil, iron workshop tools',
+  'la forja': 'blacksmith forge, glowing molten metal embers, anvil, iron workshop tools',
+  'herrería': 'blacksmith workshop, sparks, roaring furnace, iron anvil',
+  'taberna': 'warm rustic medieval tavern interior, wooden tables, roaring hearth, lantern light',
+  'posada': 'cozy fantasy inn interior, wooden timber beams, warm fireplace glow',
+  'taberna del cerdo sifilítico': 'grimy rustic fantasy tavern, dim lantern lighting, weathered wood tables, crowded medieval pub',
+  'ruinas': 'ancient mossy stone ruins, crumbling pillars, atmospheric depth',
+  'ruina': 'ancient stone ruins, overgrown foliage',
+  'templo': 'grand sacred stone temple, towering marble columns, divine rays',
+  'castillo': 'gothic castle fortress ramparts, towering stone spires',
+  'fortaleza': 'imposing stone fortress walls, battlements, torches',
+  'plaza': 'bustling town square cobblestone plaza, medieval market stalls',
+  'pueblo': 'quaint fantasy village settlement, thatched roofs, dirt roads',
+  'ciudad': 'sprawling medieval fantasy city, gothic architecture, stone streets',
+  'gremio': 'guildhall stone headquarters, large oak doors, banners',
+  'gremio de aventureros': 'adventurer guildhall headquarters, wooden benches, quest board, warm lanterns',
+  'bosque': 'dense enchanted forest, towering ancient trees, sunbeams through canopy',
+  'bosque oscuro': 'dark eerie forest, twisted ancient trees, ground mist, moonlight rays',
+  'montaña': 'rugged mountain peaks, snow-capped ridges, dramatic clouds',
+  'cueva': 'subterranean cavern, glowing crystal formations, underground pool',
+  'calabozo': 'dungeon stone prison corridor, iron cell bars, wall torches',
+  'mazmorra': 'dark stone dungeon corridor, iron cages, flickering torches',
+  'torre': 'tall gothic mage tower, arched stained glass windows',
+  'acantilado': 'sheer coastal cliff, crashing ocean waves, misty horizon',
+  'mercado': 'busy fantasy marketplace alley, merchant tents, hanging lanterns',
+  'puerto': 'seaport harbor docks, wooden piers, moored fantasy sailing ships, mist',
+  'muelle': 'wooden pier, foggy harbor, nautical ropes, ocean water reflections',
+  'bahía': 'coastal ocean bay, rocky shores, dramatic sea cliffs',
+  'sala del trono': 'grand royal throne room, gothic chandeliers, red carpet, vaulted stone arches',
+  'biblioteca': 'arcane library interior, towering bookshelves, floating scrolls, candlelight',
+  'laboratorio': 'alchemist laboratory, glowing magical potions, alembics, arcane clutter',
+  'pantano': 'gloomy murky swamp, dead twisted trees, green mist, reflective dark water',
+  'cementerio': 'gothic graveyard, mossy ancient tombstones, wrought iron fence, ground fog',
+  'cripta': 'underground stone crypt, ancient carved sarcophagi, eerie glowing braziers',
+  'callejón': 'narrow medieval cobblestone alley, gothic stone arches, dim hanging lanterns',
+  'alcantarillas': 'subterranean stone sewers, murky water, damp brick walls, green moss',
 
   // Iluminación y clima
   'noche': 'night scene with bright moonlight and lanterns',
@@ -249,6 +351,71 @@ const VISUAL_DICTIONARY = {
 };
 
 /**
+ * Strips conversational Spanish narrative filler and converts known terms to English tokens.
+ * @param {string} text - Raw input prompt or description.
+ * @returns {string} Cleaned and translated token string.
+ */
+export function cleanHeuristicVisualPrompt(text = '') {
+  if (!text || typeof text !== 'string') return '';
+  let clean = text.trim();
+
+  // Multi-word replacements first (longest phrases first)
+  const sortedEntries = Object.entries(VISUAL_DICTIONARY).sort((a, b) => b[0].length - a[0].length);
+  for (const [key, replacement] of sortedEntries) {
+    const regex = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+    clean = clean.replace(regex, replacement);
+  }
+
+  // Remove Spanish narrative filler phrases and stop words
+  const spanishStopWords = [
+    '\\bes un\\b', '\\bes una\\b', '\\bes el\\b', '\\bes la\\b', '\\ben su\\b', '\\bde su\\b',
+    '\\bsu forma\\b', '\\bsu rostro\\b', '\\bsu torso\\b', '\\bsu cuerpo\\b', '\\bviste un\\b',
+    '\\bviste una\\b', '\\bsosteniendo un\\b', '\\bsosteniendo una\\b', '\\bpresenta\\b',
+    '\\bsuperando los\\b', '\\bcubierto por\\b', '\\bcon un\\b', '\\bcon una\\b', '\\bpero letal\\b',
+    '\\bque\\b', '\\bcomo\\b', '\\bpara\\b', '\\bpor\\b', '\\bdel\\b', '\\bde los\\b', '\\bde las\\b',
+    '\\ben\\b', '\\bel\\b', '\\bla\\b', '\\blos\\b', '\\blas\\b', '\\bun\\b', '\\buna\\b', '\\bunos\\b',
+    '\\bunas\\b', '\\by\\b', '\\be\\b', '\\bo\\b', '\\bu\\b'
+  ];
+  for (const stop of spanishStopWords) {
+    clean = clean.replace(new RegExp(stop, 'gi'), ' ');
+  }
+
+  // Clean repeated commas, punctuation, and multiple spaces
+  clean = clean
+    .replace(/[.;:!?]+/g, ', ')
+    .replace(/\s+/g, ' ')
+    .replace(/,\s*,+/g, ',')
+    .replace(/^[, ]+|[, ]+$/g, '');
+
+  return clean;
+}
+
+/**
+ * Creates LLM prompt to translate and convert character / scene descriptions into English SDXL visual tags.
+ * @param {string} text - The input description in any language.
+ * @param {string} style - Visual style category.
+ * @returns {{ system: string, user: string }}
+ */
+export function createVisualPromptTranslationPrompt(text = '', style = '') {
+  return {
+    system: `You are an expert AI image prompt engineer and translator for Stable Diffusion SDXL and Illustrious anime models.
+Your task is to analyze the character, creature, or scene description (which may be in Spanish or other languages) and convert it into precise, comma-separated English visual tags and descriptive keywords.
+
+CRITICAL RULES:
+1. Output ONLY English comma-separated visual tags (Danbooru / CLIP tokens).
+2. Structure the prompt logically:
+   - Subject & Species/Type (e.g. "1man, solo, anthro horse, equine humanoid", "1girl, elf sorceress", "ancient ruined temple")
+   - Physical build & Anatomy (e.g. "muscular male, tall, thick brown mane hair, horse ears, dark intelligent eyes")
+   - Clothing, Armor & Attire (e.g. "wearing leather loincloth, mismatched plate armor")
+   - Equipment, Weapons & Items (e.g. "holding spiked mace, weathered weapon")
+   - Scene, Pose & Lighting (e.g. "standing, dramatic lighting, detailed background")
+3. Translate all non-English descriptions into accurate English visual concepts.
+4. Do NOT include conversational filler, notes, prefixes, or markdown. Output ONLY the comma-separated English tags.`,
+    user: `Convert this character/scene description into English visual diffusion tags:\n${text}`
+  };
+}
+
+/**
  * Translates and enriches visual prompts and style selections into optimal English tokens for SDXL models.
  * 
  * @param {string} prompt - Raw visual prompt.
@@ -256,13 +423,7 @@ const VISUAL_DICTIONARY = {
  * @returns {string} Enriched English prompt with professional lighting modifiers.
  */
 export function enrichImagePrompt(prompt = '', style = 'Fantasía Oscura / Entornos') {
-  let cleanPrompt = (prompt || '').trim();
-
-  // Replace common foreign keywords with expressive English equivalents
-  for (const [key, replacement] of Object.entries(VISUAL_DICTIONARY)) {
-    const regex = new RegExp(`\\b${key}\\b`, 'gi');
-    cleanPrompt = cleanPrompt.replace(regex, replacement);
-  }
+  let cleanPrompt = cleanHeuristicVisualPrompt(prompt || '');
 
   // Resolve style preset
   const styleModifier = STYLE_PROMPT_PRESETS[style] || STYLE_PROMPT_PRESETS['Fantasía Oscura'] || 'cinematic lighting, masterpiece, high quality, highly detailed';

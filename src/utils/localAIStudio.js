@@ -1,4 +1,4 @@
-import { enrichImagePrompt, resolveTargetLanguage, createTranslationPrompt } from './language';
+import { enrichImagePrompt, resolveTargetLanguage, createTranslationPrompt, createVisualPromptTranslationPrompt, detectLanguage, STYLE_PROMPT_PRESETS } from './language';
 import { loadChatSettings } from './storage';
 import { findMatchingEntity } from './textFormatter';
 import { generateNativeImage, getServerBaseUrl } from './serverApi';
@@ -310,6 +310,72 @@ export async function startImageBackend(model = 'v6.safetensors', imageServerUrl
 }
 
 /**
+ * Translates and synthesizes narrative character or scene descriptions into English SDXL visual tags.
+ * Uses the local LLM if available, with graceful fallback to the heuristic visual dictionary.
+ * 
+ * @param {string} rawPrompt - The character or scene prompt (may be Spanish or multilingual).
+ * @param {string} [style='Fantasía Oscura / Entornos'] - Selected visual style.
+ * @param {string} [baseUrl] - Base server URL.
+ * @param {string} [modelId] - LLM model ID.
+ * @returns {Promise<string>} Fully enriched English visual prompt.
+ */
+export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fantasía Oscura / Entornos', baseUrl = '', modelId = '') {
+  if (!rawPrompt || typeof rawPrompt !== 'string' || !rawPrompt.trim()) {
+    return enrichImagePrompt('', style);
+  }
+
+  const trimmed = rawPrompt.trim();
+  const lang = detectLanguage(trimmed);
+  const isLikelySpanish = lang === 'es' || /[áéíóúñ¿¡]/i.test(trimmed) || /\b(es|un|una|su|torso|forma|armadura|maza|colosal|bipeda|bipedo|orejas|ojos|rasgos|taparrabos)\b/i.test(trimmed);
+
+  // If text is already strictly in English and not narrative prose, return enriched prompt directly
+  if (!isLikelySpanish && lang === 'en' && trimmed.includes(',') && !trimmed.includes('. ')) {
+    return enrichImagePrompt(trimmed, style);
+  }
+
+  // Try LLM translation into English SDXL visual tokens
+  const finalBaseUrl = getBaseUrl(baseUrl);
+  try {
+    const { system, user } = createVisualPromptTranslationPrompt(trimmed, style);
+    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
+    const resolvedModelId = currentlyLoaded || (await resolveModelId(modelId, finalBaseUrl)) || modelId || 'default';
+
+    const response = await apiFetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: resolvedModelId,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        temperature: 0.2,
+        stream: false
+      })
+    }, finalBaseUrl);
+
+    if (response && response.ok) {
+      const data = await response.json();
+      let translated = data.choices?.[0]?.message?.content?.trim();
+      if (translated) {
+        // Strip think blocks and markdown code fences
+        translated = translated.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        translated = translated.replace(/^```[a-z]*\s*/i, '').replace(/```$/i, '').trim();
+        if (translated.length > 5) {
+          const styleModifier = STYLE_PROMPT_PRESETS[style] || STYLE_PROMPT_PRESETS['Fantasía Oscura'] || 'cinematic lighting, masterpiece, high quality, highly detailed';
+          return `${translated}, style: ${styleModifier}, sharp focus, detailed composition`;
+        }
+      }
+    }
+  } catch (e) {
+    // Soft fallback to heuristic dictionary on network or LLM timeout/error
+  }
+
+  // Heuristic dictionary fallback
+  return enrichImagePrompt(trimmed, style);
+}
+
+/**
  * Generates an image using Local AI Studio / Pinokio / SD WebUI with automatic English prompt enrichment.
  */
 export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Entornos', imageServerUrl = '', targetModel = '', customWidth = 768, customHeight = 512) {
@@ -317,7 +383,9 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
   const selectedModel = targetModel || settings.preferredImageModel || 'DreamShaperXL_Lightning.safetensors';
   const isLightning = selectedModel.toLowerCase().includes('lightning') || selectedModel.toLowerCase().includes('4step');
   const steps = isLightning ? 8 : 20;
-  const fullPrompt = enrichImagePrompt(prompt, style);
+
+  // Translate and convert visual prompt to English SDXL tokens
+  const fullPrompt = await translateVisualPromptToEnglish(prompt, style, settings.lmStudioUrl, settings.preferredModel);
 
   // 1. Prioritize Ptahn Native Server Diffusion Endpoint (/api/images/generate)
   try {
@@ -416,7 +484,7 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
  */
 export async function generateCharacterPortrait(characterName, traits = [], intro = '', targetModel = '', imageServerUrl = '') {
   const traitsText = Array.isArray(traits) ? traits.filter(Boolean).join(', ') : (traits || '');
-  const portraitPrompt = `portrait of ${characterName || 'hero character'}, ${traitsText ? `${traitsText}, ` : ''}${intro ? `${intro}, ` : ''}expressive eyes, dramatic lighting, sharp focus, 8k masterpiece character concept art, high quality vertical portrait`;
+  const portraitPrompt = `portrait of ${characterName || 'hero character'}, ${traitsText ? `traits: ${traitsText}, ` : ''}${intro ? `description: ${intro}, ` : ''}expressive eyes, dramatic lighting, sharp focus, 8k masterpiece character concept art, high quality vertical portrait`;
   return generateImageLocal(
     portraitPrompt,
     'Anime / Ilustración Estilizada 2.5D',
@@ -424,6 +492,21 @@ export async function generateCharacterPortrait(characterName, traits = [], intr
     targetModel || 'v6.safetensors',
     512,
     768
+  );
+}
+
+/**
+ * Generates an on-demand landscape wallpaper specifically optimized for Zona A (chat background) and Location cards.
+ */
+export async function generateLocationWallpaper(locationName, intro = '', text = '', targetModel = '', imageServerUrl = '') {
+  const locationPrompt = `wide angle cinematic landscape wallpaper of ${locationName || 'fantasy location'}, scenery background, ${intro ? `intro: ${intro}, ` : ''}${text ? `details: ${text}, ` : ''}detailed environment architecture, atmospheric depth, volumetric lighting, masterpiece wallpaper, landscape orientation`;
+  return generateImageLocal(
+    locationPrompt,
+    'Fantasía Oscura / Entornos',
+    imageServerUrl,
+    targetModel || 'v6.safetensors',
+    768,
+    512
   );
 }
 

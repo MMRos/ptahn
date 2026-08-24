@@ -269,7 +269,123 @@
   color: #ffd36b;
 }
 
+/* Server Lifecycle Card & Control Buttons */
+.server-lifecycle-card {
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.2s ease;
+}
+
+.server-lifecycle-card.online {
+  background: rgba(110, 231, 183, 0.08);
+  border: 1px solid rgba(110, 231, 183, 0.35);
+}
+
+.server-lifecycle-card.offline {
+  background: rgba(255, 211, 107, 0.06);
+  border: 1px solid rgba(255, 211, 107, 0.25);
+}
+
+.server-lifecycle-card.transitioning {
+  background: rgba(192, 132, 252, 0.08);
+  border: 1px solid rgba(192, 132, 252, 0.35);
+}
+
+.server-lifecycle-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.server-lifecycle-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: bold;
+  font-size: 0.82rem;
+}
+
+.server-lifecycle-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.server-btn-primary {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #ffd36b;
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-weight: 700;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.server-btn-primary:hover:not(:disabled) {
+  background: #ffe399;
+  transform: translateY(-1px);
+}
+
+.server-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.server-btn-danger {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-weight: 600;
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.server-btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.3);
+  color: #ffffff;
+}
+
+.server-btn-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.server-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+

@@ -27,13 +27,18 @@ import {
   faExternalLinkAlt,
   faSave
 } from '@fortawesome/free-solid-svg-icons';
-import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
+import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generateLocationWallpaper, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
 import { resolveTargetLanguage, getLanguageDirective } from '../utils/language';
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { speakBrowserUtterance, cancelBrowserSpeech } from '../utils/speechTTS';
 import { FormattedMessageText, findMatchingEntity, normalizeEntityName } from '../utils/textFormatter';
 import { detectActiveCharacter, matchCharacterExpression, resolveLocationWallpaper } from '../utils/characterMatcher';
+import { getNsfwDynamicsDirective } from '../utils/nsfwDynamics';
+import { executeInboundOrchestration, executeOutboundOrchestration } from '../utils/orchestratorPipeline';
+import { filterAndSortRelevantCards } from '../utils/weightCalculator';
 import { addChat } from '../utils/db';
+
+
 import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
 import CharacterSidebar from './CharacterSidebar';
@@ -185,11 +190,14 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     setIsGeneratingTagCover(true);
     try {
       const isChar = activeEntityModal.draftType === 'Personaje';
+      const isLocation = activeEntityModal.draftType === 'Lugar';
       const promptTitle = activeEntityModal.draftTitle;
       const promptIntro = activeEntityModal.draftIntro || activeEntityModal.draftText || '';
       let url = '';
       if (isChar) {
         url = await generateCharacterPortrait(promptTitle, activeEntityModal.draftTraits || [], promptIntro, chatSettings?.preferredImageModel);
+      } else if (isLocation) {
+        url = await generateLocationWallpaper(promptTitle, activeEntityModal.draftIntro, activeEntityModal.draftText, chatSettings?.preferredImageModel);
       } else {
         url = await generateImageLocal(`${promptTitle}, ${activeEntityModal.draftType}, ${promptIntro}`, 'Fantasía Oscura / Entornos', '', chatSettings?.preferredImageModel);
       }
@@ -495,7 +503,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
 
   // Construcción unificada y estructurada del systemPrompt (arnés de contexto).
   // Consolida los detalles del escenario, personajes/PNJs preestablecidos, narrador, herramientas del taller, jugador, inventario y memorias.
-  const buildSystemPrompt = () => {
+  const buildSystemPrompt = (preFilteredEntities = null) => {
     // 1. Resolve linked scenario and narrator
     const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId || s.title?.toLowerCase() === (chat.scenario || '').toLowerCase()) ||
                      (appData?.cards || []).find(c => c.id === chat.scenarioId || c.title?.toLowerCase() === (chat.scenario || '').toLowerCase()) ||
@@ -630,7 +638,13 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
       return isDirectlyLinked || isChatLinked || isScenarioLinked || isConnected;
     });
 
-    const relevantEntities = scenarioCards;
+    const relevantEntities = (preFilteredEntities && Array.isArray(preFilteredEntities) && preFilteredEntities.length > 0)
+      ? preFilteredEntities
+      : filterAndSortRelevantCards(scenarioCards, {
+          recentText: messages.slice(-3).map(m => m.text || '').join(' '),
+          maxLimit: 8
+        });
+
 
     if (relevantEntities.length > 0) {
       const entityEntries = relevantEntities.map(ent => {
@@ -661,6 +675,13 @@ ${entityEntries}
     const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
     const languageDirective = getLanguageDirective(targetLang);
 
+    // 9. Format NSFW, Eroticism & Intimacy Dynamics Matrix
+    const nsfwDynamicsDirective = getNsfwDynamicsDirective({
+      scenario,
+      userChar,
+      npcs: relevantEntities
+    });
+
     return `
 ${languageDirective}
 
@@ -680,10 +701,13 @@ ${scenarioCharactersDetails ? `${scenarioCharactersDetails}\n\n` : ''}${narrator
 
 ${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
 
-${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}[PERSISTENT AI ORDERS]:
+${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}${nsfwDynamicsDirective}
+
+[PERSISTENT AI ORDERS]:
 ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external Game Master in strict third-person.'}
 
 [CORE SYSTEM DIRECTIVES & INVIOLABLE HARNESS RULES]:
+
 1. STRICT PROHIBITION AGAINST OVER-DESCRIBING PLAYER APPEARANCE OR INVENTORY:
    - The player ALREADY knows their character's appearance, equipment, and clothing.
    - NEVER waste output describing {{user}}'s muscles, physique, attire, or invent random anatomical traits. {{user}} is strictly human according to their sheet.
@@ -788,8 +812,14 @@ ${languageDirective}
             // Generar ilustración/imagen local para la nueva entidad
             let coverUrl = '';
             try {
-              const promptForImg = entity.imagePrompt || `${entity.title}, ${entity.type}, ${entity.intro || entity.text}`;
-              coverUrl = await generateImageLocal(promptForImg, 'Fantasía Oscura', chatSettings?.imageServerUrl);
+              if (entity.type === 'Lugar') {
+                coverUrl = await generateLocationWallpaper(entity.title, entity.intro, entity.text, chatSettings?.preferredImageModel);
+              } else if (entity.type === 'Personaje') {
+                coverUrl = await generateCharacterPortrait(entity.title, entity.traits || [], entity.intro || entity.text, chatSettings?.preferredImageModel);
+              } else {
+                const promptForImg = entity.imagePrompt || `${entity.title}, ${entity.type}, ${entity.intro || entity.text}`;
+                coverUrl = await generateImageLocal(promptForImg, 'Fantasía Oscura / Entornos', chatSettings?.imageServerUrl);
+              }
             } catch (imgErr) {
               console.warn(`[Auto-Card Image]: Error al generar imagen para ${entity.title}:`, imgErr);
             }
@@ -912,11 +942,23 @@ ${languageDirective}
     // Truncar historial para eliminar la respuesta anterior e insertar el placeholder de stream
     await persistMessages(historyBefore);
     setMessages([...historyBefore, streamingPlaceholder]);
+    setMessages([...historyBefore, streamingPlaceholder]);
     setIsSending(true);
-    setGenerationProgress({ percent: 15, status: '🧠 Evaluando contexto y memorias...' });
+    setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Evaluando intención y filtrando lore...' });
 
     try {
-      const systemPrompt = buildSystemPrompt();
+      // 1. Orquestación Inbound (Pre-Vuelo)
+      const lastUserPrompt = promptMessages[promptMessages.length - 1]?.text || '';
+      const inbound = await executeInboundOrchestration({
+        orchestratorModel: chatSettings?.orchestratorModel,
+        userMessage: lastUserPrompt,
+        cards: appData?.cards || [],
+        recentMessages: historyBefore,
+        chatSettings,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+
+      const systemPrompt = buildSystemPrompt(inbound.filteredCards);
       const res = await sendChatMessage({
         messages: promptMessages,
         systemInstruction: systemPrompt,
@@ -940,9 +982,21 @@ ${languageDirective}
         }
       });
 
+      // 2. Orquestación Outbound (Post-Vuelo)
+      const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
+      const outbound = await executeOutboundOrchestration({
+        orchestratorModel: chatSettings?.orchestratorModel,
+        rawNarrative: res.text || '',
+        targetLang,
+        compendiumCards: appData?.cards || [],
+        chatSettings,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+
+      const finalNarrative = outbound.formattedText || res.text || 'Sin respuesta.';
       const newAiMsg = {
         from: aiRole,
-        text: res.text || 'Sin respuesta.',
+        text: finalNarrative,
         timestamp: new Date().toISOString()
       };
       const finalMsgs = [...historyBefore, newAiMsg];
@@ -980,10 +1034,21 @@ ${languageDirective}
     
     if (overrideText === null) setInputMsg('');
     setIsSending(true);
-    setGenerationProgress({ percent: 15, status: '🧠 Evaluando contexto y memorias...' });
+    setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Analizando intención y relevancia de lore...' });
 
     try {
-      const systemPrompt = buildSystemPrompt();
+      // 1. Orquestación Inbound (Pre-Vuelo)
+      const inbound = await executeInboundOrchestration({
+        orchestratorModel: chatSettings?.orchestratorModel,
+        userMessage: textToSend.trim(),
+        cards: appData?.cards || [],
+        recentMessages: messages,
+        chatSettings,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+
+      // 2. Generación Principal con Storyteller
+      const systemPrompt = buildSystemPrompt(inbound.filteredCards);
 
       const res = await sendChatMessage({
         messages: nextMsgs,
@@ -1008,16 +1073,59 @@ ${languageDirective}
         }
       });
 
-      const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };
+      // 3. Orquestación Outbound (Post-Vuelo)
+      const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
+      const outbound = await executeOutboundOrchestration({
+        orchestratorModel: chatSettings?.orchestratorModel,
+        rawNarrative: res.text || '',
+        targetLang,
+        compendiumCards: appData?.cards || [],
+        chatSettings,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+
+      const finalNarrative = outbound.formattedText || res.text || 'Sin respuesta.';
+      const aiMsg = { from: 'ai', text: finalNarrative, timestamp: new Date().toISOString() };
       const finalMsgs = [...nextMsgs, aiMsg];
       await persistMessages(finalMsgs);
 
-      // Lanzar el resumen de contexto automático y la generación de tarjetas en segundo plano
+      // 4. Auto-creación de tarjetas de entidades descubiertas
+      if (chatSettings?.autoCardCreation !== 'off' && outbound.discoveredEntities?.length > 0 && appData && onUpdateAppData) {
+        const existingTitles = new Set((appData.cards || []).map(c => (c.title || c.name || '').toLowerCase()));
+        const newCards = outbound.discoveredEntities
+          .filter(e => e.name && !existingTitles.has(e.name.toLowerCase()))
+          .map(e => ({
+            id: `card-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            title: e.name,
+            name: e.name,
+            type: e.type || 'Objeto',
+            intro: e.summary || '',
+            text: e.summary || '',
+            tags: [e.type || 'Objeto'],
+            traits: [],
+            connectedCards: [chat.scenarioId].filter(Boolean),
+            importance: 5,
+            isPinned: false,
+            activationMode: 'dynamic',
+            createdAt: new Date().toISOString()
+          }));
+
+        if (newCards.length > 0) {
+          const nextCards = [...newCards, ...(appData.cards || [])];
+          const nextData = { ...appData, cards: nextCards };
+          onUpdateAppData(nextData);
+          if (folderHandle) saveAppDataToFolder(folderHandle, nextData).catch(console.warn);
+        }
+      }
+
+
+      // 6. Lanzar el resumen de contexto automático y la generación de tarjetas en segundo plano
       runBackgroundSummarization(finalMsgs);
       runBackgroundCardGeneration(finalMsgs);
 
     } catch (err) {
       console.error("Error al enviar chat:", err);
+
       const errorMsg = { from: 'ai', text: `[Error de conexión con IA]: ${err.message || 'LM Studio no accesible.'}`, timestamp: new Date().toISOString() };
       await persistMessages([...nextMsgs, errorMsg]);
     } finally {

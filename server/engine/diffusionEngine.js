@@ -26,10 +26,11 @@ class DiffusionEngine {
     if (this.pythonPath && fs.existsSync(this.pythonPath)) {
       return this.pythonPath;
     }
+    const localVenvWindows = path.join(__dirname, '..', '..', '.venv', 'Scripts', 'python.exe');
+    const localVenvUnix = path.join(__dirname, '..', '..', '.venv', 'bin', 'python');
     const candidates = [
-      'C:\\pinokio\\api\\comfy.git\\app\\env\\Scripts\\python.exe',
-      'C:\\pinokio\\api\\ai-toolkit.git\\app\\env\\Scripts\\python.exe',
-      'C:\\pinokio\\bin\\miniconda\\python.exe',
+      localVenvWindows,
+      localVenvUnix,
       'python',
       'py'
     ];
@@ -57,10 +58,11 @@ class DiffusionEngine {
    */
   getStatus() {
     const models = this.getAvailableModels();
+    const defaultModel = models.find(m => m.subType === 'checkpoint') || models[0];
     return {
       ready: true,
       isGenerating: this.isGenerating,
-      activeModel: this.activeModel || (models[0]?.filename || null),
+      activeModel: this.activeModel || (defaultModel?.filename || null),
       availableModelsCount: models.length,
       models: models.map(m => ({ id: m.id, name: m.filename, size: m.formattedSize, type: m.subType || 'diffusion' })),
       pythonRuntime: this.findPythonExecutable(),
@@ -69,11 +71,11 @@ class DiffusionEngine {
   }
 
   /**
-   * Generates a raw fallback 1x1 PNG for test suites
+   * Generates a raw fallback 1x1 PNG for test suites (transparent)
    */
   createMinimalPngBuffer(width = 512, height = 768) {
     return Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
       'base64'
     );
   }
@@ -165,7 +167,8 @@ class DiffusionEngine {
       cfgScale = 7.0,
       seed = Math.floor(Math.random() * 1000000),
       model = null,
-      negativePrompt = 'blurry, low quality, deformed, distorted, text, watermark, bad anatomy'
+      negativePrompt = 'blurry, low quality, deformed, distorted, text, watermark, bad anatomy',
+      _mockForTest = false
     } = options;
 
     this.isGenerating = true;
@@ -182,7 +185,7 @@ class DiffusionEngine {
       let targetModelObj = models.find(m => m.filename === model || m.id === model);
       if (!targetModelObj) {
         // Find largest .safetensors (likely base model e.g. v6 or malaAnimeMix)
-        targetModelObj = models.slice().sort((a, b) => b.size - a.size)[0];
+        targetModelObj = models.slice().sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0))[0];
       }
 
       const modelPath = path.isAbsolute(targetModelObj.filename)
@@ -191,8 +194,8 @@ class DiffusionEngine {
 
       let generatedBase64 = null;
 
-      // 1. In test environment, generate synthetic test image buffer
-      if (process.env.NODE_ENV === 'test') {
+      // 1. Explicit mock for test suites if requested via _mockForTest
+      if (_mockForTest) {
         const imageBuffer = this.createMinimalPngBuffer(width, height);
         fs.writeFileSync(outputPath, imageBuffer);
         generatedBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;

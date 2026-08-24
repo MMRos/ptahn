@@ -10,14 +10,27 @@ const modelsRouter = require('./routes/models');
 const storageRouter = require('./routes/storage');
 const networkRouter = require('./routes/network');
 const imagesRouter = require('./routes/images');
+const lifecycleRouter = require('./routes/lifecycle');
+const authRouter = require('./routes/auth');
+
+
 
 function createApp() {
   const app = express();
+
+  // Security Headers against MitM, Clickjacking and MIME sniffing
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+  });
 
   // Middleware
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 
   // Ensure essential directories exist
   [MODELS_DIR, DATA_DIR].forEach(dir => {
@@ -32,6 +45,10 @@ function createApp() {
   app.use('/api/storage', storageRouter);
   app.use('/api/network', networkRouter);
   app.use('/api/images', imagesRouter);
+  app.use('/api/lifecycle', lifecycleRouter);
+  app.use('/api/auth', authRouter);
+
+
 
   // OpenAI / LM Studio drop-in compatibility routes
   app.use('/v1/chat', aiRouter);

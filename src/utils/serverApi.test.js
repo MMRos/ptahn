@@ -122,4 +122,47 @@ describe('Server API Client Layer', () => {
     expect(info.port).toBe(3001);
     expect(info.url).toBe('http://192.168.1.50:3001');
   });
+
+  test('fetchServerLifecycleStatus returns lifecycle details when online', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, running: true, uptime: 42, engines: { llama: true } })
+    });
+
+    const { fetchServerLifecycleStatus } = require('./serverApi');
+    const result = await fetchServerLifecycleStatus('http://localhost:3001');
+    expect(result.success).toBe(true);
+    expect(result.running).toBe(true);
+    expect(result.uptime).toBe(42);
+  });
+
+  test('startServerService, stopServerService and restartServerService dispatch lifecycle requests', async () => {
+    const { startServerService, stopServerService, restartServerService } = require('./serverApi');
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, status: 'running' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, status: 'stopped' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, status: 'restarted' }) });
+
+    const startRes = await startServerService('all', 'http://localhost:3001');
+    expect(startRes.status).toBe('running');
+
+    const stopRes = await stopServerService('all', 'http://localhost:3001');
+    expect(stopRes.status).toBe('stopped');
+
+    const restartRes = await restartServerService('all', 'http://localhost:3001');
+    expect(restartRes.status).toBe('restarted');
+  });
+
+  test('pollServerOnline resolves when server responds within timeout', async () => {
+    const { pollServerOnline } = require('./serverApi');
+
+    global.fetch
+      .mockRejectedValueOnce(new Error('Connecting...'))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, running: true }) });
+
+    const isOnline = await pollServerOnline({ baseUrl: 'http://localhost:3001', intervalMs: 10, maxRetries: 3 });
+    expect(isOnline).toBe(true);
+  });
 });
+

@@ -2,7 +2,9 @@
   "name": "ptahn",
   "version": "0.1.0",
   "private": true,
+  "proxy": "http://localhost:3001",
   "dependencies": {
+
     "@fortawesome/fontawesome-svg-core": "^7.3.1",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
@@ -19,13 +21,19 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "server": "node server/index.js",
+    "start": "node scripts/dev.js",
+    "start:client": "react-scripts start",
     "start:server": "node server/index.js",
+    "server": "node server/index.js",
+    "launch": "node scripts/launcher.js",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:server": "jest server/tests/ --runInBand",
     "eject": "react-scripts eject"
   },
+
+
+
   "eslintConfig": {
     "extends": [
       "react-app"

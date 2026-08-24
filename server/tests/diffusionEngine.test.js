@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { createApp } = require('../index');
-const { DiffusionEngine } = require('../engine/diffusionEngine');
+const { DiffusionEngine, diffusionEngine } = require('../engine/diffusionEngine');
 
 function makeRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -60,6 +60,28 @@ describe('Native Diffusion Engine Module & Endpoints', () => {
       baseUrl = `http://127.0.0.1:${port}`;
       done();
     });
+  });
+
+  beforeEach(() => {
+    jest.spyOn(diffusionEngine, 'runNativeWorker').mockImplementation(async (prompt, options) => {
+      const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+      if (options.outputPath) {
+        fs.writeFileSync(options.outputPath, Buffer.from(b64, 'base64'));
+      }
+      return {
+        success: true,
+        output_path: options.outputPath,
+        filename: path.basename(options.outputPath),
+        device: 'mock',
+        model: 'DreamShaperXL_Lightning.safetensors',
+        seed: 12345,
+        base64: `data:image/png;base64,${b64}`
+      };
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   afterAll((done) => {

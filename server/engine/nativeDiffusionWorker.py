@@ -52,42 +52,40 @@ def main():
             generator_seed = args.seed
         generator = torch.Generator(device=device).manual_seed(generator_seed)
 
+        file_size_mb = os.path.getsize(args.model_path) / (1024 * 1024)
+        if file_size_mb < 800:
+            error_res = {
+                "success": False,
+                "error": f"Selected file '{os.path.basename(args.model_path)}' ({file_size_mb:.1f} MB) is too small to be a standalone base checkpoint. It appears to be a LoRA adapter or embedding. Please select a full checkpoint (.safetensors >= 2 GB, such as v6.safetensors or malaAnimeMixNSFW)."
+            }
+            print(json.dumps(error_res))
+            sys.exit(1)
+
         # Load pipeline from .safetensors single file
         pipe = None
         load_errors = []
 
-        # Attempt 1: AutoPipeline with single file
+        # Attempt 1: StableDiffusionXLPipeline (SDXL models like v6, Animagine, Illustrious)
         try:
-            pipe = AutoPipelineForText2Image.from_single_file(
+            pipe = StableDiffusionXLPipeline.from_single_file(
                 args.model_path,
                 torch_dtype=torch_dtype,
-                use_safetensors=True,
-                safety_checker=None
+                use_safetensors=True
             )
         except Exception as e1:
-            load_errors.append(f"AutoPipeline: {str(e1)}")
+            load_errors.append(f"SDXL: {str(e1)}")
             
-            # Attempt 2: StableDiffusionXLPipeline
+            # Attempt 2: StableDiffusionPipeline (SD 1.5 fallback)
             try:
-                pipe = StableDiffusionXLPipeline.from_single_file(
+                pipe = StableDiffusionPipeline.from_single_file(
                     args.model_path,
                     torch_dtype=torch_dtype,
-                    use_safetensors=True
+                    use_safetensors=True,
+                    safety_checker=None
                 )
             except Exception as e2:
-                load_errors.append(f"SDXL: {str(e2)}")
-                
-                # Attempt 3: StableDiffusionPipeline (SD 1.5 fallback)
-                try:
-                    pipe = StableDiffusionPipeline.from_single_file(
-                        args.model_path,
-                        torch_dtype=torch_dtype,
-                        use_safetensors=True,
-                        safety_checker=None
-                    )
-                except Exception as e3:
-                    load_errors.append(f"SD15: {str(e3)}")
-                    raise RuntimeError(f"Failed to load checkpoint with all pipelines: {' | '.join(load_errors)}")
+                load_errors.append(f"SD15: {str(e2)}")
+                raise RuntimeError(f"Failed to load checkpoint: {' | '.join(load_errors)}")
 
         # Configure fast high-quality scheduler
         try:
@@ -95,16 +93,26 @@ def main():
         except Exception:
             pass
 
-        # VRAM Optimizations
+        # VRAM & GPU Optimizations
         if device == "cuda":
-            # Enable offload if available to support 4GB-16GB VRAM gracefully
             try:
                 pipe.enable_model_cpu_offload()
             except Exception:
                 pipe.to("cuda")
             
             try:
-                pipe.enable_vae_tiling()
+                if hasattr(pipe.vae, "enable_tiling"):
+                    pipe.vae.enable_tiling()
+                elif hasattr(pipe, "enable_vae_tiling"):
+                    pipe.enable_vae_tiling()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(pipe.vae, "enable_slicing"):
+                    pipe.vae.enable_slicing()
+                elif hasattr(pipe, "enable_vae_slicing"):
+                    pipe.enable_vae_slicing()
             except Exception:
                 pass
         else:

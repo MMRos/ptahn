@@ -65,7 +65,19 @@
   justify-content: center;
   overflow: hidden;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+  position: relative;
+  cursor: pointer;
 }
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  border-radius: 50%;
+}
+
 
 .avatar-placeholder {
   font-size: 2.2rem;
@@ -238,3 +250,50 @@
   color: rgba(255, 255, 255, 0.4);
   font-style: italic;
 }
+
+.avatar-container {
+  position: relative;
+  cursor: pointer;
+}
+
+.avatar-edit-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #ffd36b;
+  font-size: 0.75rem;
+  font-weight: bold;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: 50%;
+}
+
+.avatar-container:hover .avatar-edit-overlay {
+  opacity: 1;
+}
+
+.cover-edit-floating-btn {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 211, 107, 0.4);
+  color: #ffd36b;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.cover-edit-floating-btn:hover {
+  background: #ffd36b;
+  color: #000;
+}
+

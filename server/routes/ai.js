@@ -1,14 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const { llamaEngine } = require('../engine/llamaEngine');
+const { isServerRunning } = require('./lifecycle');
 
 // GET /api/ai/status - Check native engine status
 router.get('/status', (req, res) => {
+  const isOnline = typeof isServerRunning === 'function' ? isServerRunning() : true;
   res.json({
-    online: true,
+    online: isOnline,
+    running: isOnline,
     ...llamaEngine.getStatus()
   });
 });
+
 
 async function handleChatCompletion(req, res) {
   try {

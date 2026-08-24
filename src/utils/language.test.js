@@ -4,6 +4,8 @@ import {
   getLanguageDirective,
   enrichImagePrompt,
   createTranslationPrompt,
+  createVisualPromptTranslationPrompt,
+  cleanHeuristicVisualPrompt,
   SUPPORTED_LANGUAGES
 } from './language';
 
@@ -68,5 +70,28 @@ describe('Language Detection & Multilingual Management Tests', () => {
     expect(enriched).toContain('volumetric lighting');
     expect(enriched).toContain('chiaroscuro');
     expect(enriched).toContain('visible clear illumination');
+  });
+
+  test('should translate equine warrior prompt terms in cleanHeuristicVisualPrompt', () => {
+    const kaelenPrompt = 'Kaelen es un alfa équido colosal, su torso es una masa de músculo cubierto por una espesa melena castaña, orejas alerta, viste un taparrabos de cuero y armadura de placas mal ajustadas, sosteniendo una maza de pinchos desgastada.';
+    const cleaned = cleanHeuristicVisualPrompt(kaelenPrompt);
+    
+    expect(cleaned).toContain('muscular anthro horse stallion, equine humanoid');
+    expect(cleaned).toContain('towering colossal muscular build');
+    expect(cleaned).toContain('muscular broad torso');
+    expect(cleaned).toContain('thick brown mane hair');
+    expect(cleaned).toContain('alert animal ears');
+    expect(cleaned).toContain('rugged leather loincloth');
+    expect(cleaned).toContain('mismatched weathered plate armor pieces');
+    expect(cleaned).toContain('weathered battle-worn spiked mace');
+    expect(cleaned).not.toContain('es un');
+    expect(cleaned).not.toContain('su torso');
+  });
+
+  test('should create visual prompt translation prompt for LLM with Danbooru/SDXL directives', () => {
+    const { system, user } = createVisualPromptTranslationPrompt('Kaelen alfa équido con maza', 'Anime / Ilustración Estilizada 2.5D');
+    expect(system).toContain('Stable Diffusion SDXL');
+    expect(system).toContain('Danbooru / CLIP tokens');
+    expect(user).toContain('Kaelen alfa équido');
   });
 });

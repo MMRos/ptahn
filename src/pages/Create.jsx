@@ -26,10 +26,27 @@ const INITIAL_IMAGES = [
   'https://images.unsplash.com/photo-1563089145-599997674d42?auto=format&fit=crop&w=400&q=80'
 ];
 
-export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpenCreateModal }) {
+export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpenCreateModal, currentUser, onOpenAuthModal }) {
   const [data, setData] = useState(() => appData || loadAppData());
   const [selectedCard, setSelectedCard] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
+
+  useEffect(() => {
+    if (appData) {
+      setData(appData);
+    }
+  }, [appData]);
+
+
+  const handleActionClick = (type, prefilled = null) => {
+    if (!currentUser || currentUser.role === 'guest') {
+      if (onOpenAuthModal) onOpenAuthModal('login');
+      return;
+    }
+    if (onOpenCreateModal) onOpenCreateModal(type, prefilled);
+  };
+
+
   
   // AI Tools states
   const [activeAiTool, setActiveAiTool] = useState(null); // 'video' | 'voice' | 'image'
@@ -1349,6 +1366,48 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
         <p>Arma mundos, tarjetas modulares y narradores interactivos.</p>
       </div>
 
+      {(!currentUser || currentUser.role === 'guest') && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(255, 211, 107, 0.12), rgba(0, 0, 0, 0.4))',
+          border: '1px solid rgba(255, 211, 107, 0.35)',
+          borderRadius: '12px',
+          padding: '14px 18px',
+          margin: '0 8px 18px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '1.4rem' }}>🎟️</span>
+            <div>
+              <h4 style={{ margin: '0 0 2px 0', color: '#ffd36b', fontSize: '0.92rem' }}>Modo Invitado (Solo Chats)</h4>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)' }}>
+                Como invitado tienes acceso total para iniciar y jugar chats. Para crear nuevos escenarios, personajes, historias o narradores, identifícate o crea una cuenta de Creador.
+              </p>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={() => onOpenAuthModal && onOpenAuthModal('login')}
+            style={{
+              background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '8px 16px',
+              color: '#000',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              fontSize: '0.82rem'
+            }}
+          >
+            Iniciar Sesión / Registro
+          </button>
+        </div>
+      )}
+
+
       {/* SECCIÓN NUEVA: HERRAMIENTAS DE IA (IsekaiZero-inspired) */}
       <div style={{ padding: '0 8px', marginTop: '10px', marginBottom: '24px' }}>
         <h3 style={{ fontSize: '1rem', color: '#ffd36b', margin: '0 0 12px 0', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Herramientas de IA</h3>
@@ -1436,7 +1495,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
       </div>
 
       <section className="create-actions">
-        <button className="action-card" onClick={() => onOpenCreateModal && onOpenCreateModal('Escenario')}>
+        <button className="action-card" onClick={() => handleActionClick('Escenario')}>
           <div className="icon icon-scenario" aria-hidden="true">
             <svg viewBox="0 0 64 64">
               <circle cx="32" cy="24" r="6" fill="currentColor" />
@@ -1449,7 +1508,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
           <div className="card-copy">Arma viajes completos y mundos jugables.</div>
         </button>
 
-        <button className="action-card" onClick={() => onOpenCreateModal && onOpenCreateModal('Historia')}>
+        <button className="action-card" onClick={() => handleActionClick('Historia')}>
           <div className="icon icon-card" aria-hidden="true">
             <svg viewBox="0 0 64 64">
               <rect x="14" y="16" width="36" height="32" rx="8" fill="none" stroke="currentColor" strokeWidth="5" />
@@ -1461,7 +1520,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
           <div className="card-copy">Define ideas, personajes, memorias y reglas.</div>
         </button>
 
-        <button className="action-card" onClick={() => onOpenCreateModal && onOpenCreateModal('Narrador')}>
+        <button className="action-card" onClick={() => handleActionClick('Narrador')}>
           <div className="icon icon-narrator" aria-hidden="true">
             <svg viewBox="0 0 64 64">
               <path d="M14 18C18 10 46 10 50 18" fill="none" stroke="currentColor" strokeWidth="4" />
@@ -1476,7 +1535,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
           <div className="card-copy">Crea el hilo que guía tu historia.</div>
         </button>
 
-        <button className="action-card" onClick={() => onOpenCreateModal && onOpenCreateModal('Herramienta')}>
+        <button className="action-card" onClick={() => handleActionClick('Herramienta')}>
           <div className="icon icon-workshop" aria-hidden="true" style={{ color: '#ffd36b' }}>
             <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
               <path d="M40 10l14 14-8 8-14-14 8-8z" />
@@ -1488,6 +1547,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
           <div className="card-copy">Crea atributos, dados, progresión y tablas de eventos.</div>
         </button>
       </section>
+
 
       <div className="create-body">
         <section className="created-section">
@@ -1545,7 +1605,24 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                         style={{ flex: isChar ? '0 1 150px' : '1 1 180px', maxWidth: isChar ? '180px' : '280px', minWidth: '140px', background: 'rgba(20,18,30,0.8)', border: `1px solid ${isMemory ? 'rgba(180, 100, 255, 0.3)' : isInv ? 'rgba(255, 211, 107, 0.3)' : 'rgba(255,255,255,0.08)'}`, borderRadius: '10px', overflow: 'hidden', cursor: 'pointer' }}
                         onClick={() => setSelectedCard(c)}
                       >
-                        <div style={{ backgroundImage: `url(${c.cover || (isMemory ? 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=400&q=80' : isInv ? 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80' : 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80')})`, height: isChar ? '160px' : '100px', backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                        <div style={{ backgroundImage: `url(${c.cover || (isMemory ? 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=400&q=80' : isInv ? 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80' : 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80')})`, height: isChar ? '160px' : '100px', backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative' }}>
+                          {isChar && (
+                            <span style={{
+                              position: 'absolute',
+                              top: '6px',
+                              right: '6px',
+                              fontSize: '0.65rem',
+                              fontWeight: '700',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: (c.isPlayable || c.characterRole === 'playable') ? 'rgba(16, 185, 129, 0.85)' : (c.characterRole === 'npc') ? 'rgba(59, 130, 246, 0.85)' : 'rgba(217, 119, 6, 0.85)',
+                              color: '#fff',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.5)'
+                            }}>
+                              {(c.isPlayable || c.characterRole === 'playable') ? '🎮 PJ' : (c.characterRole === 'npc') ? '👥 PNJ' : '🎭 Persona'}
+                            </span>
+                          )}
+                        </div>
                         <div style={{ padding: '8px' }}>
                           <h4 style={{ margin: 0, fontSize: '0.82rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {isMemory && '🧠 '}
@@ -1553,13 +1630,14 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                             {c.title}
                           </h4>
                           <small style={{ color: isMemory ? '#c084fc' : isInv ? '#ffd36b' : 'rgba(255,255,255,0.5)', fontSize: '0.72rem' }}>
-                            {c.type}
+                            {c.type} {isChar && ((c.isPlayable || c.characterRole === 'playable') ? '• Jugable' : (c.characterRole === 'npc') ? '• PNJ' : '• Persona')}
                           </small>
                         </div>
                       </div>
                     );
                   })
                 )}
+
               </div>
             </details>
 
