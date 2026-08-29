@@ -688,6 +688,7 @@ function App() {
       ) : (
         <ScenarioPopup
           scenario={popupScenario}
+          allCards={appData.cards || []}
           isOpen={scenarioOpen}
           onClose={closeScenario}
           onStartChat={startChat}

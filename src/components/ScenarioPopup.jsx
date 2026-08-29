@@ -1,10 +1,12 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faShareAlt, faBookmark, faHeart, faPlay, faEdit, faClone, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { getCardTypeStyle } from '../utils/cardTypeStyles';
 import './scenario.css';
 
 export default function ScenarioPopup({ 
   scenario = {}, 
+  allCards = [],
   isOpen = false, 
   onClose = () => {}, 
   onStartChat = () => {}, 
@@ -54,6 +56,50 @@ export default function ScenarioPopup({
               {scenario.presentation}
             </p>
           )}
+
+          {/* Tarjetas y Entidades Conectadas al Escenario */}
+          {(() => {
+            const rawCards = scenario.cards || [];
+            if (!Array.isArray(rawCards) || rawCards.length === 0) return null;
+            const resolvedCards = rawCards.map(cIdOrObj => {
+              if (typeof cIdOrObj === 'object' && cIdOrObj !== null) return cIdOrObj;
+              return (allCards || []).find(c => c.id === cIdOrObj || c.title === cIdOrObj) || { id: cIdOrObj, title: cIdOrObj, type: 'Otros' };
+            });
+
+            return (
+              <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: '700', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                  Entidades y Elementos Conectados ({resolvedCards.length})
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '90px', overflowY: 'auto' }}>
+                  {resolvedCards.map((card, idx) => {
+                    const typeStyle = getCardTypeStyle(card.type);
+                    return (
+                      <span
+                        key={card.id || idx}
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: '600',
+                          padding: '3px 8px',
+                          borderRadius: '5px',
+                          background: typeStyle.chipBg,
+                          border: `1px solid ${typeStyle.chipBorder}`,
+                          color: typeStyle.chipColor,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                        title={`Tarjeta tipo ${typeStyle.label}`}
+                      >
+                        <span>{typeStyle.icon}</span>
+                        <span>{card.title || card.name || 'Tarjeta'}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="scenario-buttons" style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
             <button className="primary" onClick={() => onStartChat(scenario)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

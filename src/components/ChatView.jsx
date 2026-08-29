@@ -666,8 +666,8 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
 `.trim();
     }
 
-    // 7.1 Format Pre-established Scenario Characters, Entities, and NPCs (Strict Scenario Scope)
-    let scenarioCharactersDetails = '';
+    // 7.1 Format Pre-established Scenario Entities by Exact Category (Strict Typological Separation)
+    let scenarioEntitiesDetails = '';
     const scenarioCards = getScenarioCards(scenario, chat, appData, userChar);
 
     const relevantEntities = (preFilteredEntities && Array.isArray(preFilteredEntities) && preFilteredEntities.length > 0)
@@ -677,23 +677,70 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
           maxLimit: 8
         });
 
-
     if (relevantEntities.length > 0) {
-      const entityEntries = relevantEntities.map(ent => {
+      const formatCardEntry = (ent, label) => {
         const traitsStr = ent.traits && ent.traits.length > 0 ? `  * Personality & Traits: ${ent.traits.join(', ')}\n` : '';
-        const tagsStr = ent.tags && ent.tags.length > 0 ? `  * Tags/Role: ${ent.tags.join(', ')}\n` : '';
+        const tagsStr = ent.tags && ent.tags.length > 0 ? `  * Tags: ${ent.tags.join(', ')}\n` : '';
         const introStr = ent.intro ? `  * Summary: ${ent.intro}\n` : '';
-        const bioStr = ent.text ? `  * Background & Lore: ${ent.text}\n` : '';
-        return `--- [NPC / ENTITY: ${ent.title || ent.name} (${ent.type || 'Personaje'})] ---\n${introStr}${bioStr}${traitsStr}${tagsStr}`.trim();
-      }).join('\n\n');
+        const bioStr = (ent.description || ent.text) ? `  * Lore & Description: ${ent.description || ent.text}\n` : '';
+        return `--- [${label}: ${ent.title || ent.name || 'Entidad'}${ent.subtype ? ` (${ent.subtype})` : ''}] ---\n${introStr}${bioStr}${traitsStr}${tagsStr}`.trim();
+      };
 
-      scenarioCharactersDetails = `
-[SCENARIO ROSTER: ESTABLISHED CHARACTERS, NPCS & COMPENDIUM ENTITIES]:
-The following characters and key entities exist strictly in this scenario. YOU (Game Master) roleplay and control them:
-${entityEntries}
-`.trim();
+      const locationCards = relevantEntities.filter(e => (e.type || '').toLowerCase() === 'lugar');
+      const raceCards = relevantEntities.filter(e => (e.type || '').toLowerCase() === 'raza');
+      const characterCards = relevantEntities.filter(e => {
+        const t = (e.type || '').toLowerCase();
+        return t === 'personaje' || t === 'npc' || (!t && !e.subtype);
+      });
+      const factionCards = relevantEntities.filter(e => {
+        const t = (e.type || '').toLowerCase();
+        return t === 'facción' || t === 'faccion';
+      });
+      const itemCards = relevantEntities.filter(e => {
+        const t = (e.type || '').toLowerCase();
+        return t === 'objeto' || t === 'inventario' || t === 'item';
+      });
+      const otherCards = relevantEntities.filter(e => 
+        !locationCards.includes(e) && !raceCards.includes(e) && !characterCards.includes(e) && !factionCards.includes(e) && !itemCards.includes(e)
+      );
+
+      const sections = [];
+
+      if (locationCards.length > 0) {
+        sections.push(`[SCENARIO LOCATIONS, TOWNS & GEOGRAPHY (PLACES / LUGAR)]:
+CRITICAL NOTE: The following entries are PHYSICAL PLACES, TOWNS, BUILDINGS, OR GEOGRAPHY. They are INANIMATE ENVIRONMENTS, NOT living persons or NPCs. NEVER personify, give dialogue, thoughts, animal body parts, or ears to a location.
+${locationCards.map(c => formatCardEntry(c, 'LOCATION')).join('\n\n')}`);
+      }
+
+      if (raceCards.length > 0) {
+        sections.push(`[SCENARIO RACES & SPECIES PHYSIOLOGY (RAZAS)]:
+The following describe biological traits, species anatomy, and physiology of inhabitants in this world:
+${raceCards.map(c => formatCardEntry(c, 'RACE / SPECIES')).join('\n\n')}`);
+      }
+
+      if (characterCards.length > 0) {
+        sections.push(`[SCENARIO LIVING CHARACTERS & NPCS (PERSONAJES)]:
+The following are living individual beings/NPCs that exist in this scenario. YOU (Game Master) roleplay and speak for them when they are present:
+${characterCards.map(c => formatCardEntry(c, 'NPC / CHARACTER')).join('\n\n')}`);
+      }
+
+      if (factionCards.length > 0) {
+        sections.push(`[SCENARIO FACTIONS & ORGANIZATIONS (FACCIONES)]:
+${factionCards.map(c => formatCardEntry(c, 'FACTION')).join('\n\n')}`);
+      }
+
+      if (itemCards.length > 0) {
+        sections.push(`[SCENARIO SPECIAL ITEMS & OBJECTS (OBJETOS)]:
+${itemCards.map(c => formatCardEntry(c, 'ITEM / OBJECT')).join('\n\n')}`);
+      }
+
+      if (otherCards.length > 0) {
+        sections.push(`[SCENARIO COMPENDIUM LORE ENTITIES]:
+${otherCards.map(c => formatCardEntry(c, 'ENTITY')).join('\n\n')}`);
+      }
+
+      scenarioEntitiesDetails = sections.join('\n\n');
     }
-
 
     // 8. Format Memories & Milestones (strictly scoped to this chat and scenario)
     const inChatMemories = (chat.memoryCards || []).map(m => `* ${m}`);
@@ -730,7 +777,7 @@ ${languageDirective}
 
 ${scenarioDetails}
 
-${scenarioCharactersDetails ? `${scenarioCharactersDetails}\n\n` : ''}${narratorDetails}
+${scenarioEntitiesDetails ? `${scenarioEntitiesDetails}\n\n` : ''}${narratorDetails}
 
 ${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
 
@@ -766,7 +813,7 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external G
    - The world does not revolve subserviently around the player; reckless actions carry realistic risks, logical consequences, and believable opposition.
    - Maintain strict consistency with scenario lore, inventory, and accumulated memories.
 
-7. STRICT TYPOGRAPHICAL FORMATTING & DIALOGUE RULES:
+7. STRICT TYPOGRAPHICAL FORMATTING, DELIMITERS & ENTITY HIGHLIGHTS:
    - SPOKEN NPC DIALOGUE (ALOUD): MUST be wrapped EXCLUSIVELY in double quotes without internal asterisks: "Hello, traveler."
      * Any vocal speech, conversation, shouts, or verbal responses MUST be inside double quotes: "¡Dueño!", "¡Espera!".
      * FORBIDDEN to put asterisks inside quotes (NEVER write "*Hello*" or "*¡Dueño!*").
@@ -776,10 +823,13 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external G
      * Tildes (~...~) are ONLY for SHORT (1-2 sentences) silent, private inner thoughts inside an NPC's mind.
      * STRICTLY FORBIDDEN to wrap scene descriptions, narrative paragraphs, actions, or dialogues in tildes (~...~).
      * FORBIDDEN to combine with asterisks (NEVER write *~thought~*).
-   - GENERAL NARRATIVE PROSE & SCENERY:
+   - GENERAL NARRATIVE PROSE & ACTIONS:
      * Write standard, clean literary paragraphs for descriptions, sensory details, and world reactions WITHOUT wrapping whole sentences or descriptions in asterisks (*...*) or tildes (~...~).
      * Asterisks (*...*) are reserved ONLY for short, specific inline actions or gestures (e.g. *sonríe con picardía*, *desenvaina su espada*).
-   - KEY ENTITIES & PROPER NAMES: Wrap key compendium items, locations, and characters between equal signs: ==La Forja==, ==Azgael==.
+   - MANDATORY ENTITY HIGHLIGHTS (==...==):
+     * You MUST wrap ALL key proper names, locations, towns, characters, factions, and notable items in double equal signs (==...==).
+     * Examples: ==Garrison==, ==Tierra de Bestias==, ==La Forja==, ==Azgael==, ==Mari Setogaya==, ==Taberna del Búho==, ==Armadillo y Martillo==, ==Fosas Miasmáticas==, ==Leporinos==.
+     * This triggers interactive compendium linking in the reader's interface. Failure to wrap important entities and places in ==...== breaks the user's interface.
 
 8. MANDATORY 4-PHASE REASONING & SELF-CORRECTION PROTOCOL (<think>):
    Before delivering your final story response, you MUST execute a silent 4-phase scratchpad inside a <think> ... </think> block:
@@ -787,7 +837,7 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external G
    [FASE 1: PLANIFICACIÓN]
    - NPC Intent & Emotion: What is the NPC's psychological drive and what reaction do they seek from {{user}}?
    - Atmosphere & Sensory Anchoring: Scent, temperature, textures, lighting, breath, and heartbeat.
-   - Lore & Memory Consistency: Check active scenario cards, inventory items, and accumulated memories to prevent factual contradictions.
+   - Lore & Entity Categorization: Verify active locations, species, and characters. Ensure locations (e.g. ==Garrison==) are treated as geographical places, NOT as speaking NPCs.
    - Rhythm & Direction: How to advance the scene without rushing or stalling.
 
    [FASE 2: REDACCIÓN (BORRADOR INTERNO)]
@@ -795,8 +845,10 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external G
 
    [FASE 3: AUTO-CRÍTICA (CONTROL DE CALIDAD)]
    - Autonomy Audit: Did my draft usurp, speak, think, or act for {{user}}? -> If yes, immediately purge it.
-   - Anti-Cliché & Prose Freshness: Are there tired tropes, repetitive words, or melodrama? -> Elevate to rich, visceral prose.
-   - Formatting Check: Ensure spoken dialogue uses double quotes ("..."), physical gestures use asterisks (*...*), and unspoken inner thoughts use tildes (~...~).
+   - Location vs Character Audit: Did I accidentally give voice or body parts to a place or town? -> Purge immediately; places are environments.
+   - Mandatory Entity Wrapping Audit (==...==): Did I wrap all key proper names, places, species, and NPCs in double equals (e.g. ==Garrison==, ==Leporinos==, ==Taberna del Búho==)? -> Wrap all proper nouns in ==...==.
+   - Typographical Check: Ensure spoken dialogue uses double quotes ("..."), physical gestures use asterisks (*...*), and unspoken inner thoughts use tildes (~...~).
+   - Anti-Cliché & Prose Freshness: Elevate to rich, visceral prose.
    - Final Adjustments & Greenlight: Apply corrections.
 
    [FASE 4: MENSAJE FINAL]

@@ -97,7 +97,20 @@ export function filterCreationsCards(cards = [], {
     if (sortBy === 'name_asc') return (a.title || a.name || '').localeCompare(b.title || b.name || '');
     if (sortBy === 'name_desc') return (b.title || b.name || '').localeCompare(a.title || a.name || '');
     if (sortBy === 'type') {
-      const typePriority = { personaje: 1, lugar: 2, objeto: 3, faccion: 4, facción: 4, memoria: 5, inventario: 6 };
+      const typePriority = { 
+        personaje: 1, 
+        lugar: 2, 
+        objeto: 3, 
+        criatura: 4, 
+        raza: 5, 
+        faccion: 6, 
+        'facción': 6, 
+        memoria: 7, 
+        inventario: 8, 
+        regla: 9, 
+        historia: 10, 
+        otros: 11 
+      };
       const pA = typePriority[(a.type || '').toLowerCase()] || 99;
       const pB = typePriority[(b.type || '').toLowerCase()] || 99;
       if (pA !== pB) return pA - pB;

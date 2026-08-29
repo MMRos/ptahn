@@ -273,7 +273,7 @@ Your job is to parse the storyteller's raw narrative and return a SINGLE valid J
    - Silent internal thoughts MUST be in tildes: ~Qué extraño...~ (NEVER *~...~*).
    - General narrative prose MUST be standard clean paragraph text without wrapping full sentences or descriptions in asterisks.
    - Specific short inline actions/gestures can be in asterisks: *sonríe con picardía*.
-   - Key entities and proper names wrapped in equal signs: ==La Forja==, ==Azgael==.
+   - Key entities, proper names, towns, locations, and characters MUST be wrapped in double equal signs: ==Garrison==, ==Tierra de Bestias==, ==La Forja==, ==Azgael==, ==Leporinos==.
    ${isSpanish ? '- MANDATORY: The entire formatted narrative MUST be 100% in natural Spanish. Do NOT output English.' : ''}
 2. "areaA_expression": { "characterName": "...", "expression": "smiling / battle / neutral" } or null if no character is active.
 3. "areaB_location": { "locationName": "..." } or null.

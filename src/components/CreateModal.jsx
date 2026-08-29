@@ -27,6 +27,7 @@ import {
   toggleTagInString 
 } from '../utils/imageTagging';
 import { generateImageLocal } from '../utils/localAIStudio';
+import { getCardTypeStyle } from '../utils/cardTypeStyles';
 import '../pages/create.css';
 
 const CARD_TYPES = ['Historia', 'Personaje', 'Inventario', 'Memoria', 'Raza', 'Facción', 'Regla', 'Criatura', 'Objeto', 'Lugar', 'Otros'];
@@ -2829,20 +2830,26 @@ export default function CreateModal({
                   />
                 </div>
 
-                {/* Cuadrículas agrupadas por tipo */}
-                {['Personaje', 'Lugar', 'Facción', 'Raza', 'Objeto', 'Otros'].map(type => {
+                {/* Cuadrículas agrupadas por tipo con estilo cromático */}
+                {['Personaje', 'Lugar', 'Objeto', 'Criatura', 'Raza', 'Facción', 'Memoria', 'Inventario', 'Regla', 'Otros'].map(type => {
+                  const typeStyle = getCardTypeStyle(type);
                   const linkedCardsOfType = (appData.cards || []).filter(c => {
                     if (!selectedCards.includes(c.id)) return false;
-                    if (c.type === type) return true;
-                    if (type === 'Otros' && !['Personaje', 'Lugar', 'Facción', 'Raza', 'Objeto'].includes(c.type)) return true;
+                    const cType = c.type || '';
+                    if (cType.toLowerCase() === type.toLowerCase()) return true;
+                    if (type === 'Facción' && cType.toLowerCase() === 'faccion') return true;
+                    if (type === 'Regla' && (cType.toLowerCase() === 'historia' || cType.toLowerCase() === 'regla')) return true;
+                    if (type === 'Otros' && !['Personaje', 'Lugar', 'Objeto', 'Criatura', 'Raza', 'Facción', 'Memoria', 'Inventario', 'Regla', 'Historia'].some(t => t.toLowerCase() === cType.toLowerCase())) return true;
                     return false;
                   });
-                  const typeLabel = type === 'Personaje' ? 'Personajes' : type === 'Lugar' ? 'Lugares' : type === 'Facción' ? 'Facciones' : type === 'Raza' ? 'Razas' : type === 'Objeto' ? 'Objetos' : 'Otros / Personalizados';
 
                   return (
                     <div key={type} style={{ marginBottom: '24px' }}>
-                      <h5 style={{ margin: '0 0 10px 0', color: '#ffffff', fontSize: '0.88rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>{typeLabel} ({linkedCardsOfType.length})</span>
+                      <h5 style={{ margin: '0 0 10px 0', color: typeStyle.color, fontSize: '0.88rem', borderBottom: `1px solid ${typeStyle.borderColor}`, paddingBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>{typeStyle.icon}</span>
+                          <span>{typeStyle.pluralLabel} ({linkedCardsOfType.length})</span>
+                        </span>
                       </h5>
 
                       <div style={{
@@ -2852,28 +2859,30 @@ export default function CreateModal({
                       }}>
                         {/* Tarjetas conectadas de este tipo */}
                         {linkedCardsOfType.map(card => {
+                          const cardStyle = getCardTypeStyle(card.type);
                           return (
                             <div
                               key={card.id}
                               onClick={() => handleOpenEditNestedCard(card)}
                               style={{
-                                background: 'rgba(255, 255, 255, 0.02)',
-                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                background: 'rgba(20, 18, 30, 0.85)',
+                                border: `1px solid ${cardStyle.borderColor}`,
                                 borderRadius: '10px',
                                 overflow: 'hidden',
                                 position: 'relative',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                height: '175px',
+                                height: '180px',
                                 transition: 'all 0.2s',
-                                cursor: 'pointer'
+                                cursor: 'pointer',
+                                boxShadow: `0 2px 8px ${cardStyle.glowColor}`
                               }}
                               onMouseEnter={(e) => {
-                                e.currentTarget.style.borderColor = 'rgba(255, 211, 107, 0.4)';
+                                e.currentTarget.style.borderColor = cardStyle.color;
                                 e.currentTarget.style.transform = 'translateY(-2px)';
                               }}
                               onMouseLeave={(e) => {
-                                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                e.currentTarget.style.borderColor = cardStyle.borderColor;
                                 e.currentTarget.style.transform = 'none';
                               }}
                               title={`Clic para editar "${card.title}"`}
@@ -2887,9 +2896,9 @@ export default function CreateModal({
                                     handleOpenEditNestedCard(card);
                                   }}
                                   style={{
-                                    background: 'rgba(0, 0, 0, 0.7)',
-                                    border: '1px solid rgba(255, 211, 107, 0.4)',
-                                    color: '#ffd36b',
+                                    background: 'rgba(0, 0, 0, 0.75)',
+                                    border: `1px solid ${cardStyle.borderColor}`,
+                                    color: cardStyle.color,
                                     width: '22px',
                                     height: '22px',
                                     borderRadius: '50%',
@@ -2910,7 +2919,7 @@ export default function CreateModal({
                                     handleFieldChange(setSelectedCards, selectedCards.filter(id => id !== card.id));
                                   }}
                                   style={{
-                                    background: 'rgba(0, 0, 0, 0.7)',
+                                    background: 'rgba(0, 0, 0, 0.75)',
                                     border: '1px solid rgba(255, 107, 107, 0.4)',
                                     color: '#ff6b6b',
                                     width: '22px',
@@ -2931,12 +2940,29 @@ export default function CreateModal({
 
                               {/* Portada */}
                               <div style={{
-                                height: '85px',
+                                height: '90px',
                                 backgroundSize: 'cover',
                                 backgroundPosition: 'center',
                                 backgroundImage: `url(${card.cover || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=300&q=80'})`,
-                                backgroundColor: '#1a1a24'
-                              }} />
+                                backgroundColor: '#1a1a24',
+                                position: 'relative'
+                              }}>
+                                <span style={{
+                                  position: 'absolute',
+                                  top: '6px',
+                                  left: '6px',
+                                  fontSize: '0.62rem',
+                                  fontWeight: '700',
+                                  padding: '2px 5px',
+                                  borderRadius: '4px',
+                                  background: cardStyle.chipBg,
+                                  border: `1px solid ${cardStyle.chipBorder}`,
+                                  color: cardStyle.chipColor,
+                                  backdropFilter: 'blur(4px)'
+                                }}>
+                                  {cardStyle.icon} {cardStyle.label}
+                                </span>
+                              </div>
 
                               {/* Info */}
                               <div style={{ padding: '8px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -2944,10 +2970,10 @@ export default function CreateModal({
                                   {card.title}
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                                    {card.type}
+                                  <span style={{ fontSize: '0.68rem', color: cardStyle.color, fontWeight: '600', letterSpacing: '0.3px' }}>
+                                    {cardStyle.label}
                                   </span>
-                                  <span style={{ fontSize: '0.68rem', color: '#ffd36b', fontWeight: '600' }}>
+                                  <span style={{ fontSize: '0.68rem', color: cardStyle.color, fontWeight: '600' }}>
                                     ✏️ Editar
                                   </span>
                                 </div>
@@ -2960,28 +2986,28 @@ export default function CreateModal({
                         <div
                           onClick={() => setNestedCardType(type)}
                           style={{
-                            border: '2px dashed rgba(255, 211, 107, 0.3)',
+                            border: `2px dashed ${typeStyle.borderColor}`,
                             borderRadius: '10px',
-                            height: '170px',
+                            height: '175px',
                             display: 'flex',
                             flexDirection: 'column',
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: 'pointer',
-                            color: '#ffd36b',
+                            color: typeStyle.color,
                             fontSize: '0.78rem',
                             fontWeight: '600',
                             gap: '6px',
                             transition: 'all 0.2s',
-                            background: 'rgba(255,211,107,0.01)'
+                            background: typeStyle.chipBg
                           }}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.border = '2px dashed rgba(255, 211, 107, 0.6)';
-                            e.currentTarget.style.background = 'rgba(255,211,107,0.04)';
+                            e.currentTarget.style.borderColor = typeStyle.color;
+                            e.currentTarget.style.background = `rgba(255,255,255,0.06)`;
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.border = '2px dashed rgba(255, 211, 107, 0.3)';
-                            e.currentTarget.style.background = 'rgba(255,211,107,0.01)';
+                            e.currentTarget.style.borderColor = typeStyle.borderColor;
+                            e.currentTarget.style.background = typeStyle.chipBg;
                           }}
                         >
                           <span style={{ fontSize: '1.3rem' }}>+</span>

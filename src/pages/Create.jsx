@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { loadAppData } from '../utils/storage';
 import { isChildCard, getCardProvenance, filterCreationsCards } from '../utils/creationsFilter';
+import { getCardTypeStyle } from '../utils/cardTypeStyles';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faArrowLeft, 
@@ -1816,12 +1817,16 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                       }}
                     >
                       <option value="all" style={{ background: '#1a1b2b', color: '#fff' }}>🃏 Todos los tipos</option>
-                      <option value="Personaje" style={{ background: '#1a1b2b', color: '#fff' }}>🎭 Personajes</option>
-                      <option value="Lugar" style={{ background: '#1a1b2b', color: '#fff' }}>🏛️ Lugares</option>
-                      <option value="Objeto" style={{ background: '#1a1b2b', color: '#fff' }}>📦 Objetos</option>
-                      <option value="Faccion" style={{ background: '#1a1b2b', color: '#fff' }}>🐾 Facciones</option>
-                      <option value="Memoria" style={{ background: '#1a1b2b', color: '#fff' }}>🧠 Memorias</option>
-                      <option value="Inventario" style={{ background: '#1a1b2b', color: '#fff' }}>🎒 Inventario</option>
+                      <option value="Personaje" style={{ background: '#1a1b2b', color: '#818cf8' }}>🎭 Personajes</option>
+                      <option value="Lugar" style={{ background: '#1a1b2b', color: '#22d3ee' }}>🏛️ Lugares</option>
+                      <option value="Objeto" style={{ background: '#1a1b2b', color: '#ffd36b' }}>📦 Objetos</option>
+                      <option value="Criatura" style={{ background: '#1a1b2b', color: '#a3e635' }}>🐉 Criaturas</option>
+                      <option value="Raza" style={{ background: '#1a1b2b', color: '#fb923c' }}>🐾 Razas</option>
+                      <option value="Facción" style={{ background: '#1a1b2b', color: '#f87171' }}>🛡️ Facciones</option>
+                      <option value="Memoria" style={{ background: '#1a1b2b', color: '#c084fc' }}>🧠 Memorias</option>
+                      <option value="Inventario" style={{ background: '#1a1b2b', color: '#fde047' }}>🎒 Inventarios</option>
+                      <option value="Regla" style={{ background: '#1a1b2b', color: '#fbbf24' }}>📜 Reglas / Historia</option>
+                      <option value="Otros" style={{ background: '#1a1b2b', color: '#cbd5e1' }}>✨ Otros</option>
                     </select>
                   </div>
                 </div>
@@ -1834,9 +1839,8 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                 ) : (
                   filteredCards.map(c => {
                     const isChar = (c.type || '').toLowerCase() === 'personaje';
-                    const isMemory = (c.type || '').toLowerCase() === 'memoria';
-                    const isInv = (c.type || '').toLowerCase() === 'inventario';
                     const prov = getCardProvenance(c);
+                    const typeStyle = getCardTypeStyle(c.type);
 
                     return (
                       <div 
@@ -1845,16 +1849,42 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                           flex: isChar ? '0 1 150px' : '1 1 180px', 
                           maxWidth: isChar ? '180px' : '280px', 
                           minWidth: '140px', 
-                          background: 'rgba(20,18,30,0.8)', 
-                          border: `1px solid ${prov.isChild ? 'rgba(129, 140, 248, 0.4)' : (isMemory ? 'rgba(180, 100, 255, 0.3)' : isInv ? 'rgba(255, 211, 107, 0.3)' : 'rgba(255,255,255,0.08)')}`, 
+                          background: 'rgba(20,18,30,0.85)', 
+                          border: `1px solid ${prov.isChild ? 'rgba(129, 140, 248, 0.45)' : typeStyle.borderColor}`, 
                           borderRadius: '10px', 
                           overflow: 'hidden', 
                           cursor: 'pointer',
-                          position: 'relative'
+                          position: 'relative',
+                          boxShadow: `0 3px 10px ${typeStyle.glowColor}`,
+                          transition: 'all 0.18s ease'
                         }}
                         onClick={() => setSelectedCard(c)}
                       >
-                        <div style={{ backgroundImage: `url(${c.cover || (isMemory ? 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=400&q=80' : isInv ? 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80' : 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80')})`, height: isChar ? '160px' : '100px', backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative' }}>
+                        <div style={{ backgroundImage: `url(${c.cover || (c.type === 'Memoria' ? 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=400&q=80' : c.type === 'Inventario' ? 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80' : 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80')})`, height: isChar ? '160px' : '105px', backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative' }}>
+                          
+                          {/* Badge Cromático de Tipo en Esquina Superior Izquierda */}
+                          <span style={{
+                            position: 'absolute',
+                            top: '6px',
+                            left: '6px',
+                            fontSize: '0.66rem',
+                            fontWeight: '700',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: typeStyle.chipBg,
+                            border: `1px solid ${typeStyle.chipBorder}`,
+                            color: typeStyle.chipColor,
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.7)',
+                            backdropFilter: 'blur(4px)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            zIndex: 2
+                          }}>
+                            {typeStyle.icon} {typeStyle.label}
+                          </span>
+
+                          {/* Rol Específico de Personaje en Esquina Superior Derecha */}
                           {isChar && (
                             <span style={{
                               position: 'absolute',
@@ -1866,7 +1896,8 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                               borderRadius: '4px',
                               background: (c.isPlayable || c.characterRole === 'playable') ? 'rgba(16, 185, 129, 0.85)' : (c.characterRole === 'npc') ? 'rgba(59, 130, 246, 0.85)' : 'rgba(217, 119, 6, 0.85)',
                               color: '#fff',
-                              boxShadow: '0 2px 4px rgba(0,0,0,0.5)'
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.5)',
+                              zIndex: 2
                             }}>
                               {(c.isPlayable || c.characterRole === 'playable') ? '🎮 PJ' : (c.characterRole === 'npc') ? '👥 PNJ' : '🎭 Persona'}
                             </span>
@@ -1884,13 +1915,14 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                                 fontWeight: '600',
                                 padding: '3px 6px',
                                 borderRadius: '4px',
-                                background: 'rgba(15, 23, 42, 0.92)',
-                                border: '1px solid rgba(129, 140, 248, 0.45)',
+                                background: 'rgba(15, 23, 42, 0.94)',
+                                border: '1px solid rgba(129, 140, 248, 0.55)',
                                 color: '#c7d2fe',
                                 whiteSpace: 'nowrap',
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
-                                boxShadow: '0 2px 5px rgba(0,0,0,0.7)'
+                                boxShadow: '0 2px 5px rgba(0,0,0,0.7)',
+                                zIndex: 2
                               }} 
                               title={prov.formattedLabel}
                             >
@@ -1900,12 +1932,13 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                         </div>
                         <div style={{ padding: '8px' }}>
                           <h4 style={{ margin: 0, fontSize: '0.82rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {isMemory && '🧠 '}
-                            {isInv && '🎒 '}
-                            {c.title}
+                            {typeStyle.icon} {c.title || c.name || 'Sin título'}
                           </h4>
-                          <small style={{ color: prov.isChild ? '#818cf8' : (isMemory ? '#c084fc' : isInv ? '#ffd36b' : 'rgba(255,255,255,0.5)'), fontSize: '0.72rem' }}>
-                            {prov.isChild ? '🔗 Versión Hijo' : c.type} {isChar && !prov.isChild && ((c.isPlayable || c.characterRole === 'playable') ? '• Jugable' : (c.characterRole === 'npc') ? '• PNJ' : '• Persona')}
+                          <small style={{ color: prov.isChild ? '#818cf8' : typeStyle.color, fontSize: '0.72rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                            <span>{prov.isChild ? '🔗 Versión Hijo' : typeStyle.label}</span>
+                            {isChar && !prov.isChild && (
+                              <span style={{ opacity: 0.8 }}>• {(c.isPlayable || c.characterRole === 'playable') ? 'Jugable' : (c.characterRole === 'npc') ? 'PNJ' : 'Persona'}</span>
+                            )}
                           </small>
                         </div>
                       </div>
@@ -2010,10 +2043,28 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
         <div className="char-backdrop" style={{ zIndex: 1200 }} onClick={(e) => { if (e.target === e.currentTarget) setSelectedCard(null); }}>
           <div className="char-modal" style={{ maxWidth: '420px', width: '90%', zIndex: 1201 }}>
             <button className="char-close" onClick={() => setSelectedCard(null)}>×</button>
-            <h4 style={{ color: '#fff', fontSize: '1.2rem', marginBottom: '4px' }}>{selectedCard.title}</h4>
-            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 12px 0' }}>
-              Tarjeta de {selectedCard.type}
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              {(() => {
+                const selectedTypeStyle = getCardTypeStyle(selectedCard.type);
+                return (
+                  <span style={{
+                    fontSize: '0.72rem',
+                    fontWeight: '700',
+                    padding: '3px 8px',
+                    borderRadius: '5px',
+                    background: selectedTypeStyle.chipBg,
+                    border: `1px solid ${selectedTypeStyle.chipBorder}`,
+                    color: selectedTypeStyle.chipColor,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    {selectedTypeStyle.icon} {selectedTypeStyle.label}
+                  </span>
+                );
+              })()}
+            </div>
+            <h4 style={{ color: '#fff', fontSize: '1.25rem', margin: '0 0 10px 0' }}>{selectedCard.title || selectedCard.name || 'Sin título'}</h4>
 
             {/* Si es una tarjeta hijo, mostrar su proveniencia explícita */}
             {isChildCard(selectedCard) && (

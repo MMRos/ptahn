@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSearch, faLink, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { faSearch, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { getCardTypeStyle } from '../utils/cardTypeStyles';
 import './connectionSelector.css';
 
 export default function ConnectionSelector({ 
@@ -45,23 +46,33 @@ export default function ConnectionSelector({
         {selectedCards.length === 0 ? (
           <div className="cs-empty-text">No hay conexiones establecidas aún.</div>
         ) : (
-          selectedCards.map(card => (
-            <div key={card.id} className="cs-badge">
-              <FontAwesomeIcon icon={faLink} className="cs-badge-icon" />
-              <div className="cs-badge-info">
-                <span className="cs-badge-title">{card.title}</span>
-                <span className="cs-badge-connection">Conectado a: {card.type}</span>
-              </div>
-              <button 
-                type="button" 
-                className="cs-badge-remove"
-                onClick={() => onRemoveCard(card.id)}
-                title="Eliminar conexión"
+          selectedCards.map(card => {
+            const typeStyle = getCardTypeStyle(card.type);
+            return (
+              <div 
+                key={card.id} 
+                className="cs-badge" 
+                style={{ 
+                  background: typeStyle.chipBg, 
+                  borderColor: typeStyle.chipBorder 
+                }}
               >
-                <FontAwesomeIcon icon={faTimes} />
-              </button>
-            </div>
-          ))
+                <span style={{ fontSize: '0.85rem' }}>{typeStyle.icon}</span>
+                <div className="cs-badge-info">
+                  <span className="cs-badge-title" style={{ color: '#fff' }}>{card.title}</span>
+                  <span className="cs-badge-connection" style={{ color: typeStyle.color }}>{typeStyle.label}</span>
+                </div>
+                <button 
+                  type="button" 
+                  className="cs-badge-remove"
+                  onClick={() => onRemoveCard(card.id)}
+                  title="Eliminar conexión"
+                >
+                  <FontAwesomeIcon icon={faTimes} />
+                </button>
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -91,25 +102,50 @@ export default function ConnectionSelector({
                 : 'No se encontraron tarjetas coincidentes.'}
             </div>
           ) : (
-            filteredCards.map(card => (
-              <div 
-                key={card.id} 
-                className="cs-dropdown-item"
-                onClick={() => {
-                  onSelectCard(card.id);
-                  setQuery('');
-                  setIsOpen(false);
-                }}
-              >
-                <div className="cs-item-title">{card.title}</div>
-                <div className="cs-item-meta">
-                  <span className="cs-item-type">{card.type}</span>
-                  {card.tags && card.tags.length > 0 && (
-                    <span className="cs-item-tags">• {card.tags.join(', ')}</span>
-                  )}
+            filteredCards.map(card => {
+              const itemTypeStyle = getCardTypeStyle(card.type);
+              return (
+                <div 
+                  key={card.id} 
+                  className="cs-dropdown-item"
+                  onClick={() => {
+                    onSelectCard(card.id);
+                    setQuery('');
+                    setIsOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px'
+                  }}
+                >
+                  <div>
+                    <div className="cs-item-title" style={{ fontWeight: '600', color: '#fff' }}>
+                      {itemTypeStyle.icon} {card.title}
+                    </div>
+                    {card.tags && card.tags.length > 0 && (
+                      <div className="cs-item-tags" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.45)', marginTop: '2px' }}>
+                        {card.tags.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                  <span 
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: '700',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      background: itemTypeStyle.chipBg,
+                      border: `1px solid ${itemTypeStyle.chipBorder}`,
+                      color: itemTypeStyle.chipColor
+                    }}
+                  >
+                    {itemTypeStyle.label}
+                  </span>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
