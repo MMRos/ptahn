@@ -157,12 +157,22 @@ export function resolveTargetLanguage(preference = 'auto', contextText = '') {
  */
 export function getLanguageDirective(targetLanguage) {
   const lang = targetLanguage || SUPPORTED_LANGUAGES.find(l => l.code === 'es');
+  const isSpanish = lang.code === 'es';
+
+  if (isSpanish) {
+    return `
+[CRITICAL INVIOLABLE DIRECTIVE: MANDATORY OUTPUT LANGUAGE / IDIOMA OBLIGATORIO: ${lang.name.toUpperCase()} (${lang.name})]:
+- TODA TU NARRACIÓN, PROSA LITERARIA, DESCRIPCIONES DE ESCENAS, DIÁLOGOS DE PNJS Y PENSAMIENTOS DEBEN ESTAR ESCRITOS 100% EN ESPAÑOL (${lang.name}).
+- ESTÁ ESTRICTAMENTE PROHIBIDO RESPONDER O NARRAR EN INGLÉS. Aunque algunas instrucciones del sistema, fichas de compendio o títulos estén en inglés, tú DEBES traducir e interpretar todo para redactar única y exclusivamente en un español (${lang.name}) fluido, literario y natural.
+- YOUR ENTIRE PROSE OUTPUT, SCENE NARRATION, AND DIALOGUES MUST BE IN SPANISH (${lang.name.toUpperCase()}). DO NOT OUTPUT ENGLISH UNDER ANY CIRCUMSTANCES.
+`.trim();
+  }
+
   return `
-[CRITICAL INVIOLABLE DIRECTIVE: MANDATORY OUTPUT LANGUAGE / IDIOMA OBLIGATORIO]:
+[CRITICAL INVIOLABLE DIRECTIVE: MANDATORY OUTPUT LANGUAGE / IDIOMA OBLIGATORIO: ${lang.name.toUpperCase()} (${lang.name})]:
 - YOUR ENTIRE PROSE OUTPUT, SCENE NARRATION, DESCRIPTIONS, INTERNAL THOUGHTS, AND NPC DIALOGUES MUST BE EXCLUSIVELY WRITTEN IN: ${lang.name} (${lang.code.toUpperCase()}).
 - ${lang.instruction}
-- ABSOLUTE PROHIBITION AGAINST CODE-SWITCHING OR INSERTING ENGLISH WORDS (e.g. NEVER write "Trying desperately to...", always write 100% natural, expressive, literary ${lang.name}).
-- EVEN THOUGH SYSTEM PROMPTS, FORMATTING RULES, OR LABELS ARE IN ENGLISH FOR ACCURACY, NEVER REFLECT ENGLISH IN YOUR STORYTELLING OUTPUT. TRANSLATE ALL CONTEXT AND WORLD EVENTS TO NATURAL, HIGH-QUALITY ${lang.name.toUpperCase()}.
+- ABSOLUTE PROHIBITION AGAINST CODE-SWITCHING OR INSERTING ENGLISH WORDS. ALL OUTPUT MUST BE 100% NATURAL, EXPRESSIVE, LITERARY ${lang.name.toUpperCase()}.
 `.trim();
 }
 
@@ -391,27 +401,93 @@ export function cleanHeuristicVisualPrompt(text = '') {
 }
 
 /**
- * Creates LLM prompt to translate and convert character / scene descriptions into English SDXL visual tags.
+ * Detects the diffusion architecture family based on model filename/ID.
+ * @param {string} modelName
+ * @returns {'pony' | 'illustrious' | 'sdxl' | 'sd15'}
+ */
+export function detectDiffusionArchitecture(modelName = '') {
+  const lower = (modelName || '').toLowerCase();
+  if (lower.includes('pony') || lower.includes('malaanime') || lower.includes('v6.safetensors') || lower.includes('autismmix') || lower.includes('ebara')) {
+    return 'pony';
+  }
+  if (lower.includes('illustrious') || lower.includes('noobai')) {
+    return 'illustrious';
+  }
+  return 'sdxl';
+}
+
+/**
+ * Returns the optimal negative prompt based on diffusion architecture.
+ * @param {string} modelName
+ * @returns {string}
+ */
+export function getNegativePromptForModel(modelName = '') {
+  const arch = detectDiffusionArchitecture(modelName);
+  if (arch === 'pony') {
+    return 'score_6, score_5, score_4, score_3, score_2, score_1, worst quality, low quality, bad anatomy, bad hands, text, watermark, signature, frame, border, multiple people, group photo';
+  }
+  return 'blurry, low quality, deformed, distorted, text, watermark, bad anatomy, bad hands';
+}
+
+/**
+ * Adapts and formats a visual prompt specifically for the target diffusion architecture.
+ * @param {string} prompt - Base visual tags or prompt.
+ * @param {string} modelName - Selected diffusion checkpoint filename.
+ * @param {object} [options={}] - Additional flags (e.g. isNsfw).
+ * @returns {string}
+ */
+export function adaptPromptForDiffusionArchitecture(prompt = '', modelName = '', options = {}) {
+  const arch = detectDiffusionArchitecture(modelName);
+  let clean = (prompt || '').trim();
+
+  if (arch === 'pony') {
+    const isNsfw = options.isNsfw || /nsfw|erotic|nude|naked|desnud|lenceria|underwear|topless|sex|aroused/i.test(clean);
+    const ratingTag = isNsfw ? 'rating:explicit' : 'rating:general';
+    const ponyPrefix = `score_9, score_8_up, score_7_up, score_6_up, score_5_up, score_4_up, ${ratingTag}`;
+
+    // Remove any existing score tags to avoid duplication
+    clean = clean.replace(/score_\d(_up|_down)?/gi, '').replace(/rating:(general|questionable|explicit)/gi, '').trim();
+    clean = clean.replace(/^[,\s]+|[,\s]+$/g, '');
+
+    // Ensure solo subject tag if character is mentioned to prevent group photo hallucination
+    const isFemale = /\b(girl|woman|she|her|daughter|queen|princess|waifu|chica|mujer|ella|femme)\b/i.test(clean);
+    const isMale = /\b(man|boy|he|his|son|king|prince|chico|hombre|él)\b/i.test(clean);
+
+    let subjectTag = '';
+    if (!clean.includes('solo') && !clean.includes('1girl') && !clean.includes('1boy')) {
+      if (isFemale && !isMale) subjectTag = '1girl, solo, ';
+      else if (isMale && !isFemale) subjectTag = '1boy, solo, ';
+    }
+
+    return `${ponyPrefix}, ${subjectTag}${clean}, masterpiece, best quality`.replace(/,\s*,+/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '');
+  }
+
+  return clean;
+}
+
+/**
+ * Creates LLM prompt to translate and convert character / scene descriptions into English SDXL / Pony visual tags.
  * @param {string} text - The input description in any language.
  * @param {string} style - Visual style category.
+ * @param {string} [targetModel=''] - Optional diffusion model name to tailor prompt tags.
  * @returns {{ system: string, user: string }}
  */
-export function createVisualPromptTranslationPrompt(text = '', style = '') {
+export function createVisualPromptTranslationPrompt(text = '', style = '', targetModel = '') {
+  const arch = detectDiffusionArchitecture(targetModel);
+  const isPony = arch === 'pony';
+
   return {
-    system: `You are an expert AI image prompt engineer and translator for Stable Diffusion SDXL and Illustrious anime models.
-Your task is to analyze the character, creature, or scene description (which may be in Spanish or other languages) and convert it into precise, comma-separated English visual tags and descriptive keywords.
+    system: `You are an expert AI image prompt engineer and synthesizer for Stable Diffusion SDXL and Pony Diffusion anime models.
+Your task is to analyze character lore, biography, or scene descriptions (which may contain narrative prose, backstories, or Spanish text) and distill it EXCLUSIVELY into concise, comma-separated English visual tags (Danbooru tokens).
 
 CRITICAL RULES:
 1. Output ONLY English comma-separated visual tags (Danbooru / CLIP tokens).
-2. Structure the prompt logically:
-   - Subject & Species/Type (e.g. "1man, solo, anthro horse, equine humanoid", "1girl, elf sorceress", "ancient ruined temple")
-   - Physical build & Anatomy (e.g. "muscular male, tall, thick brown mane hair, horse ears, dark intelligent eyes")
-   - Clothing, Armor & Attire (e.g. "wearing leather loincloth, mismatched plate armor")
-   - Equipment, Weapons & Items (e.g. "holding spiked mace, weathered weapon")
-   - Scene, Pose & Lighting (e.g. "standing, dramatic lighting, detailed background")
-3. Translate all non-English descriptions into accurate English visual concepts.
+2. DISTILL VISUALS, IGNORE NARRATIVE PROSE:
+   - Convert abstract lore (e.g. "grew up under pressure of high society, spoiled brat who breaks men") into concrete visual tags: "1girl, solo, smug, arrogant smile, rich girl, luxury dress, jewelry, upper body, looking at viewer".
+   - Never output words like "family", "mother", "daughter", "society", "pressure", "trophy" if only a single character should be drawn.
+3. ${isPony ? 'Structure for Pony Diffusion: Focus on character appearance, outfit, pose, expression, and environment without filler words.' : 'Structure for SDXL: Include subject, detailed appearance, attire, lighting, and camera composition.'}
 4. Do NOT include conversational filler, notes, prefixes, or markdown. Output ONLY the comma-separated English tags.`,
-    user: `Convert this character/scene description into English visual diffusion tags:\n${text}`
+    user: `Convert this character or scene narrative into clean English visual diffusion tags:\n${text}`
   };
 }
 
@@ -420,14 +496,16 @@ CRITICAL RULES:
  * 
  * @param {string} prompt - Raw visual prompt.
  * @param {string} style - Selected style key.
+ * @param {string} [targetModel=''] - Target diffusion checkpoint.
  * @returns {string} Enriched English prompt with professional lighting modifiers.
  */
-export function enrichImagePrompt(prompt = '', style = 'Fantasía Oscura / Entornos') {
+export function enrichImagePrompt(prompt = '', style = 'Fantasía Oscura / Entornos', targetModel = '') {
   let cleanPrompt = cleanHeuristicVisualPrompt(prompt || '');
 
   // Resolve style preset
   const styleModifier = STYLE_PROMPT_PRESETS[style] || STYLE_PROMPT_PRESETS['Fantasía Oscura'] || 'cinematic lighting, masterpiece, high quality, highly detailed';
 
   // Compose prompt with clear illumination guarantees
-  return `${cleanPrompt}, style: ${styleModifier}, sharp focus, detailed composition`;
+  const enriched = `${cleanPrompt}, style: ${styleModifier}, sharp focus, detailed composition`;
+  return adaptPromptForDiffusionArchitecture(enriched, targetModel);
 }

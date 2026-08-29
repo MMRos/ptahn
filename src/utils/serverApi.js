@@ -54,6 +54,28 @@ export async function loadModelOnServer(modelName, baseUrl = getServerBaseUrl())
   }
 }
 
+export async function uploadImageToServer(imageDataUrl, entityId = 'asset', baseUrl = getServerBaseUrl()) {
+  if (!imageDataUrl || typeof imageDataUrl !== 'string' || !imageDataUrl.startsWith('data:image/')) {
+    return imageDataUrl;
+  }
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test' && !global.__ALLOW_TEST_NETWORK_WRITE) {
+    return imageDataUrl;
+  }
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/upload-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageDataUrl, entityId })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return (data && data.success && data.url) ? data.url : imageDataUrl;
+  } catch (error) {
+    console.warn('[serverApi]: Failed to upload image to disk:', error.message);
+    return imageDataUrl;
+  }
+}
+
 export async function fetchAppDataFromServer(baseUrl = getServerBaseUrl()) {
   try {
     const res = await fetch(`${baseUrl}/api/storage/app-data`);
@@ -65,12 +87,77 @@ export async function fetchAppDataFromServer(baseUrl = getServerBaseUrl()) {
 }
 
 export async function saveAppDataToServer(data, baseUrl = getServerBaseUrl()) {
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test' && !global.__ALLOW_TEST_NETWORK_WRITE) {
+    return { success: true };
+  }
   try {
     const res = await fetch(`${baseUrl}/api/storage/app-data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data })
     });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchChatsFromServer(baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/chats`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (error) {
+    return { success: false, chats: [], error: error.message };
+  }
+}
+
+export async function saveChatsToServer(chats, baseUrl = getServerBaseUrl()) {
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test' && !global.__ALLOW_TEST_NETWORK_WRITE) {
+    return { success: true };
+  }
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/chats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chats })
+    });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchSettingsFromServer(baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/settings`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (error) {
+    return { success: false, settings: null, error: error.message };
+  }
+}
+
+export async function saveSettingsToServer(settings, baseUrl = getServerBaseUrl()) {
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test' && !global.__ALLOW_TEST_NETWORK_WRITE) {
+    return { success: true };
+  }
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings })
+    });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchAllStorageFromServer(baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/all`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (error) {
     return { success: false, error: error.message };

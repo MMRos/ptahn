@@ -14,6 +14,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import ASSET_LIBRARY from '../data/assets';
 import { generateImageLocal } from '../utils/localAIStudio';
+import { uploadImageToServer } from '../utils/serverApi';
 import ImageCropperModal from './ImageCropperModal';
 
 export default function MediaPickerModal({
@@ -120,13 +121,21 @@ export default function MediaPickerModal({
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!previewUrl) {
       alert('Por favor selecciona, sube o genera una imagen primero.');
       return;
     }
+    let finalUrl = previewUrl;
+    if (previewUrl.startsWith('data:image/')) {
+      try {
+        finalUrl = await uploadImageToServer(previewUrl, isAvatar ? 'avatar' : 'cover');
+      } catch (e) {
+        console.warn('Image upload fallback to dataUrl:', e);
+      }
+    }
     if (onSave) {
-      onSave(previewUrl);
+      onSave(finalUrl);
     }
     onClose();
   };

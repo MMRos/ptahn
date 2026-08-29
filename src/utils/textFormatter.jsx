@@ -94,6 +94,35 @@ export function findMatchingEntity(rawName, appData) {
 }
 
 /**
+ * Sanitizes and cleans conflicting typographical tokens:
+ * - Fixes `*"dialogue"*` or `"*dialogue*"` -> `"dialogue"`
+ * - Fixes `*~thought~*` or `~*thought*~` -> `~thought~`
+ * - Strips leading/trailing asterisks inside dialogue quotation marks
+ * 
+ * @param {string} text 
+ * @returns {string}
+ */
+export function sanitizeTypography(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    // 1. Fix quote wrapped in asterisks: *"Hello"* -> "Hello"
+    .replace(/\*+"([^"\n]+)"\*+/g, '"$1"')
+    // 2. Fix asterisks wrapped inside quotes: "*Hello*" -> "Hello"
+    .replace(/"\*+([^*"\n]+)\*+"/g, '"$1"')
+    // 3. Fix thoughts wrapped in asterisks: *~Thought~* -> ~Thought~
+    .replace(/\*+~([^~\n]+)~\*+/g, '~$1~')
+    // 4. Fix asterisks inside thought tildes: ~*Thought*~ -> ~Thought~
+    .replace(/~\*+([^*~\n]+)\*+~/g, '~$1~')
+    // 5. Fix quotes wrapped in tildes: ~"Dialogue"~ -> "Dialogue"
+    .replace(/~+"([^"\n]+)"+~/g, '"$1"')
+    // 6. Fix tildes wrapped in quotes: "~Dialogue~" -> "~Dialogue~"
+    .replace(/"~+([^~"\n]+)~+"/g, '~$1~')
+    // 7. Clean any residual `"*word` or `word*"`
+    .replace(/"\*+([^*"\n]+)/g, '"$1')
+    .replace(/([^*"\n]+)\*+"/g, '$1"');
+}
+
+/**
  * Parses inline typographical tokens:
  * - Highlights: ==term== (interactive tag/compendium card link)
  * - Actions: *action* (third-person action/narration)
@@ -108,9 +137,10 @@ export function findMatchingEntity(rawName, appData) {
  */
 export function renderInlineFormattedText(rawText, onTagClick, appData) {
   if (!rawText) return null;
+  const sanitized = sanitizeTypography(rawText);
   // Match bold (**...**), actions (*...*), dialogue ("..."), thoughts (~...~), tags (==...==)
   const regex = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|"[^"\n]+(?:"|$)|~[^~\n]+(?:~|$)|==[^=\n]+(?:==|$))/g;
-  const parts = rawText.split(regex);
+  const parts = sanitized.split(regex);
 
   return parts.map((part, j) => {
     if (!part) return null;
@@ -122,28 +152,35 @@ export function renderInlineFormattedText(rawText, onTagClick, appData) {
 
     // Action: *narrative action*
     if (part.startsWith('*') && part.endsWith('*') && part.length >= 2) {
+      const actionText = part.slice(1, -1).trim();
       return (
         <em key={j} className="msg-action">
           <FontAwesomeIcon icon={faRunning} className="msg-type-icon action-icon" />
-          {part.slice(1, -1)}
+          {actionText}
         </em>
       );
     }
 
     // Dialogue: "speech"
     if (part.startsWith('"') && part.length >= 2) {
-      const dialogueText = part.endsWith('"') ? part : `${part}"`;
+      let rawInner = part.endsWith('"') ? part.slice(1, -1) : part.slice(1);
+      // Strip any internal asterisks or tildes that might have slipped into dialogue
+      rawInner = rawInner.replace(/^[*~]+|[*~]+$/g, '').trim();
       return (
         <span key={j} className="msg-dialogue">
           <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
-          {dialogueText}
+          {`"${rawInner}"`}
         </span>
       );
     }
 
     // Thought: ~thought~
     if (part.startsWith('~') && part.length >= 2) {
-      const thoughtText = part.endsWith('~') ? part.slice(1, -1) : part.slice(1);
+      const thoughtText = (part.endsWith('~') ? part.slice(1, -1) : part.slice(1)).trim();
+      // If thought text is an entire descriptive paragraph (>200 chars), display as plain prose
+      if (thoughtText.length > 200) {
+        return <span key={j} className="msg-prose">{thoughtText}</span>;
+      }
       return (
         <span key={j} className="msg-thought">
           <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />

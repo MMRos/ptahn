@@ -5,7 +5,7 @@
  * using an intelligent lightweight SLM orchestrator.
  */
 
-import { sendChatMessage } from './localAIStudio';
+import { sendChatMessage, resolveIntermediaryModelId } from './localAIStudio';
 import { filterAndSortRelevantCards } from './weightCalculator';
 
 /**
@@ -16,7 +16,8 @@ import { filterAndSortRelevantCards } from './weightCalculator';
  * @returns {Object}
  */
 export function parseOrchestratorInboundJSON(rawOutput = '', fallbackText = '') {
-  if (!rawOutput || typeof rawOutput !== 'string') {
+  const text = typeof rawOutput === 'object' ? (rawOutput?.text || '') : String(rawOutput || '');
+  if (!text || !text.trim()) {
     return {
       translatedInput: fallbackText,
       semanticScores: {},
@@ -26,7 +27,7 @@ export function parseOrchestratorInboundJSON(rawOutput = '', fallbackText = '') 
   }
 
   try {
-    const cleaned = rawOutput
+    const cleaned = text
       .replace(/```json/gi, '')
       .replace(/```/g, '')
       .trim();
@@ -35,8 +36,8 @@ export function parseOrchestratorInboundJSON(rawOutput = '', fallbackText = '') 
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       return {
-        translatedInput: parsed.translatedInput || fallbackText,
-        semanticScores: parsed.semanticScores || {},
+        translatedInput: (parsed.translatedInput && parsed.translatedInput.trim().length > 0) ? parsed.translatedInput.trim() : fallbackText,
+        semanticScores: (parsed.semanticScores && typeof parsed.semanticScores === 'object') ? parsed.semanticScores : {},
         contextSummary: parsed.contextSummary || '',
         sceneContext: parsed.sceneContext || {}
       };
@@ -56,12 +57,13 @@ export function parseOrchestratorInboundJSON(rawOutput = '', fallbackText = '') 
 /**
  * Parses JSON block from raw outbound SLM response.
  * 
- * @param {string} rawOutput
+ * @param {string|Object} rawOutput
  * @param {string} fallbackText
  * @returns {Object}
  */
 export function parseOrchestratorOutboundJSON(rawOutput = '', fallbackText = '') {
-  if (!rawOutput || typeof rawOutput !== 'string') {
+  const text = typeof rawOutput === 'object' ? (rawOutput?.text || '') : String(rawOutput || '');
+  if (!text || !text.trim()) {
     return {
       formattedText: fallbackText,
       areaA_expression: null,
@@ -72,7 +74,7 @@ export function parseOrchestratorOutboundJSON(rawOutput = '', fallbackText = '')
   }
 
   try {
-    const cleaned = rawOutput
+    const cleaned = text
       .replace(/```json/gi, '')
       .replace(/```/g, '')
       .trim();
@@ -80,8 +82,11 @@ export function parseOrchestratorOutboundJSON(rawOutput = '', fallbackText = '')
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      const validFormatted = (parsed.formattedText && typeof parsed.formattedText === 'string' && parsed.formattedText.trim().length > 3)
+        ? parsed.formattedText.trim()
+        : fallbackText;
       return {
-        formattedText: parsed.formattedText || fallbackText,
+        formattedText: validFormatted,
         areaA_expression: parsed.areaA_expression || null,
         areaB_location: parsed.areaB_location || null,
         discoveredEntities: Array.isArray(parsed.discoveredEntities) ? parsed.discoveredEntities : [],
@@ -158,7 +163,7 @@ export async function executeInboundOrchestration({
   chatSettings = {},
   baseUrl
 }) {
-  const modelToUse = orchestratorModel || chatSettings.orchestratorModel || chatSettings.preferredModel;
+  const modelToUse = await resolveIntermediaryModelId(orchestratorModel || chatSettings.orchestratorModel, baseUrl || chatSettings.lmStudioUrl);
   
   if (!modelToUse) {
     return {
@@ -197,7 +202,8 @@ Respond ONLY with valid JSON.`;
       modelId: modelToUse,
       baseUrl: baseUrl || chatSettings.lmStudioUrl,
       temperature: 0.1,
-      maxTokens: 500
+      maxTokens: 500,
+      callerType: 'INTERMEDIARY_SLM'
     });
 
     const parsed = parseOrchestratorInboundJSON(response, userMessage);
@@ -245,7 +251,7 @@ export async function executeOutboundOrchestration({
   chatSettings = {},
   baseUrl
 }) {
-  const modelToUse = orchestratorModel || chatSettings.orchestratorModel || chatSettings.preferredModel;
+  const modelToUse = await resolveIntermediaryModelId(orchestratorModel || chatSettings.orchestratorModel, baseUrl || chatSettings.lmStudioUrl);
 
   if (!modelToUse) {
     return {
@@ -257,13 +263,18 @@ export async function executeOutboundOrchestration({
     };
   }
 
+  const langCode = typeof targetLang === 'object' ? (targetLang.code || 'es') : (targetLang || 'es');
+  const isSpanish = langCode === 'es';
+
   const systemPrompt = `You are Ptahn's High-Speed Post-Processing Orchestrator.
 Your job is to parse the storyteller's raw narrative and return a SINGLE valid JSON object with:
-1. "formattedText": The narrative translated to language code "${targetLang}" with STRICT typographical formatting:
-   - Spoken NPC dialogue MUST be in double quotes: "Hello."
-   - Silent thoughts MUST be in tildes: ~I wonder...~
-   - Actions and descriptions MUST be in asterisks: *She smiled.*
-   - Key entities and proper names wrapped in equal signs: ==The Forge==.
+1. "formattedText": The narrative translated faithfully into ${isSpanish ? 'Spanish (Español)' : `language code "${langCode}"`} with clean, literary formatting:
+   - Spoken NPC dialogue MUST be strictly in double quotes without internal asterisks: "¡Hola!" (NEVER "*¡Hola!*" and NEVER *"¡Hola!"*).
+   - Silent internal thoughts MUST be in tildes: ~Qué extraño...~ (NEVER *~...~*).
+   - General narrative prose MUST be standard clean paragraph text without wrapping full sentences or descriptions in asterisks.
+   - Specific short inline actions/gestures can be in asterisks: *sonríe con picardía*.
+   - Key entities and proper names wrapped in equal signs: ==La Forja==, ==Azgael==.
+   ${isSpanish ? '- MANDATORY: The entire formatted narrative MUST be 100% in natural Spanish. Do NOT output English.' : ''}
 2. "areaA_expression": { "characterName": "...", "expression": "smiling / battle / neutral" } or null if no character is active.
 3. "areaB_location": { "locationName": "..." } or null.
 4. "discoveredEntities": Array of any new items, NPCs, or places mentioned for the first time: [{ "name": "...", "type": "Objeto|Lugar|Personaje", "summary": "..." }].
@@ -280,7 +291,8 @@ Respond ONLY with valid JSON.`;
       modelId: modelToUse,
       baseUrl: baseUrl || chatSettings.lmStudioUrl,
       temperature: 0.1,
-      maxTokens: 800
+      maxTokens: 800,
+      callerType: 'INTERMEDIARY_SLM'
     });
 
     const parsed = parseOrchestratorOutboundJSON(response, rawNarrative);

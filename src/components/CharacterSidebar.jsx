@@ -21,16 +21,103 @@ export default function CharacterSidebar({
   onInspectCharacter,
   onGeneratePortrait,
   isGeneratingPortrait = false,
+  availableCharacters = [],
+  onSelectCharacter,
+  onOpenCreateModal,
   onClose 
 }) {
   const [showGallery, setShowGallery] = useState(false);
 
   if (!character) {
     return (
-      <aside className="chat-zone-b empty">
-        <div className="zone-b-placeholder">
-          <FontAwesomeIcon icon={faUserAstronaut} className="placeholder-icon" />
-          <p>Sin personaje enfocado</p>
+      <aside className="chat-zone-b empty" aria-label="Panel Lateral de Personajes (Zona B)">
+        {/* Botón de cierre */}
+        <button 
+          type="button" 
+          className="zone-b-close-btn" 
+          title="Ocultar panel de personaje (Zona B)" 
+          onClick={onClose}
+        >
+          <FontAwesomeIcon icon={faTimes} />
+        </button>
+
+        <div className="zone-b-portrait-card">
+          <div className="zone-b-image-wrap" style={{ minHeight: '340px' }}>
+            <div className="zone-b-no-image" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '14px', padding: '24px', textAlign: 'center' }}>
+              <div style={{
+                width: '72px',
+                height: '72px',
+                borderRadius: '50%',
+                background: 'rgba(255, 211, 107, 0.1)',
+                border: '1px solid rgba(255, 211, 107, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <FontAwesomeIcon icon={faUserAstronaut} size="2x" style={{ color: '#ffd36b' }} />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ color: '#ffd36b', fontWeight: 'bold', fontSize: '0.95rem' }}>Zona B: Retrato de Personaje</span>
+                <span style={{ color: 'rgba(255, 255, 255, 0.65)', fontSize: '0.78rem', lineHeight: '1.4' }}>
+                  El retrato se enfocará automáticamente cuando un personaje hable o actúe en la historia.
+                </span>
+              </div>
+
+              {availableCharacters.length > 0 && (
+                <div style={{ width: '100%', marginTop: '6px' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'block', marginBottom: '6px' }}>
+                    Personajes de este escenario:
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                    {availableCharacters.map(char => (
+                      <button
+                        key={char.id}
+                        type="button"
+                        onClick={() => onSelectCharacter && onSelectCharacter(char)}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.06)',
+                          border: '1px solid rgba(255, 211, 107, 0.3)',
+                          color: '#ffd36b',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '0.74rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {char.title || char.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {onOpenCreateModal && (
+                <button
+                  type="button"
+                  onClick={() => onOpenCreateModal('Personaje')}
+                  style={{
+                    background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                    border: 'none',
+                    color: '#0d0e16',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    fontSize: '0.78rem',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 4px 14px rgba(255, 211, 107, 0.25)',
+                    marginTop: '8px'
+                  }}
+                >
+                  <FontAwesomeIcon icon={faUserAstronaut} />
+                  <span>+ Crear Personaje en Escenario</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </aside>
     );
@@ -134,9 +221,9 @@ export default function CharacterSidebar({
             <h3 className="zone-b-name">{character.title || character.name}</h3>
 
             {/* Badge de Expresión Contextual Detectada */}
-            <div className="zone-b-expression-badge" title={`Expresión actual: ${effectiveImage.label || 'Normal'}`}>
+            <div className="zone-b-expression-badge" title={`Expresión / Etiquetas actuales: ${effectiveImage.tags || effectiveImage.label || 'Principal'}`}>
               <FontAwesomeIcon icon={faSmile} />
-              <span>{effectiveImage.label || 'Normal / Principal'}</span>
+              <span>{effectiveImage.tags || effectiveImage.label || 'Normal / Principal'}</span>
             </div>
           </div>
         </div>

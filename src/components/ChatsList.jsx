@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getAllChats } from '../utils/db';
+import { getAllChats, getChatActivityTimestamp } from '../utils/db';
 import ScenarioCard from './ScenarioCard';
 import './chats.css';
 
@@ -9,7 +9,7 @@ export default function ChatsList({ onOpen, appData = {} }) {
   useEffect(() => {
     let mounted = true;
     getAllChats().then(data => { 
-      if (mounted) setChats((data || []).slice().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt))); 
+      if (mounted) setChats((data || []).slice().sort((a, b) => getChatActivityTimestamp(b) - getChatActivityTimestamp(a))); 
     }).catch(err => console.error(err));
     return () => { mounted = false; };
   }, []);

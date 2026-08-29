@@ -132,4 +132,18 @@ describe('Text Formatter Tests', () => {
     expect(dialogueSpan).toBeInTheDocument();
     expect(dialogueSpan.textContent).toContain('¡Hola aventurero en proceso');
   });
+
+  test('cleans quotes with asterisks ("*dialogue*" and *"dialogue"*) into clean dialogue without asterisks', () => {
+    const rawText = '"*¡Dueño!*" she wraps her arms around your neck. "*¡Hmmm! ¡Si! ¡Mas!*" *~Ahhh... secreto~*';
+    const { container } = render(<FormattedMessageText text={rawText} />);
+    
+    const dialogues = container.querySelectorAll('.msg-dialogue');
+    expect(dialogues.length).toBe(2);
+    expect(dialogues[0].textContent).toBe('"¡Dueño!"');
+    expect(dialogues[1].textContent).toBe('"¡Hmmm! ¡Si! ¡Mas!"');
+
+    const thoughts = container.querySelectorAll('.msg-thought');
+    expect(thoughts.length).toBe(1);
+    expect(thoughts[0].textContent).toContain('Ahhh... secreto');
+  });
 });

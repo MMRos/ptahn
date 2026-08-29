@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { faBars, faAngleDoubleLeft, faUser, faHome, faPlusSquare, faList, faEye, faCopy, faTrash, faMusic } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import './sidebar.css';
-import { getAllChats } from '../utils/db';
+import { getAllChats, getChatActivityTimestamp } from '../utils/db';
 
 function Sidebar({ appData = {}, onNavigate = () => {}, onOpenChat = () => {}, onInspectScenario, onCopyChat, onDeleteChat, recentChats }) {
   const [open, setOpen] = useState(() => {
@@ -34,7 +34,7 @@ function Sidebar({ appData = {}, onNavigate = () => {}, onOpenChat = () => {}, o
   const [chats, setChats] = useState([]);
   useEffect(()=>{
     if (Array.isArray(recentChats)) {
-      const sorted = recentChats.slice().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+      const sorted = recentChats.slice().sort((a, b) => getChatActivityTimestamp(b) - getChatActivityTimestamp(a));
       setChats(sorted);
     }
   }, [recentChats]);
@@ -45,7 +45,7 @@ function Sidebar({ appData = {}, onNavigate = () => {}, onOpenChat = () => {}, o
     getAllChats().then(data => {
       if (!mounted) return;
       if (Array.isArray(data)) {
-        const sorted = data.slice().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+        const sorted = data.slice().sort((a, b) => getChatActivityTimestamp(b) - getChatActivityTimestamp(a));
         setChats(sorted);
       }
     }).catch(() => {});

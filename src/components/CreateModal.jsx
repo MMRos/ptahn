@@ -12,13 +12,20 @@ import {
   faBoxes, 
   faTrashAlt, 
   faCheck,
-  faMagic
+  faMagic,
+  faEdit
 } from '@fortawesome/free-solid-svg-icons';
 import ConnectionSelector from './ConnectionSelector';
 import ImageCropperModal from './ImageCropperModal';
 import BatchCropperModal from './BatchCropperModal';
 import NarratorForm from './NarratorForm';
 import ToolWorkshopForm from './ToolWorkshopForm';
+import { 
+  CHARACTER_TAG_PRESETS, 
+  LOCATION_TAG_PRESETS, 
+  classifyImageWithAI, 
+  toggleTagInString 
+} from '../utils/imageTagging';
 import { generateImageLocal } from '../utils/localAIStudio';
 import '../pages/create.css';
 
@@ -152,6 +159,11 @@ export default function CreateModal({
   // States para etiquetas (Tags)
   const [selectedTags, setSelectedTags] = useState([]);
   const [tagQuery, setTagQuery] = useState('');
+
+  // States para clasificación on-demand y presets de imágenes
+  const [classifyingImgId, setClassifyingImgId] = useState(null);
+  const [openPresetImgId, setOpenPresetImgId] = useState(null);
+  const [isClassifyingAll, setIsClassifyingAll] = useState(false);
   const [showTagDropdown, setShowTagDropdown] = useState(false);
 
   // States específicos para Escenario
@@ -213,13 +225,15 @@ export default function CreateModal({
   const [highlightedTraitIndex, setHighlightedTraitIndex] = useState(-1);
   const [highlightedNestedTraitIndex, setHighlightedNestedTraitIndex] = useState(-1);
 
-  // States para creación de tarjeta anidada (in-situ)
+  // States para creación / edición de tarjeta anidada (in-situ)
+  const [nestedEditingCardId, setNestedEditingCardId] = useState(null);
   const [nestedCardType, setNestedCardType] = useState(null);
   const [nestedCardTitle, setNestedCardTitle] = useState('');
   const [nestedCardIntro, setNestedCardIntro] = useState('');
   const [nestedCardText, setNestedCardText] = useState('');
   const [nestedCardCover, setNestedCardCover] = useState('');
   const [nestedCardTraits, setNestedCardTraits] = useState([]);
+  const [nestedCardTags, setNestedCardTags] = useState([]);
   const [nestedTraitQuery, setNestedTraitQuery] = useState('');
   const [showNestedTraitDropdown, setShowNestedTraitDropdown] = useState(false);
   const [nestedCharacterImages, setNestedCharacterImages] = useState([]); // [{ id, url, label, isDefault }]
@@ -565,9 +579,71 @@ export default function CreateModal({
     setIsDirty(true);
   };
 
-  const handleUpdateCharacterImageLabel = (id, newLabel) => {
-    setCharacterImages(prev => prev.map(img => img.id === id ? { ...img, label: newLabel } : img));
+  const handleUpdateCharacterImageTags = (id, newTags) => {
+    setCharacterImages(prev => prev.map(img => img.id === id ? { ...img, tags: newTags, label: img.label || newTags } : img));
     setIsDirty(true);
+  };
+
+  const handleToggleTag = (id, tagToToggle) => {
+    const target = characterImages.find(i => i.id === id);
+    const current = target?.tags !== undefined ? target.tags : (target?.label || '');
+    const next = toggleTagInString(current, tagToToggle);
+    handleUpdateCharacterImageTags(id, next);
+  };
+
+  const handleClassifyCharacterImage = async (id, targetType = (itemType === 'Lugar' ? 'Lugar' : 'Personaje')) => {
+    const img = characterImages.find(i => i.id === id);
+    if (!img) return;
+    setClassifyingImgId(id);
+    try {
+      const suggested = await classifyImageWithAI({
+        imageUrl: img.url,
+        entityType: targetType,
+        entityTitle: title || '',
+        entityDesc: intro || text || presentation || '',
+        currentLabel: img.label || '',
+        currentTags: img.tags || '',
+        prompt: charAiPrompt || coverAiPrompt || ''
+      });
+      if (suggested) {
+        handleUpdateCharacterImageTags(id, suggested);
+      }
+    } catch (err) {
+      console.warn('Auto classification error:', err);
+    } finally {
+      setClassifyingImgId(null);
+    }
+  };
+
+  const handleClassifyAllImages = async () => {
+    if (characterImages.length === 0 || isClassifyingAll) return;
+    setIsClassifyingAll(true);
+    try {
+      const updated = [...characterImages];
+      for (let i = 0; i < updated.length; i++) {
+        const item = updated[i];
+        setClassifyingImgId(item.id);
+        const suggested = await classifyImageWithAI({
+          imageUrl: item.url,
+          entityType: itemType === 'Lugar' ? 'Lugar' : 'Personaje',
+          entityTitle: title || '',
+          entityDesc: intro || text || presentation || '',
+          currentLabel: item.label || '',
+          currentTags: item.tags || '',
+          prompt: charAiPrompt || coverAiPrompt || ''
+        });
+        if (suggested) {
+          updated[i] = { ...item, tags: suggested, label: item.label || suggested };
+        }
+      }
+      setCharacterImages(updated);
+      setIsDirty(true);
+    } catch (err) {
+      console.warn('Batch classification error:', err);
+    } finally {
+      setClassifyingImgId(null);
+      setIsClassifyingAll(false);
+    }
   };
 
   const handleReCropCharacterImage = (img) => {
@@ -597,8 +673,38 @@ export default function CreateModal({
     });
   };
 
-  const handleUpdateNestedCharacterImageLabel = (id, newLabel) => {
-    setNestedCharacterImages(prev => prev.map(img => img.id === id ? { ...img, label: newLabel } : img));
+  const handleUpdateNestedCharacterImageTags = (id, newTags) => {
+    setNestedCharacterImages(prev => prev.map(img => img.id === id ? { ...img, tags: newTags, label: img.label || newTags } : img));
+  };
+
+  const handleToggleNestedTag = (id, tagToToggle) => {
+    const target = nestedCharacterImages.find(i => i.id === id);
+    const current = target?.tags !== undefined ? target.tags : (target?.label || '');
+    const next = toggleTagInString(current, tagToToggle);
+    handleUpdateNestedCharacterImageTags(id, next);
+  };
+
+  const handleClassifyNestedCharacterImage = async (id, targetType = 'Personaje') => {
+    const img = nestedCharacterImages.find(i => i.id === id);
+    if (!img) return;
+    setClassifyingImgId(id);
+    try {
+      const suggested = await classifyImageWithAI({
+        imageUrl: img.url,
+        entityType: targetType,
+        entityTitle: nestedCardTitle || '',
+        entityDesc: nestedCardIntro || nestedCardText || '',
+        currentLabel: img.label || '',
+        currentTags: img.tags || ''
+      });
+      if (suggested) {
+        handleUpdateNestedCharacterImageTags(id, suggested);
+      }
+    } catch (err) {
+      console.warn('Auto nested classification error:', err);
+    } finally {
+      setClassifyingImgId(null);
+    }
   };
 
   const handleReCropNestedCharacterImage = (img) => {
@@ -674,6 +780,30 @@ export default function CreateModal({
     }
   };
 
+  const handleOpenEditNestedCard = (card) => {
+    if (!card) return;
+    setNestedEditingCardId(card.id);
+    setNestedCardType(card.type || 'Personaje');
+    setNestedCardTitle(card.title || card.name || '');
+    setNestedCardIntro(card.intro || '');
+    setNestedCardText(card.text || '');
+    setNestedCardCover(card.cover || '');
+    setNestedCardTraits(card.traits || []);
+    setNestedCardTags(card.tags || []);
+    const role = card.characterRole || (card.isPlayable ? 'playable' : (card.isUserPersona ? 'user_persona' : 'user_persona'));
+    setNestedCharacterRole(role);
+    setNestedImportance(typeof card.importance === 'number' ? card.importance : 5);
+    setNestedIsPinned(Boolean(card.isPinned));
+    setNestedActivationMode(card.activationMode || 'dynamic');
+    if (Array.isArray(card.images) && card.images.length > 0) {
+      setNestedCharacterImages(card.images);
+    } else if (card.cover) {
+      setNestedCharacterImages([{ id: 'img-default', url: card.cover, label: 'Principal', isDefault: true }]);
+    } else {
+      setNestedCharacterImages([]);
+    }
+  };
+
   const handleSaveNestedCard = () => {
     const trimmedTitle = nestedCardTitle.trim();
     if (!trimmedTitle) {
@@ -682,71 +812,76 @@ export default function CreateModal({
     }
 
     if (nestedCardType === 'Herramienta') {
-      const newTool = {
-        id: `tool-${Date.now()}`,
+      const toolData = {
+        id: nestedEditingCardId || `tool-${Date.now()}`,
         name: trimmedTitle,
         toolType: 'attributes',
         description: nestedCardIntro.trim() || nestedCardText.trim(),
         config: {},
-        createdAt: new Date().toISOString()
+        updatedAt: new Date().toISOString()
       };
-      onSaveItem({ type: 'tool', data: newTool, isEdit: false });
-      setNarratorTools(prev => [...prev, newTool.id]);
+      if (!nestedEditingCardId) toolData.createdAt = new Date().toISOString();
+      onSaveItem({ type: 'tool', data: toolData, isEdit: Boolean(nestedEditingCardId) });
+      if (!nestedEditingCardId) setNarratorTools(prev => [...prev, toolData.id]);
     } else {
       const primaryImg = nestedCharacterImages.find(img => img.isDefault) || nestedCharacterImages[0];
       const finalCover = (nestedCardType === 'Personaje' && primaryImg ? primaryImg.url : nestedCardCover).trim();
+      const existingCard = nestedEditingCardId ? ((appData.cards || []).find(c => c.id === nestedEditingCardId) || {}) : {};
 
-      const newCard = {
-        id: `card-${Date.now()}`,
+      const cardData = {
+        ...existingCard,
+        id: nestedEditingCardId || `card-${Date.now()}`,
         type: nestedCardType,
         title: trimmedTitle,
         intro: nestedCardIntro.trim(),
         text: nestedCardText.trim(),
         cover: finalCover,
         images: nestedCardType === 'Personaje' ? nestedCharacterImages : (finalCover ? [{ id: 'img-1', url: finalCover, label: 'Principal', isDefault: true }] : []),
-        nsfw: false,
-        public: false,
-        tags: [],
-        connectedCards: [],
-        traits: nestedCardType === 'Personaje' ? nestedCardTraits : [],
-        characterRole: nestedCardType === 'Personaje' ? nestedCharacterRole : undefined,
-        isPlayable: nestedCardType === 'Personaje' ? (nestedCharacterRole === 'playable') : undefined,
-        isUserPersona: nestedCardType === 'Personaje' ? (nestedCharacterRole === 'user_persona') : undefined,
+        nsfw: existingCard.nsfw || false,
+        public: existingCard.public || false,
+        tags: nestedCardTags.length > 0 ? nestedCardTags : (existingCard.tags || []),
+        connectedCards: existingCard.connectedCards || [],
+        traits: nestedCardType === 'Personaje' ? nestedCardTraits : (existingCard.traits || []),
+        characterRole: nestedCardType === 'Personaje' ? nestedCharacterRole : existingCard.characterRole,
+        isPlayable: nestedCardType === 'Personaje' ? (nestedCharacterRole === 'playable') : existingCard.isPlayable,
+        isUserPersona: nestedCardType === 'Personaje' ? (nestedCharacterRole === 'user_persona') : existingCard.isUserPersona,
         importance: typeof nestedImportance === 'number' ? nestedImportance : 5,
         isPinned: Boolean(nestedIsPinned),
         activationMode: nestedActivationMode || 'dynamic',
         // Campos de Memoria
-
-
-        summary: nestedCardType === 'Memoria' ? (nestedCardIntro.trim() || nestedCardText.trim()) : undefined,
-        impact: nestedCardType === 'Memoria' ? 'Medio' : undefined,
-        linkedCharacters: nestedCardType === 'Memoria' && itemType === 'Personaje' ? [(editItem?.id || title)] : [],
-        linkedScenario: nestedCardType === 'Memoria' && itemType === 'Escenario' ? (editItem?.id || title) : '',
-        timeline: nestedCardType === 'Memoria' ? 'Hito inicial' : undefined,
+        summary: nestedCardType === 'Memoria' ? (nestedCardIntro.trim() || nestedCardText.trim()) : existingCard.summary,
+        impact: nestedCardType === 'Memoria' ? (existingCard.impact || 'Medio') : existingCard.impact,
+        linkedCharacters: nestedCardType === 'Memoria' ? (existingCard.linkedCharacters || (itemType === 'Personaje' ? [(editItem?.id || title)] : [])) : existingCard.linkedCharacters,
+        linkedScenario: nestedCardType === 'Memoria' ? (existingCard.linkedScenario || (itemType === 'Escenario' ? (editItem?.id || title) : '')) : existingCard.linkedScenario,
+        timeline: nestedCardType === 'Memoria' ? (existingCard.timeline || 'Hito inicial') : existingCard.timeline,
         // Campos de Inventario
-        linkedCharacterId: nestedCardType === 'Inventario' && itemType === 'Personaje' ? (editItem?.id || title) : '',
-        items: nestedCardType === 'Inventario' ? [
+        linkedCharacterId: nestedCardType === 'Inventario' ? (existingCard.linkedCharacterId || (itemType === 'Personaje' ? (editItem?.id || title) : '')) : existingCard.linkedCharacterId,
+        items: nestedCardType === 'Inventario' ? (existingCard.items || [
           { id: `item-${Date.now()}-1`, name: 'Pertenencias iniciales', qty: 1, rarity: 'Común', equipped: true, desc: 'Equipo personal del personaje.' }
-        ] : undefined,
-        capacity: nestedCardType === 'Inventario' ? '20 kg / 10 slots' : undefined,
-        createdAt: new Date().toISOString()
+        ]) : existingCard.items,
+        capacity: nestedCardType === 'Inventario' ? (existingCard.capacity || '20 kg / 10 slots') : existingCard.capacity,
+        updatedAt: new Date().toISOString()
       };
+      if (!nestedEditingCardId) cardData.createdAt = new Date().toISOString();
+
       // Guardar globalmente
-      onSaveItem({ type: 'card', data: newCard, isEdit: false });
-      // Conectar al escenario actual si estamos en escenario
-      if (itemType === 'Escenario') {
-        setSelectedCards(prev => [...prev, newCard.id]);
+      onSaveItem({ type: 'card', data: cardData, isEdit: Boolean(nestedEditingCardId) });
+      // Conectar al escenario actual si es nueva y estamos en escenario
+      if (!nestedEditingCardId && itemType === 'Escenario') {
+        setSelectedCards(prev => [...prev, cardData.id]);
       }
     }
 
     setIsDirty(true);
     // Limpiar estados y cerrar sub-modal
+    setNestedEditingCardId(null);
     setNestedCardType(null);
     setNestedCardTitle('');
     setNestedCardIntro('');
     setNestedCardText('');
     setNestedCardCover('');
     setNestedCardTraits([]);
+    setNestedCardTags([]);
     setNestedTraitQuery('');
     setShowNestedTraitDropdown(false);
     setHighlightedNestedTraitIndex(-1);
@@ -1201,50 +1336,78 @@ export default function CreateModal({
             {/* 1. Imagen de portada / Galería de Expresiones AL INICIO */}
             {itemType === 'Personaje' ? (
               <div className="field-group" style={{ marginBottom: '14px', background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '8px' }}>
                   <div>
                     <label style={{ fontSize: '0.85rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <FontAwesomeIcon icon={faImage} /> Imágenes y Expresiones del Personaje ({characterImages.length})
                     </label>
 
                     <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', display: 'block', marginTop: '2px' }}>
-                      Añade múltiples retratos y nómbralos (ej: Normal, Alegre, Enfadado, Con armadura). La IA los identificará para ilustrar reacciones y generar nuevas imágenes.
+                      Añade múltiples retratos y etiquétalos en inglés (ej: school uniform, bikini, aroused, kneeling). La IA los identificará por contexto.
                     </span>
                   </div>
+
+                  {characterImages.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClassifyAllImages}
+                      disabled={isClassifyingAll}
+                      style={{
+                        background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                        border: 'none',
+                        color: '#0d0e16',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontSize: '0.72rem',
+                        fontWeight: '700',
+                        cursor: isClassifyingAll ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        boxShadow: '0 2px 8px rgba(255,211,107,0.25)'
+                      }}
+                      title="Clasificar todas las fotos automáticamente con IA en lote"
+                    >
+                      <FontAwesomeIcon icon={faMagic} spin={isClassifyingAll} />
+                      <span>{isClassifyingAll ? 'Clasificando con IA...' : '✨ Clasificar todas con IA'}</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Lista de Imágenes Existentes */}
                 {characterImages.length > 0 && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', marginTop: '12px', marginBottom: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(185px, 1fr))', gap: '12px', marginTop: '12px', marginBottom: '14px' }}>
                     {characterImages.map((img, idx) => (
                       <div 
                         key={img.id || idx}
                         style={{
                           background: img.isDefault ? 'rgba(255, 211, 107, 0.08)' : 'rgba(255,255,255,0.03)',
-                          border: img.isDefault ? '1.5px solid rgba(255, 211, 107, 0.5)' : '1px solid rgba(255,255,255,0.08)',
-                          borderRadius: '8px',
+                          border: img.isDefault ? '1.5px solid rgba(255, 211, 107, 0.6)' : '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '10px',
                           overflow: 'hidden',
                           display: 'flex',
                           flexDirection: 'column',
-                          position: 'relative'
+                          position: 'relative',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.4)'
                         }}
                       >
                         {/* Badge de Principal */}
                         {img.isDefault && (
                           <div style={{
                             position: 'absolute',
-                            top: '4px',
-                            left: '4px',
+                            top: '6px',
+                            left: '6px',
                             background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
                             color: '#000',
-                            fontSize: '0.65rem',
+                            fontSize: '0.68rem',
                             fontWeight: 'bold',
-                            padding: '2px 6px',
+                            padding: '2px 8px',
                             borderRadius: '4px',
                             zIndex: 3,
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '3px'
+                            gap: '4px',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.5)'
                           }}>
                             <FontAwesomeIcon icon={faStar} /> Portada
                           </div>
@@ -1256,19 +1419,19 @@ export default function CreateModal({
                           onClick={() => handleRemoveCharacterImage(img.id)}
                           style={{
                             position: 'absolute',
-                            top: '4px',
-                            right: '4px',
-                            background: 'rgba(0,0,0,0.65)',
+                            top: '6px',
+                            right: '6px',
+                            background: 'rgba(0,0,0,0.75)',
                             border: 'none',
                             color: '#ff6b6b',
-                            width: '20px',
-                            height: '20px',
+                            width: '22px',
+                            height: '22px',
                             borderRadius: '50%',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '0.75rem',
+                            fontSize: '0.8rem',
                             fontWeight: 'bold',
                             zIndex: 3
                           }}
@@ -1280,7 +1443,7 @@ export default function CreateModal({
                         {/* Miniatura 3:4 */}
                         <div 
                           style={{
-                            height: '130px',
+                            height: '160px',
                             backgroundImage: `url(${img.url})`,
                             backgroundSize: 'cover',
                             backgroundPosition: 'center',
@@ -1288,27 +1451,125 @@ export default function CreateModal({
                           }}
                         />
 
-                        {/* Contenido inferior: Input del Identificador / Emoción y Botones */}
-                        <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          <input
-                            type="text"
-                            value={img.label || ''}
-                            onChange={(e) => handleUpdateCharacterImageLabel(img.id, e.target.value)}
-                            placeholder="Ej: Alegre, Armadura..."
-                            style={{
-                              width: '100%',
-                              padding: '4px 6px',
-                              background: '#14141f',
-                              border: '1px solid rgba(255,255,255,0.12)',
-                              borderRadius: '4px',
-                              color: '#fff',
-                              fontSize: '0.72rem',
-                              boxSizing: 'border-box'
-                            }}
-                            title="Etiqueta / Estado de la imagen"
-                          />
+                        {/* Contenido inferior: Campo de descripción/tags agrandado al triple */}
+                        <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, justifyContent: 'space-between', background: 'rgba(15, 16, 25, 0.95)' }}>
+                          <div>
+                            {/* Barra de cabecera del tag */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                              <span style={{ fontSize: '0.7rem', color: '#ffd36b', fontWeight: '700' }}>
+                                Tags & Pose:
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenPresetImgId(openPresetImgId === img.id ? null : img.id)}
+                                  style={{
+                                    background: openPresetImgId === img.id ? 'rgba(255,211,107,0.3)' : 'rgba(255,211,107,0.12)',
+                                    border: '1px solid rgba(255,211,107,0.3)',
+                                    color: '#ffd36b',
+                                    cursor: 'pointer',
+                                    padding: '2px 5px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.66rem',
+                                    fontWeight: '600'
+                                  }}
+                                  title="Abrir selector de etiquetas rápidas"
+                                >
+                                  🏷️ Presets
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleClassifyCharacterImage(img.id, itemType === 'Lugar' ? 'Lugar' : 'Personaje')}
+                                  disabled={classifyingImgId === img.id}
+                                  style={{
+                                    background: classifyingImgId === img.id ? 'rgba(110,231,183,0.25)' : 'rgba(255,211,107,0.12)',
+                                    border: '1px solid rgba(255,211,107,0.3)',
+                                    color: classifyingImgId === img.id ? '#6ee7b7' : '#ffd36b',
+                                    cursor: classifyingImgId === img.id ? 'wait' : 'pointer',
+                                    padding: '2px 5px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.66rem',
+                                    fontWeight: '600'
+                                  }}
+                                  title="Clasificar etiquetas on-demand con IA Multimodal"
+                                >
+                                  <FontAwesomeIcon icon={faMagic} spin={classifyingImgId === img.id} /> IA
+                                </button>
+                              </div>
+                            </div>
 
-                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'space-between' }}>
+                            {/* Textarea multilínea grande para la descripción visual (3x espacio) */}
+                            <textarea
+                              rows={3}
+                              value={img.tags !== undefined ? img.tags : (img.label || '')}
+                              onChange={(e) => handleUpdateCharacterImageTags(img.id, e.target.value)}
+                              placeholder={itemType === 'Lugar' ? "ej: night, heavy rain, ruins, dim lighting" : "ej: highschool uniform, kneeling, crawling, blushing"}
+                              style={{
+                                width: '100%',
+                                minHeight: '62px',
+                                padding: '6px 8px',
+                                background: '#0a0a14',
+                                border: '1px solid rgba(255,211,107,0.35)',
+                                borderRadius: '5px',
+                                color: '#ffd36b',
+                                fontSize: '0.74rem',
+                                fontWeight: '600',
+                                lineHeight: '1.3',
+                                boxSizing: 'border-box',
+                                resize: 'vertical'
+                              }}
+                              title="Descripción visual y etiquetas en inglés para el motor matchmaker"
+                            />
+                          </div>
+
+                          {/* Menú Flotante / Desplegable de Presets Rápidos */}
+                          {openPresetImgId === img.id && (
+                            <div style={{
+                              background: '#141524',
+                              border: '1px solid rgba(255,211,107,0.4)',
+                              borderRadius: '6px',
+                              padding: '6px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                              boxShadow: '0 6px 16px rgba(0,0,0,0.8)',
+                              zIndex: 10
+                            }}>
+                              <div style={{ fontSize: '0.65rem', color: '#ffd36b', fontWeight: 'bold' }}>
+                                {itemType === 'Lugar' ? 'Presets de Lugar / Entorno:' : 'Presets de Personaje (añadir / quitar):'}
+                              </div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', maxHeight: '120px', overflowY: 'auto' }}>
+                                {(itemType === 'Lugar'
+                                  ? [...LOCATION_TAG_PRESETS.momento, ...LOCATION_TAG_PRESETS.clima, ...LOCATION_TAG_PRESETS.estado]
+                                  : [...CHARACTER_TAG_PRESETS.ropa, ...CHARACTER_TAG_PRESETS.emocion, ...CHARACTER_TAG_PRESETS.accion, ...(CHARACTER_TAG_PRESETS.nsfw || [])]
+                                ).map(item => {
+                                  const tagStr = item.tag || item.label || '';
+                                  const isSelected = (img.tags || img.label || '').toLowerCase().includes(tagStr.toLowerCase());
+                                  return (
+                                    <button
+                                      key={item.id || item.tag}
+                                      type="button"
+                                      onClick={() => handleToggleTag(img.id, tagStr)}
+                                      style={{
+                                        background: isSelected ? '#ffd36b' : 'rgba(255,255,255,0.06)',
+                                        color: isSelected ? '#000' : '#fff',
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        borderRadius: '3px',
+                                        padding: '2px 5px',
+                                        fontSize: '0.62rem',
+                                        fontWeight: isSelected ? '700' : 'normal',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      {item.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'space-between', marginTop: '2px' }}>
                             {!img.isDefault && (
                               <button
                                 type="button"
@@ -1318,14 +1579,15 @@ export default function CreateModal({
                                   background: 'rgba(255,255,255,0.05)',
                                   border: '1px solid rgba(255,255,255,0.1)',
                                   color: '#ffd36b',
-                                  padding: '3px 4px',
+                                  padding: '4px 6px',
                                   borderRadius: '4px',
                                   fontSize: '0.68rem',
                                   cursor: 'pointer',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  gap: '3px'
+                                  gap: '3px',
+                                  fontWeight: '600'
                                 }}
                                 title="Establecer como imagen de portada principal"
                               >
@@ -1340,7 +1602,7 @@ export default function CreateModal({
                                 background: 'rgba(255,255,255,0.05)',
                                 border: '1px solid rgba(255,255,255,0.1)',
                                 color: '#eaeaea',
-                                padding: '3px 6px',
+                                padding: '4px 8px',
                                 borderRadius: '4px',
                                 fontSize: '0.68rem',
                                 cursor: 'pointer',
@@ -1921,8 +2183,8 @@ export default function CreateModal({
                     handleFieldChange(setText, e.target.value);
                   }}
                   placeholder="Ej. Tras derrotar al capitán en el muelle, el grupo obtuvo el mapa cifrado del tesoro real. Ahora la guardia de la ciudad los busca..."
-                  rows={3}
-                  style={{ width: '100%', padding: '10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', marginBottom: '12px' }}
+                  rows={8}
+                  style={{ width: '100%', minHeight: '180px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', marginBottom: '12px', resize: 'vertical' }}
                 />
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '12px' }}>
@@ -2381,15 +2643,14 @@ export default function CreateModal({
             {itemType !== 'Memoria' && itemType !== 'Inventario' && (
               <div className="field-group">
                 <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>
-                  Introducción (Resumen de máx. 200 caracteres)
+                  Introducción / Resumen descriptivo
                 </label>
                 <textarea
                   value={intro}
                   onChange={(e) => handleFieldChange(setIntro, e.target.value)}
-                  rows={2}
-                  maxLength={200}
-                  placeholder="Breve sumario descriptivo..."
-                  style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                  rows={6}
+                  placeholder="Sumario descriptivo y trasfondo inicial..."
+                  style={{ width: '100%', minHeight: '120px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
                 />
               </div>
             )}
@@ -2402,9 +2663,9 @@ export default function CreateModal({
                   <textarea
                     value={presentation}
                     onChange={(e) => handleFieldChange(setPresentation, e.target.value)}
-                    rows={3}
+                    rows={9}
                     placeholder="El texto de bienvenida que verá el jugador..."
-                    style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                    style={{ width: '100%', minHeight: '190px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
                   />
                 </div>
                 <div className="field-group">
@@ -2412,9 +2673,9 @@ export default function CreateModal({
                   <textarea
                     value={baseContext}
                     onChange={(e) => handleFieldChange(setBaseContext, e.target.value)}
-                    rows={4}
+                    rows={12}
                     placeholder="Geografía, política, historia y lore del escenario..."
-                    style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                    style={{ width: '100%', minHeight: '260px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
                   />
                 </div>
                 <div className="field-group">
@@ -2422,9 +2683,9 @@ export default function CreateModal({
                   <textarea
                     value={aiInstructions}
                     onChange={(e) => handleFieldChange(setAiInstructions, e.target.value)}
-                    rows={3}
+                    rows={9}
                     placeholder="Instrucciones del sistema de cómo la IA debe narrar e interpretar..."
-                    style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                    style={{ width: '100%', minHeight: '190px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
                   />
                 </div>
               </>
@@ -2432,13 +2693,13 @@ export default function CreateModal({
               /* Campo de Detalles / Lore para tarjetas que no sean Memoria ni Inventario */
               (itemType !== 'Memoria' && itemType !== 'Inventario') && (
                 <div className="field-group">
-                  <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>Detalles de la tarjeta / Lore</label>
+                  <label style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.8)' }}>Detalles de la tarjeta / Lore completo</label>
                   <textarea
                     value={text}
                     onChange={(e) => handleFieldChange(setText, e.target.value)}
-                    rows={4}
-                    placeholder="Detalla las características, reglas, aspecto o mecánicas de la tarjeta..."
-                    style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
+                    rows={12}
+                    placeholder="Detalla las características, reglas, aspecto, personalidad o mecánicas de la tarjeta..."
+                    style={{ width: '100%', minHeight: '260px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical' }}
                   />
                 </div>
               )
@@ -2571,6 +2832,7 @@ export default function CreateModal({
                           return (
                             <div
                               key={card.id}
+                              onClick={() => handleOpenEditNestedCard(card)}
                               style={{
                                 background: 'rgba(255, 255, 255, 0.02)',
                                 border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -2579,40 +2841,74 @@ export default function CreateModal({
                                 position: 'relative',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                height: '170px',
-                                transition: 'all 0.2s'
+                                height: '175px',
+                                transition: 'all 0.2s',
+                                cursor: 'pointer'
                               }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.borderColor = 'rgba(255, 211, 107, 0.4)';
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                e.currentTarget.style.transform = 'none';
+                              }}
+                              title={`Clic para editar "${card.title}"`}
                             >
-                              {/* Botón de Desenlazar (x) */}
-                              <button
-                                type="button"
-                                onClick={() => handleFieldChange(setSelectedCards, selectedCards.filter(id => id !== card.id))}
-                                style={{
-                                  position: 'absolute',
-                                  top: '6px',
-                                  right: '6px',
-                                  background: 'rgba(0, 0, 0, 0.6)',
-                                  border: 'none',
-                                  color: '#ff6b6b',
-                                  width: '20px',
-                                  height: '20px',
-                                  borderRadius: '50%',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '0.8rem',
-                                  fontWeight: 'bold',
-                                  zIndex: 5
-                                }}
-                                title="Desenlazar del escenario"
-                              >
-                                ×
-                              </button>
+                              {/* Botones de Acción (Editar y Desenlazar) */}
+                              <div style={{ position: 'absolute', top: '6px', right: '6px', display: 'flex', gap: '4px', zIndex: 5 }}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenEditNestedCard(card);
+                                  }}
+                                  style={{
+                                    background: 'rgba(0, 0, 0, 0.7)',
+                                    border: '1px solid rgba(255, 211, 107, 0.4)',
+                                    color: '#ffd36b',
+                                    width: '22px',
+                                    height: '22px',
+                                    borderRadius: '50%',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '0.7rem'
+                                  }}
+                                  title="Editar tarjeta"
+                                >
+                                  <FontAwesomeIcon icon={faEdit} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleFieldChange(setSelectedCards, selectedCards.filter(id => id !== card.id));
+                                  }}
+                                  style={{
+                                    background: 'rgba(0, 0, 0, 0.7)',
+                                    border: '1px solid rgba(255, 107, 107, 0.4)',
+                                    color: '#ff6b6b',
+                                    width: '22px',
+                                    height: '22px',
+                                    borderRadius: '50%',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 'bold'
+                                  }}
+                                  title="Desenlazar del escenario"
+                                >
+                                  ×
+                                </button>
+                              </div>
 
                               {/* Portada */}
                               <div style={{
-                                height: '80px',
+                                height: '85px',
                                 backgroundSize: 'cover',
                                 backgroundPosition: 'center',
                                 backgroundImage: `url(${card.cover || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=300&q=80'})`,
@@ -2624,8 +2920,13 @@ export default function CreateModal({
                                 <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={card.title}>
                                   {card.title}
                                 </div>
-                                <div style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                                  {card.type}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                    {card.type}
+                                  </span>
+                                  <span style={{ fontSize: '0.68rem', color: '#ffd36b', fontWeight: '600' }}>
+                                    ✏️ Editar
+                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -2782,7 +3083,10 @@ export default function CreateModal({
             }}>
               <button
                 type="button"
-                onClick={() => setNestedCardType(null)}
+                onClick={() => {
+                  setNestedCardType(null);
+                  setNestedEditingCardId(null);
+                }}
                 style={{
                   position: 'absolute',
                   top: '16px',
@@ -2798,7 +3102,7 @@ export default function CreateModal({
               </button>
 
               <h4 style={{ margin: '0 0 16px 0', color: '#ffd36b', fontSize: '1.1rem', fontWeight: '700' }}>
-                Crear Nuevo {nestedCardType} (In-Situ)
+                {nestedEditingCardId ? `Editar ${nestedCardType}` : `Crear Nuevo ${nestedCardType} (In-Situ)`}
               </h4>
 
               {/* Rol del Personaje In-Situ */}
@@ -2988,22 +3292,111 @@ export default function CreateModal({
                           />
 
                           <div style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <input
-                              type="text"
-                              value={img.label || ''}
-                              onChange={(e) => handleUpdateNestedCharacterImageLabel(img.id, e.target.value)}
-                              placeholder="Ej: Alegre, Armadura..."
+                            {/* Barra de herramientas rápida nested */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                              <span style={{ fontSize: '0.68rem', color: '#ffd36b', fontWeight: '700' }}>Tags:</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenPresetImgId(openPresetImgId === `nested-${img.id}` ? null : `nested-${img.id}`)}
+                                  style={{
+                                    background: openPresetImgId === `nested-${img.id}` ? 'rgba(255,211,107,0.3)' : 'rgba(255,211,107,0.12)',
+                                    border: '1px solid rgba(255,211,107,0.3)',
+                                    color: '#ffd36b',
+                                    cursor: 'pointer',
+                                    padding: '1px 4px',
+                                    borderRadius: '3px',
+                                    fontSize: '0.64rem',
+                                    fontWeight: '600'
+                                  }}
+                                  title="Abrir selector de etiquetas rápidas"
+                                >
+                                  🏷️ Presets
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleClassifyNestedCharacterImage(img.id, 'Personaje')}
+                                  disabled={classifyingImgId === img.id}
+                                  style={{
+                                    background: classifyingImgId === img.id ? 'rgba(110,231,183,0.25)' : 'rgba(255,211,107,0.12)',
+                                    border: '1px solid rgba(255,211,107,0.3)',
+                                    color: classifyingImgId === img.id ? '#6ee7b7' : '#ffd36b',
+                                    cursor: classifyingImgId === img.id ? 'wait' : 'pointer',
+                                    padding: '1px 4px',
+                                    borderRadius: '3px',
+                                    fontSize: '0.64rem',
+                                    fontWeight: '600'
+                                  }}
+                                  title="Clasificar etiquetas on-demand con IA"
+                                >
+                                  <FontAwesomeIcon icon={faMagic} spin={classifyingImgId === img.id} /> IA
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Textarea multilínea grande para la descripción visual */}
+                            <textarea
+                              rows={3}
+                              value={img.tags !== undefined ? img.tags : (img.label || '')}
+                              onChange={(e) => handleUpdateNestedCharacterImageTags(img.id, e.target.value)}
+                              placeholder="ej: school uniform, kneeling, blushing"
                               style={{
                                 width: '100%',
-                                padding: '3px 5px',
-                                background: '#14141f',
-                                border: '1px solid rgba(255,255,255,0.12)',
+                                minHeight: '55px',
+                                padding: '5px 7px',
+                                background: '#0a0a14',
+                                border: '1px solid rgba(255,211,107,0.35)',
                                 borderRadius: '4px',
-                                color: '#fff',
-                                fontSize: '0.7rem',
-                                boxSizing: 'border-box'
+                                color: '#ffd36b',
+                                fontSize: '0.72rem',
+                                fontWeight: '600',
+                                lineHeight: '1.3',
+                                boxSizing: 'border-box',
+                                resize: 'vertical'
                               }}
+                              title="Etiquetas contextuales para selección de IA"
                             />
+
+                            {/* Preset pills para nested */}
+                            {openPresetImgId === `nested-${img.id}` && (
+                              <div style={{
+                                background: '#141524',
+                                border: '1px solid rgba(255,211,107,0.4)',
+                                borderRadius: '4px',
+                                padding: '4px',
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: '2px',
+                                zIndex: 10,
+                                maxHeight: '110px',
+                                overflowY: 'auto'
+                              }}>
+                                {[...CHARACTER_TAG_PRESETS.ropa, ...CHARACTER_TAG_PRESETS.emocion, ...CHARACTER_TAG_PRESETS.accion, ...(CHARACTER_TAG_PRESETS.nsfw || [])].map(item => {
+                                  const tagStr = item.tag || item.label || '';
+                                  const isSelected = (img.tags || img.label || '').toLowerCase().includes(tagStr.toLowerCase());
+                                  return (
+                                    <button
+                                      key={item.id || item.tag}
+                                      type="button"
+                                      onClick={() => handleToggleNestedTag(img.id, tagStr)}
+                                      style={{
+                                        background: isSelected ? '#ffd36b' : 'rgba(255,255,255,0.06)',
+                                        color: isSelected ? '#000' : '#fff',
+                                        border: '1px solid rgba(255,255,255,0.1)',
+                                        borderRadius: '3px',
+                                        padding: '1px 4px',
+                                        fontSize: '0.6rem',
+                                        fontWeight: isSelected ? '700' : 'normal',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      {item.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
                             <div style={{ display: 'flex', gap: '3px', justifyContent: 'space-between' }}>
                               {!img.isDefault && (
                                 <button
@@ -3017,26 +3410,37 @@ export default function CreateModal({
                                     padding: '2px 4px',
                                     borderRadius: '3px',
                                     fontSize: '0.65rem',
-                                    cursor: 'pointer'
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '2px'
                                   }}
+                                  title="Establecer como imagen de portada"
                                 >
-                                  Principal
+                                  <FontAwesomeIcon icon={faStar} /> Principal
                                 </button>
                               )}
                               <button
                                 type="button"
                                 onClick={() => handleReCropNestedCharacterImage(img)}
                                 style={{
+                                  flex: img.isDefault ? 1 : 'none',
                                   background: 'rgba(255,255,255,0.05)',
                                   border: '1px solid rgba(255,255,255,0.1)',
                                   color: '#eaeaea',
                                   padding: '2px 5px',
                                   borderRadius: '3px',
                                   fontSize: '0.65rem',
-                                  cursor: 'pointer'
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '2px'
                                 }}
+                                title="Re-encuadrar y recortar imagen"
                               >
-                                <FontAwesomeIcon icon={faCrop} />
+                                <FontAwesomeIcon icon={faCrop} /> {img.isDefault ? 'Recortar' : ''}
                               </button>
                             </div>
                           </div>
@@ -3232,21 +3636,21 @@ export default function CreateModal({
                 <textarea
                   value={nestedCardIntro}
                   onChange={(e) => setNestedCardIntro(e.target.value)}
-                  rows={2}
-                  placeholder="Breve sumario descriptivo..."
-                  style={{ width: '100%', padding: '8px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical', fontSize: '0.82rem' }}
+                  rows={6}
+                  placeholder="Sumario descriptivo y trasfondo..."
+                  style={{ width: '100%', minHeight: '120px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical', fontSize: '0.82rem' }}
                 />
               </div>
 
               {/* Detalles / Lore */}
               <div style={{ marginBottom: '14px' }}>
-                <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '6px' }}>Lore / Detalles</label>
+                <label style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '6px' }}>Lore / Detalles completos</label>
                 <textarea
                   value={nestedCardText}
                   onChange={(e) => setNestedCardText(e.target.value)}
-                  rows={3}
-                  placeholder="Descripción completa del lore..."
-                  style={{ width: '100%', padding: '8px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical', fontSize: '0.82rem' }}
+                  rows={10}
+                  placeholder="Descripción completa del lore, reglas o personalidad..."
+                  style={{ width: '100%', minHeight: '220px', padding: '10px 12px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box', resize: 'vertical', fontSize: '0.82rem' }}
                 />
               </div>
 
@@ -3455,7 +3859,10 @@ export default function CreateModal({
 
                 <button
                   type="button"
-                  onClick={() => setNestedCardType(null)}
+                  onClick={() => {
+                    setNestedCardType(null);
+                    setNestedEditingCardId(null);
+                  }}
                   style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem' }}
                 >
                   Cancelar
@@ -3465,7 +3872,7 @@ export default function CreateModal({
                   onClick={handleSaveNestedCard}
                   style={{ background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)', border: 'none', color: '#000', fontWeight: '700', padding: '8px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem' }}
                 >
-                  Guardar Tarjeta
+                  {nestedEditingCardId ? 'Guardar Cambios' : 'Guardar Tarjeta'}
                 </button>
               </div>
             </div>

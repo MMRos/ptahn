@@ -45,6 +45,52 @@ import CharacterSidebar from './CharacterSidebar';
 import ConfirmModal from './ConfirmModal';
 import './chats.css';
 
+export function getScenarioCards(scenario, chat, appData, userChar) {
+  const allCards = appData?.cards || [];
+  const scenarioCardIdsOrTitles = Array.isArray(scenario?.cards) ? scenario.cards : [];
+  const chatCharacterIdsOrTitles = Array.isArray(chat?.characters) ? chat.characters.map(c => c.id || c.name) : [];
+
+  return allCards.filter(c => {
+    if (!c) return false;
+    if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
+    if (c.type === 'Inventario' || c.type === 'Memoria') return false;
+
+    // 1. Direct link in scenario.cards
+    const isDirectlyLinked = scenarioCardIdsOrTitles.some(idOrTitle => 
+      idOrTitle === c.id || 
+      idOrTitle === c.title || 
+      (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
+    );
+    if (isDirectlyLinked) return true;
+
+    // 2. Direct link in chat.characters
+    const isChatLinked = chatCharacterIdsOrTitles.some(idOrTitle => 
+      idOrTitle === c.id || 
+      idOrTitle === c.title || 
+      (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
+    );
+    if (isChatLinked) return true;
+
+    // 3. Card has linkedScenario matching scenario ID or title
+    const isScenarioLinked = c.linkedScenario === chat?.scenarioId || 
+                             c.linkedScenario === scenario?.title || 
+                             c.linkedScenario === scenario?.id || 
+                             (scenario?.title && c.linkedScenario && normalizeEntityName(c.linkedScenario) === normalizeEntityName(scenario.title));
+    if (isScenarioLinked) return true;
+
+    // 4. Connected cards matching scenario
+    const isConnected = Array.isArray(c.connectedCards) && (
+      (chat?.scenarioId && c.connectedCards.includes(chat.scenarioId)) || 
+      (scenario?.title && c.connectedCards.includes(scenario.title)) || 
+      (scenario?.id && c.connectedCards.includes(scenario.id)) ||
+      (scenario?.title && c.connectedCards.some(cc => normalizeEntityName(cc) === normalizeEntityName(scenario.title)))
+    );
+    if (isConnected) return true;
+
+    return false;
+  });
+}
+
 export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onUpdateChatSettings = () => {}, onOpenCreateModal }) {
   const [messages, setMessages] = useState(chat?.messages || []);
   const [inputMsg, setInputMsg] = useState('');
@@ -64,9 +110,22 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
   const [isPeekTransparent, setIsPeekTransparent] = useState(false);
   const [isCharacterSidebarClosed, setIsCharacterSidebarClosed] = useState(false);
   const [manualCharacterImageId, setManualCharacterImageId] = useState(null);
+  const [manualCharacterOverride, setManualCharacterOverride] = useState(null);
   const inputRef = useRef(null);
   const chatRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const activeChatIdRef = useRef(chat?.id);
+
+  useEffect(() => {
+    activeChatIdRef.current = chat?.id;
+  }, [chat?.id]);
+
+  // Sincronizar apertura de la Zona B si el usuario la activa desde el menú de Ajustes
+  useEffect(() => {
+    if (chatSettings?.showCharacterSidebar !== false) {
+      setIsCharacterSidebarClosed(false);
+    }
+  }, [chatSettings?.showCharacterSidebar]);
 
   // Auto-scroll para mostrar siempre la última interacción al abrir, refrescar o recibir mensajes
   const scrollToBottom = (behavior = 'smooth') => {
@@ -79,9 +138,26 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, fol
 
   // Scroll instantáneo y sincronización de mensajes al montar o cambiar de chat
   useEffect(() => {
-    if (chat?.messages) {
-      setMessages(chat.messages);
+    activeChatIdRef.current = chat?.id;
+    let currentMsgs = chat?.messages || [];
+    if (currentMsgs.length === 0 && chat?.scenarioId) {
+      const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId) || 
+                       (appData?.cards || []).find(c => c.id === chat.scenarioId);
+      const firstText = (scenario?.presentation || scenario?.intro || '').trim();
+      if (firstText) {
+        currentMsgs = [
+          {
+            from: 'narrator',
+            text: firstText,
+            createdAt: new Date().toISOString()
+          }
+        ];
+        persistChatMessages(chat?.id, chat, currentMsgs);
+      }
     }
+    setMessages(currentMsgs);
+    setManualCharacterOverride(null);
+    setManualCharacterImageId(null);
     scrollToBottom('auto');
     const timer = setTimeout(() => scrollToBottom('auto'), 80);
     return () => clearTimeout(timer);
@@ -301,27 +377,6 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     setActiveEntityModal(null);
   };
 
-  useEffect(() => {
-    let currentMsgs = chat?.messages || [];
-    if (currentMsgs.length === 0 && chat?.scenarioId) {
-      const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId) || 
-                       (appData?.cards || []).find(c => c.id === chat.scenarioId);
-      const firstText = (scenario?.presentation || scenario?.intro || '').trim();
-      if (firstText) {
-        currentMsgs = [
-          {
-            from: 'narrator',
-            text: firstText,
-            createdAt: new Date().toISOString()
-          }
-        ];
-        persistMessages(currentMsgs);
-      }
-    }
-    setMessages(currentMsgs);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chat, appData]);
-
   const insertFormatting = (type) => {
     const textarea = inputRef.current;
     if (!textarea) return;
@@ -388,11 +443,12 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     }
   }, [selectedMessagesForCard, isSelectingForCard, messages]);
 
-  const persistMessages = async (nextMsgs) => {
-    setMessages(nextMsgs);
+  const persistChatMessages = async (targetChatId, targetChatMeta, nextMsgs) => {
+    if (!targetChatId) return;
     const now = new Date().toISOString();
     const updatedChat = { 
-      ...chat, 
+      ...(targetChatMeta || {}),
+      id: targetChatId,
       messages: nextMsgs,
       updatedAt: now
     };
@@ -400,9 +456,16 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     if (folderHandle) {
       try { await saveChatToFolder(updatedChat, folderHandle); } catch (err) {}
     }
-    if (onUpdateChat) {
-      onUpdateChat(updatedChat);
+    if (activeChatIdRef.current === targetChatId) {
+      setMessages(nextMsgs);
+      if (onUpdateChat) {
+        onUpdateChat(updatedChat);
+      }
     }
+  };
+
+  const persistMessages = async (nextMsgs) => {
+    return persistChatMessages(chat?.id, chat, nextMsgs);
   };
 
   const handleSpeakMessage = async (message, idx) => {
@@ -605,41 +668,10 @@ ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${
 
     // 7.1 Format Pre-established Scenario Characters, Entities, and NPCs (Strict Scenario Scope)
     let scenarioCharactersDetails = '';
-    const allCards = appData?.cards || [];
-    const scenarioCardIdsOrTitles = Array.isArray(scenario?.cards) ? scenario.cards : [];
-    const chatCharacterIdsOrTitles = Array.isArray(chat?.characters) ? chat.characters.map(c => c.id || c.name) : [];
-
-    const scenarioCards = allCards.filter(c => {
-      if (!c) return false;
-      if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
-      if (c.type === 'Inventario' || c.type === 'Memoria') return false;
-
-      const isDirectlyLinked = scenarioCardIdsOrTitles.some(idOrTitle => 
-        idOrTitle === c.id || 
-        idOrTitle === c.title || 
-        (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
-      );
-      const isChatLinked = chatCharacterIdsOrTitles.some(idOrTitle => 
-        idOrTitle === c.id || 
-        idOrTitle === c.title || 
-        (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
-      );
-      const isScenarioLinked = c.linkedScenario === chat.scenarioId || 
-                               c.linkedScenario === scenario?.title || 
-                               c.linkedScenario === scenario?.id || 
-                               (scenario?.title && c.linkedScenario && normalizeEntityName(c.linkedScenario) === normalizeEntityName(scenario.title));
-      const isConnected = Array.isArray(c.connectedCards) && (
-        c.connectedCards.includes(chat.scenarioId) || 
-        c.connectedCards.includes(scenario?.title) || 
-        (scenario?.id && c.connectedCards.includes(scenario.id)) ||
-        (scenario?.title && c.connectedCards.some(cc => normalizeEntityName(cc) === normalizeEntityName(scenario.title)))
-      );
-
-      return isDirectlyLinked || isChatLinked || isScenarioLinked || isConnected;
-    });
+    const scenarioCards = getScenarioCards(scenario, chat, appData, userChar);
 
     const relevantEntities = (preFilteredEntities && Array.isArray(preFilteredEntities) && preFilteredEntities.length > 0)
-      ? preFilteredEntities
+      ? preFilteredEntities.filter(p => scenarioCards.some(sc => sc.id === p.id || sc.title === p.title))
       : filterAndSortRelevantCards(scenarioCards, {
           recentText: messages.slice(-3).map(m => m.text || '').join(' '),
           maxLimit: 8
@@ -662,9 +694,10 @@ ${entityEntries}
 `.trim();
     }
 
-    // 8. Format Memories & Milestones
+
+    // 8. Format Memories & Milestones (strictly scoped to this chat and scenario)
     const inChatMemories = (chat.memoryCards || []).map(m => `* ${m}`);
-    const cardMemories = (appData?.cards || []).filter(c => c.type === 'Memoria' && (
+    const cardMemories = scenarioCards.filter(c => c.type === 'Memoria' && (
       c.linkedScenario === chat.scenarioId || 
       (Array.isArray(c.linkedCharacters) && userChar && (c.linkedCharacters.includes(userChar.id) || c.linkedCharacters.includes(userChar.title)))
     )).map(m => `* [Impact: ${m.impact || 'Medium'}] (${m.timeline || 'Milestone'}) ${m.title}: ${m.summary || m.text}`);
@@ -733,16 +766,41 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external G
    - The world does not revolve subserviently around the player; reckless actions carry realistic risks, logical consequences, and believable opposition.
    - Maintain strict consistency with scenario lore, inventory, and accumulated memories.
 
-7. STRICT TYPOGRAPHICAL FORMATTING & DIALOGUE VS THOUGHT RULES:
-   - SPOKEN NPC DIALOGUE (ALOUD): MUST be wrapped EXCLUSIVELY in double quotes: "Hello, traveler."
-     * Any vocal speech, conversation, shouting, verbal apology (e.g. "¡Dueño!", "¡Lo siento mucho!", "¡Perdón!"), or reply directed to {{user}} or other characters MUST be inside quotes ("...").
-     * FORBIDDEN to put vocal speech or conversational apologies in tildes (~...~).
+7. STRICT TYPOGRAPHICAL FORMATTING & DIALOGUE RULES:
+   - SPOKEN NPC DIALOGUE (ALOUD): MUST be wrapped EXCLUSIVELY in double quotes without internal asterisks: "Hello, traveler."
+     * Any vocal speech, conversation, shouts, or verbal responses MUST be inside double quotes: "¡Dueño!", "¡Espera!".
+     * FORBIDDEN to put asterisks inside quotes (NEVER write "*Hello*" or "*¡Dueño!*").
+     * FORBIDDEN to wrap dialogue quotes with asterisks (NEVER write *"Hello"*).
+     * FORBIDDEN to put spoken dialogue in tildes (~...~).
    - SILENT INTERNAL THOUGHTS (UNSPOKEN): MUST be wrapped EXCLUSIVELY in tildes: ~What a strange presence this newcomer has...~
-     * Tildes (~...~) are ONLY for silent, private inner monologues inside an NPC's mind that NO ONE ELSE can hear.
-     * Never use tildes for talking to someone out loud.
-   - NARRATIVE ACTIONS & DESCRIPTIONS: MUST be wrapped in asterisks: *She took a step back, blushing deeply as she adjusted her collar.*
-     * Wrap all physical movements, gestures, expressions, and environmental changes between asterisks (*...*).
-   - KEY ENTITIES & PROPER NAMES: Wrap key compendium items, locations, and characters between equal signs: ==La Forja==, ==Eelyt==, ==Mari==.
+     * Tildes (~...~) are ONLY for SHORT (1-2 sentences) silent, private inner thoughts inside an NPC's mind.
+     * STRICTLY FORBIDDEN to wrap scene descriptions, narrative paragraphs, actions, or dialogues in tildes (~...~).
+     * FORBIDDEN to combine with asterisks (NEVER write *~thought~*).
+   - GENERAL NARRATIVE PROSE & SCENERY:
+     * Write standard, clean literary paragraphs for descriptions, sensory details, and world reactions WITHOUT wrapping whole sentences or descriptions in asterisks (*...*) or tildes (~...~).
+     * Asterisks (*...*) are reserved ONLY for short, specific inline actions or gestures (e.g. *sonríe con picardía*, *desenvaina su espada*).
+   - KEY ENTITIES & PROPER NAMES: Wrap key compendium items, locations, and characters between equal signs: ==La Forja==, ==Azgael==.
+
+8. MANDATORY 4-PHASE REASONING & SELF-CORRECTION PROTOCOL (<think>):
+   Before delivering your final story response, you MUST execute a silent 4-phase scratchpad inside a <think> ... </think> block:
+
+   [FASE 1: PLANIFICACIÓN]
+   - NPC Intent & Emotion: What is the NPC's psychological drive and what reaction do they seek from {{user}}?
+   - Atmosphere & Sensory Anchoring: Scent, temperature, textures, lighting, breath, and heartbeat.
+   - Lore & Memory Consistency: Check active scenario cards, inventory items, and accumulated memories to prevent factual contradictions.
+   - Rhythm & Direction: How to advance the scene without rushing or stalling.
+
+   [FASE 2: REDACCIÓN (BORRADOR INTERNO)]
+   - Draft a preliminary mental version of how the environment and NPCs react to the player's action.
+
+   [FASE 3: AUTO-CRÍTICA (CONTROL DE CALIDAD)]
+   - Autonomy Audit: Did my draft usurp, speak, think, or act for {{user}}? -> If yes, immediately purge it.
+   - Anti-Cliché & Prose Freshness: Are there tired tropes, repetitive words, or melodrama? -> Elevate to rich, visceral prose.
+   - Formatting Check: Ensure spoken dialogue uses double quotes ("..."), physical gestures use asterisks (*...*), and unspoken inner thoughts use tildes (~...~).
+   - Final Adjustments & Greenlight: Apply corrections.
+
+   [FASE 4: MENSAJE FINAL]
+   - Close </think> and output ONLY the final, polished, and immersive narrative prose for the reader.
 
 [RECORDED STORY MEMORIES & MILESTONES]:
 ${memoryContext}
@@ -753,31 +811,36 @@ ${languageDirective}
 
   // Función asíncrona en segundo plano para realizar el resumen de contexto y generar memorias.
   // Protegida ante fallos por try-catch y persistida en almacenamiento local e IndexedDB.
-  const runBackgroundSummarization = (finalMsgs) => {
+  const runBackgroundSummarization = (finalMsgs, targetChatSnapshot = chat) => {
     setTimeout(async () => {
       try {
+        const targetChat = targetChatSnapshot || chat;
+        const targetChatId = targetChat?.id;
+        if (!targetChatId) return;
+
         const newSummary = await sendContextSummarizationTask({
           messages: finalMsgs,
-          currentMemory: chat.memoryCards || [],
+          currentMemory: targetChat.memoryCards || [],
           modelId: chatSettings?.preferredModel,
           preferredLanguage: chatSettings?.preferredLanguage || 'auto',
           baseUrl: chatSettings?.lmStudioUrl
         });
         if (newSummary && typeof newSummary === 'string' && newSummary.trim()) {
           console.log('[Context Summary Task]: Nueva memoria generada:', newSummary);
-          const nextMemory = [...(chat.memoryCards || []), newSummary.trim()];
+          const nextMemory = [...(targetChat.memoryCards || []), newSummary.trim()];
           
-          // Mutación segura en el objeto para sincronizar la vista del TopBar y persistencia
-          chat.memoryCards = nextMemory;
+          targetChat.memoryCards = nextMemory;
           
-          const updatedChat = { ...chat, messages: finalMsgs, memoryCards: nextMemory };
+          const updatedChat = { ...targetChat, messages: finalMsgs, memoryCards: nextMemory };
           const { addChat } = await import('../utils/db');
           await addChat(updatedChat);
           if (folderHandle) {
             try { await saveChatToFolder(updatedChat, folderHandle); } catch (e) {}
           }
           
-          setMessages(finalMsgs);
+          if (activeChatIdRef.current === targetChatId) {
+            setMessages(finalMsgs);
+          }
         }
       } catch (sumErr) {
         console.warn('[Context Summary Task]: Fallo en la tarea de resumen:', sumErr);
@@ -786,12 +849,13 @@ ${languageDirective}
   };
 
   // Función asíncrona en segundo plano para extraer entidades y generar tarjetas automáticas con imágenes.
-  const runBackgroundCardGeneration = (finalMsgs) => {
+  const runBackgroundCardGeneration = (finalMsgs, targetChatSnapshot = chat) => {
     if (!autoGenCards) return;
     setTimeout(async () => {
       try {
-        const scenario = (appData?.scenarios || []).find(s => s.id === chat?.scenarioId || s.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()) ||
-                         (appData?.cards || []).find(c => c.id === chat?.scenarioId || c.title?.toLowerCase() === (chat?.scenario || '').toLowerCase());
+        const targetChat = targetChatSnapshot || chat;
+        const scenario = (appData?.scenarios || []).find(s => s.id === targetChat?.scenarioId || s.title?.toLowerCase() === (targetChat?.scenario || '').toLowerCase()) ||
+                         (appData?.cards || []).find(c => c.id === targetChat?.scenarioId || c.title?.toLowerCase() === (targetChat?.scenario || '').toLowerCase());
         const existingCards = appData?.cards || [];
         const existingScenarios = appData?.scenarios || [];
         const extractedEntities = await sendExtractCardsTask({
@@ -899,6 +963,9 @@ ${languageDirective}
   const handleRedo = async (specificIdx = null) => {
     if (isSending || messages.length === 0) return;
 
+    const executionChatId = chat?.id;
+    const targetChatSnapshot = { ...chat };
+
     let targetIdx = specificIdx;
     
     // Si se pulsa desde la barra de herramientas inferior
@@ -940,19 +1007,21 @@ ${languageDirective}
     };
 
     // Truncar historial para eliminar la respuesta anterior e insertar el placeholder de stream
-    await persistMessages(historyBefore);
-    setMessages([...historyBefore, streamingPlaceholder]);
-    setMessages([...historyBefore, streamingPlaceholder]);
-    setIsSending(true);
-    setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Evaluando intención y filtrando lore...' });
+    await persistChatMessages(executionChatId, targetChatSnapshot, historyBefore);
+    if (activeChatIdRef.current === executionChatId) {
+      setMessages([...historyBefore, streamingPlaceholder]);
+      setIsSending(true);
+      setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Evaluando intención y filtrando lore...' });
+    }
 
     try {
-      // 1. Orquestación Inbound (Pre-Vuelo)
+      // 1. Orquestación Inbound (Pre-Vuelo con estricto ámbito de escenario)
+      const activeScenarioCards = getScenarioCards(scenario, targetChatSnapshot, appData, userChar);
       const lastUserPrompt = promptMessages[promptMessages.length - 1]?.text || '';
       const inbound = await executeInboundOrchestration({
         orchestratorModel: chatSettings?.orchestratorModel,
         userMessage: lastUserPrompt,
-        cards: appData?.cards || [],
+        cards: activeScenarioCards,
         recentMessages: historyBefore,
         chatSettings,
         baseUrl: chatSettings?.lmStudioUrl
@@ -962,59 +1031,66 @@ ${languageDirective}
       const res = await sendChatMessage({
         messages: promptMessages,
         systemInstruction: systemPrompt,
-        contextDocuments: chat.contextDocuments || [],
+        contextDocuments: targetChatSnapshot.contextDocuments || [],
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
-          const targetLen = chatSettings?.responseLength || 1000;
-          const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
-          setGenerationProgress({
-            percent: streamPct,
-            status: `⚡ Redactando respuesta (${streamPct}%)...`
-          });
-          setMessages(prev => {
-            const copy = [...prev];
-            if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
-              copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
-            }
-            return copy;
-          });
+          if (activeChatIdRef.current === executionChatId) {
+            const targetLen = chatSettings?.responseLength || 1000;
+            const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
+            setGenerationProgress({
+              percent: streamPct,
+              status: `⚡ Redactando respuesta (${streamPct}%)...`
+            });
+            setMessages(prev => {
+              const copy = [...prev];
+              if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
+                copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
+              }
+              return copy;
+            });
+          }
         }
       });
 
-      // 2. Orquestación Outbound (Post-Vuelo)
+      // 2. Orquestación Outbound (Post-Vuelo con ámbito de escenario)
       const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
+      const targetLangCode = typeof targetLang === 'object' ? (targetLang.code || 'es') : targetLang;
       const outbound = await executeOutboundOrchestration({
         orchestratorModel: chatSettings?.orchestratorModel,
         rawNarrative: res.text || '',
-        targetLang,
-        compendiumCards: appData?.cards || [],
+        targetLang: targetLangCode,
+        compendiumCards: activeScenarioCards,
         chatSettings,
         baseUrl: chatSettings?.lmStudioUrl
       });
 
-      const finalNarrative = outbound.formattedText || res.text || 'Sin respuesta.';
+      const finalNarrative = (outbound?.formattedText && outbound.formattedText.trim().length > 0)
+        ? outbound.formattedText.trim()
+        : ((res?.text && res.text.trim().length > 0) ? res.text.trim() : 'Sin respuesta.');
       const newAiMsg = {
         from: aiRole,
         text: finalNarrative,
         timestamp: new Date().toISOString()
       };
       const finalMsgs = [...historyBefore, newAiMsg];
-      await persistMessages(finalMsgs);
-      runBackgroundSummarization(finalMsgs);
-      runBackgroundCardGeneration(finalMsgs);
+      await persistChatMessages(executionChatId, targetChatSnapshot, finalMsgs);
+      runBackgroundSummarization(finalMsgs, targetChatSnapshot);
+      runBackgroundCardGeneration(finalMsgs, targetChatSnapshot);
 
     } catch (err) {
       console.error("Error al rehacer respuesta:", err);
       const errorMsg = {
         from: 'ai',
-        text: `[Error al rehacer]: ${err.message || 'LM Studio no accesible.'}`,
+        text: `[Error al rehacer]: ${err.message || 'Servidor de IA no accesible.'}`,
         timestamp: new Date().toISOString()
       };
-      await persistMessages([...historyBefore, errorMsg]);
+      await persistChatMessages(executionChatId, targetChatSnapshot, [...historyBefore, errorMsg]);
     } finally {
-      setIsSending(false);
-      setGenerationProgress({ percent: 100, status: 'Completado' });
+      if (activeChatIdRef.current === executionChatId) {
+        setIsSending(false);
+        setGenerationProgress({ percent: 100, status: 'Completado' });
+      }
     }
   };
 
@@ -1022,26 +1098,32 @@ ${languageDirective}
     const textToSend = overrideText !== null ? overrideText : inputMsg;
     if ((!textToSend.trim() && overrideText === null) || isSending) return;
 
+    const executionChatId = chat?.id;
+    const targetChatSnapshot = { ...chat };
+
     const newMsg = { from: 'user', text: textToSend.trim() || '...', timestamp: new Date().toISOString() };
     const nextMsgs = textToSend.trim() ? [...messages, newMsg] : messages;
     
     const streamingAiMsg = { from: 'ai', text: '', timestamp: new Date().toISOString() };
     
     if (textToSend.trim()) {
-      await persistMessages(nextMsgs);
+      await persistChatMessages(executionChatId, targetChatSnapshot, nextMsgs);
     }
-    setMessages([...nextMsgs, streamingAiMsg]);
     
-    if (overrideText === null) setInputMsg('');
-    setIsSending(true);
-    setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Analizando intención y relevancia de lore...' });
+    if (activeChatIdRef.current === executionChatId) {
+      setMessages([...nextMsgs, streamingAiMsg]);
+      if (overrideText === null) setInputMsg('');
+      setIsSending(true);
+      setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Analizando intención y relevancia de lore...' });
+    }
 
     try {
-      // 1. Orquestación Inbound (Pre-Vuelo)
+      // 1. Orquestación Inbound (Pre-Vuelo con aislamiento estricto de tarjetas del escenario)
+      const activeScenarioCards = getScenarioCards(scenario, targetChatSnapshot, appData, userChar);
       const inbound = await executeInboundOrchestration({
         orchestratorModel: chatSettings?.orchestratorModel,
         userMessage: textToSend.trim(),
-        cards: appData?.cards || [],
+        cards: activeScenarioCards,
         recentMessages: messages,
         chatSettings,
         baseUrl: chatSettings?.lmStudioUrl
@@ -1053,41 +1135,46 @@ ${languageDirective}
       const res = await sendChatMessage({
         messages: nextMsgs,
         systemInstruction: systemPrompt,
-        contextDocuments: chat.contextDocuments || [],
+        contextDocuments: targetChatSnapshot.contextDocuments || [],
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
-          const targetLen = chatSettings?.responseLength || 1000;
-          const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
-          setGenerationProgress({
-            percent: streamPct,
-            status: `⚡ Redactando respuesta (${streamPct}%)...`
-          });
-          setMessages(prev => {
-            const copy = [...prev];
-            if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
-              copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
-            }
-            return copy;
-          });
+          if (activeChatIdRef.current === executionChatId) {
+            const targetLen = chatSettings?.responseLength || 1000;
+            const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
+            setGenerationProgress({
+              percent: streamPct,
+              status: `⚡ Redactando respuesta (${streamPct}%)...`
+            });
+            setMessages(prev => {
+              const copy = [...prev];
+              if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
+                copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
+              }
+              return copy;
+            });
+          }
         }
       });
 
-      // 3. Orquestación Outbound (Post-Vuelo)
+      // 3. Orquestación Outbound (Post-Vuelo con ámbito de escenario)
       const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
+      const targetLangCode = typeof targetLang === 'object' ? (targetLang.code || 'es') : targetLang;
       const outbound = await executeOutboundOrchestration({
         orchestratorModel: chatSettings?.orchestratorModel,
         rawNarrative: res.text || '',
-        targetLang,
-        compendiumCards: appData?.cards || [],
+        targetLang: targetLangCode,
+        compendiumCards: activeScenarioCards,
         chatSettings,
         baseUrl: chatSettings?.lmStudioUrl
       });
 
-      const finalNarrative = outbound.formattedText || res.text || 'Sin respuesta.';
+      const finalNarrative = (outbound?.formattedText && outbound.formattedText.trim().length > 0)
+        ? outbound.formattedText.trim()
+        : ((res?.text && res.text.trim().length > 0) ? res.text.trim() : 'Sin respuesta.');
       const aiMsg = { from: 'ai', text: finalNarrative, timestamp: new Date().toISOString() };
       const finalMsgs = [...nextMsgs, aiMsg];
-      await persistMessages(finalMsgs);
+      await persistChatMessages(executionChatId, targetChatSnapshot, finalMsgs);
 
       // 4. Auto-creación de tarjetas de entidades descubiertas
       if (chatSettings?.autoCardCreation !== 'off' && outbound.discoveredEntities?.length > 0 && appData && onUpdateAppData) {
@@ -1099,92 +1186,120 @@ ${languageDirective}
             title: e.name,
             name: e.name,
             type: e.type || 'Objeto',
-            intro: e.summary || '',
-            text: e.summary || '',
-            tags: [e.type || 'Objeto'],
-            traits: [],
-            connectedCards: [chat.scenarioId].filter(Boolean),
-            importance: 5,
-            isPinned: false,
-            activationMode: 'dynamic',
-            createdAt: new Date().toISOString()
+            linkedScenario: targetChatSnapshot.scenarioId || scenario?.id || scenario?.title || '',
+            intro: e.description || '',
+            text: e.description || '',
+            tags: [e.type || 'Descubierto', scenario?.title || 'Escenario'].filter(Boolean),
+            traits: []
           }));
 
         if (newCards.length > 0) {
-          const nextCards = [...newCards, ...(appData.cards || [])];
-          const nextData = { ...appData, cards: nextCards };
-          onUpdateAppData(nextData);
-          if (folderHandle) saveAppDataToFolder(folderHandle, nextData).catch(console.warn);
+          const updatedAppData = {
+            ...appData,
+            cards: [...(appData.cards || []), ...newCards]
+          };
+          onUpdateAppData(updatedAppData);
+          if (folderHandle) {
+            saveAppDataToFolder(folderHandle, updatedAppData).catch(e => console.warn('Error auto-guardando tarjetas:', e));
+          }
         }
       }
 
-
-      // 6. Lanzar el resumen de contexto automático y la generación de tarjetas en segundo plano
-      runBackgroundSummarization(finalMsgs);
-      runBackgroundCardGeneration(finalMsgs);
+      // 5. Lanzar el resumen de contexto automático y la generación de tarjetas en segundo plano
+      runBackgroundSummarization(finalMsgs, targetChatSnapshot);
+      runBackgroundCardGeneration(finalMsgs, targetChatSnapshot);
 
     } catch (err) {
-      console.error("Error al enviar chat:", err);
-
-      const errorMsg = { from: 'ai', text: `[Error de conexión con IA]: ${err.message || 'LM Studio no accesible.'}`, timestamp: new Date().toISOString() };
-      await persistMessages([...nextMsgs, errorMsg]);
+      console.error("Error al enviar mensaje:", err);
+      const errorMsg = {
+        from: 'ai',
+        text: `[Error de conexión con IA]: ${err.message || 'Servidor de IA no accesible.'}`,
+        timestamp: new Date().toISOString()
+      };
+      await persistChatMessages(executionChatId, targetChatSnapshot, [...nextMsgs, errorMsg]);
     } finally {
-      setIsSending(false);
-      setGenerationProgress({ percent: 100, status: 'Completado' });
+      if (activeChatIdRef.current === executionChatId) {
+        setIsSending(false);
+        setGenerationProgress({ percent: 100, status: 'Completado' });
+      }
     }
   };
 
   // Función "Continuar" para pedir a la IA que prosiga la narrativa sin mensaje nuevo de usuario
   const handleContinue = async () => {
-    if (isSending) return;
+    if (messages.length === 0 || isSending) return;
     
+    const executionChatId = chat?.id;
+    const targetChatSnapshot = { ...chat };
+
     const streamingAiMsg = { from: 'ai', text: '', timestamp: new Date().toISOString() };
-    setMessages([...messages, streamingAiMsg]);
-    setIsSending(true);
-    setGenerationProgress({ percent: 15, status: '🧠 Evaluando continuación...' });
+    if (activeChatIdRef.current === executionChatId) {
+      setMessages([...messages, streamingAiMsg]);
+      setIsSending(true);
+      setGenerationProgress({ percent: 15, status: '🧠 Evaluando continuación...' });
+    }
 
     try {
+      const activeScenarioCards = getScenarioCards(scenario, targetChatSnapshot, appData, userChar);
       const basePrompt = buildSystemPrompt();
       const systemPrompt = `${basePrompt}\n\n[ÓRDENE EXTRA DE INMEDIATA]: Continúa la narración desde el punto exacto donde quedó.`;
 
       const res = await sendChatMessage({
         messages: messages,
         systemInstruction: systemPrompt,
-        contextDocuments: chat.contextDocuments || [],
+        contextDocuments: targetChatSnapshot.contextDocuments || [],
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
-          const targetLen = chatSettings?.responseLength || 1000;
-          const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
-          setGenerationProgress({
-            percent: streamPct,
-            status: `⚡ Redactando respuesta (${streamPct}%)...`
-          });
-          setMessages(prev => {
-            const copy = [...prev];
-            if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
-              copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
-            }
-            return copy;
-          });
+          if (activeChatIdRef.current === executionChatId) {
+            const targetLen = chatSettings?.responseLength || 1000;
+            const streamPct = Math.min(96, Math.max(30, Math.round(30 + (accumulated.length / targetLen) * 66)));
+            setGenerationProgress({
+              percent: streamPct,
+              status: `⚡ Redactando respuesta (${streamPct}%)...`
+            });
+            setMessages(prev => {
+              const copy = [...prev];
+              if (copy.length > 0 && copy[copy.length - 1].from !== 'user') {
+                copy[copy.length - 1] = { ...copy[copy.length - 1], text: accumulated };
+              }
+              return copy;
+            });
+          }
         }
       });
 
-      const aiMsg = { from: 'ai', text: res.text || 'Sin respuesta.', timestamp: new Date().toISOString() };
+      const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
+      const targetLangCode = typeof targetLang === 'object' ? (targetLang.code || 'es') : targetLang;
+      const outbound = await executeOutboundOrchestration({
+        orchestratorModel: chatSettings?.orchestratorModel,
+        rawNarrative: res.text || '',
+        targetLang: targetLangCode,
+        compendiumCards: activeScenarioCards,
+        chatSettings,
+        baseUrl: chatSettings?.lmStudioUrl
+      });
+
+      const finalNarrative = (outbound?.formattedText && outbound.formattedText.trim().length > 0)
+        ? outbound.formattedText.trim()
+        : ((res?.text && res.text.trim().length > 0) ? res.text.trim() : 'Sin respuesta.');
+      const aiMsg = { from: 'ai', text: finalNarrative, timestamp: new Date().toISOString() };
       const finalMsgs = [...messages, aiMsg];
-      await persistMessages(finalMsgs);
+      await persistChatMessages(executionChatId, targetChatSnapshot, finalMsgs);
 
       // Lanzar el resumen de contexto automático y la generación de tarjetas en segundo plano
-      runBackgroundSummarization(finalMsgs);
-      runBackgroundCardGeneration(finalMsgs);
+      runBackgroundSummarization(finalMsgs, targetChatSnapshot);
+      runBackgroundCardGeneration(finalMsgs, targetChatSnapshot);
 
     } catch (err) {
       console.error("Error al continuar chat:", err);
-      const errorMsg = { from: 'ai', text: `[Error de conexión con IA]: ${err.message || 'LM Studio no accesible.'}`, timestamp: new Date().toISOString() };
-      await persistMessages([...messages, errorMsg]);
+      const errorMsg = { from: 'ai', text: `[Error de conexión con IA]: ${err.message || 'Servidor de IA no accesible.'}`, timestamp: new Date().toISOString() };
+      await persistChatMessages(executionChatId, targetChatSnapshot, [...messages, errorMsg]);
     } finally {
-      setIsSending(false);
-      setGenerationProgress({ percent: 100, status: 'Completado' });
+      if (activeChatIdRef.current === executionChatId) {
+        setIsSending(false);
+        setGenerationProgress({ percent: 100, status: 'Completado' });
+      }
     }
   };
 
@@ -1218,50 +1333,46 @@ ${languageDirective}
 
   // Personaje del jugador
   const userChar = (appData?.cards || []).find(c => 
-    (c.type === 'Personaje' || c.type === 'User') && 
-    (c.id === chat?.userCharacterId || (c.title && c.title === chat?.userCharacterName))
-  );
+    (c.type === 'Personaje' || c.type === 'User') && (
+      c.id === chat?.userCharacterId || 
+      (c.title && c.title === chat?.userCharacterName) ||
+      c.id === chat?.characterId ||
+      (c.title && c.title === chat?.character) ||
+      c.id === chat?.character ||
+      (c.name && c.name === chat?.character)
+    )
+  ) || findMatchingEntity(chat?.character, appData?.cards);
 
   // Escenario activo
   const scenario = (appData?.scenarios || []).find(s => 
     s.id === chat?.scenarioId || s.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
   ) || (appData?.cards || []).find(c => 
     c.id === chat?.scenarioId || c.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
-  );
+  ) || findMatchingEntity(chat?.scenario, appData);
 
-  // Personajes del compendio asociados estrictamente a este escenario
-  const scenarioCardIds = Array.isArray(scenario?.cards) ? scenario.cards : [];
-  const chatCharIds = Array.isArray(chat?.characters) ? chat.characters.map(c => c.id || c.name) : [];
-
-  const scenarioCharacters = (appData?.cards || []).filter(c => {
-    if (!c || c.type !== 'Personaje') return false;
-    if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
-    const isScenarioLinked = c.linkedScenario === chat.scenarioId || 
-                             c.linkedScenario === scenario?.title || 
-                             c.linkedScenario === scenario?.id;
-    const isDirectlyLinked = scenarioCardIds.includes(c.id) || scenarioCardIds.includes(c.title);
-    const isChatChar = chatCharIds.includes(c.id) || chatCharIds.includes(c.title);
-    return isScenarioLinked || isDirectlyLinked || isChatChar;
-  });
+  // Personajes y entidades del compendio asociados estrictamente a este escenario
+  const scenarioCards = getScenarioCards(scenario, chat, appData, userChar);
+  const scenarioCharacters = scenarioCards.filter(c => c.type === 'Personaje');
 
   // Detección del personaje activo dentro del escenario (sin cruzar personajes de otros chats)
-  const defaultScenarioChar = scenarioCharacters[0] || null;
-  const activeCharacter = detectActiveCharacter(
+  const defaultScenarioChar = scenarioCharacters[0] || userChar || null;
+  const detectedChar = detectActiveCharacter(
     messages, 
-    scenarioCharacters.length > 0 ? scenarioCharacters : (appData?.cards || []).filter(c => c && c.type === 'Personaje'), 
+    scenarioCharacters, 
     userChar, 
     defaultScenarioChar
   );
+  const activeCharacter = manualCharacterOverride || detectedChar;
 
   // Último mensaje para matching de expresión
   const lastMessageText = messages.length > 0 ? (messages[messages.length - 1]?.text || '') : '';
   const matchedExpression = matchCharacterExpression(activeCharacter, lastMessageText);
 
-  // Fondo de localización dinámico
-  const wallpaperUrl = resolveLocationWallpaper(messages, scenario, appData?.cards || [], chatSettings);
+  // Fondo de localización dinámico estrictamente vinculado al escenario
+  const wallpaperUrl = resolveLocationWallpaper(messages, scenario, scenarioCards, chatSettings);
   const chatOpacity = chatSettings.chatBackgroundOpacity ?? 0.85;
 
-  const isSidebarVisible = (chatSettings.showCharacterSidebar !== false) && !isCharacterSidebarClosed && Boolean(activeCharacter);
+  const isSidebarVisible = (chatSettings.showCharacterSidebar !== false) && !isCharacterSidebarClosed;
 
   const containerStyle = {
     '--chat-font-family': fontFamiliesMap[effectiveFontFamily] || fontFamiliesMap.default,
@@ -1391,7 +1502,7 @@ ${languageDirective}
                 </div>
               ) : (
                 <div className="msg-body">
-                  {!m.text && isSending && idx === messages.length - 1 ? (
+                  {m.from !== 'user' && !m.text && isSending && idx === messages.length - 1 ? (
                     <div className="ai-thinking-box" style={{
                       background: 'rgba(255, 211, 107, 0.05)',
                       border: '1px solid rgba(255, 211, 107, 0.25)',
@@ -1423,7 +1534,7 @@ ${languageDirective}
                     </div>
                   ) : (
                     <>
-                      {isSending && idx === messages.length - 1 && (
+                      {m.from !== 'user' && isSending && idx === messages.length - 1 && (
                         <div style={{ 
                           marginBottom: '8px', 
                           padding: '4px 8px',
@@ -1441,7 +1552,7 @@ ${languageDirective}
                         </div>
                       )}
                       <FormattedMessageText text={m.text} onTagClick={handleTagClick} appData={appData} />
-                      {isSending && idx === messages.length - 1 && (
+                      {m.from !== 'user' && isSending && idx === messages.length - 1 && (
                         <span className="streaming-cursor" style={{ display: 'inline-block', width: '7px', height: '14px', background: '#ffd36b', marginLeft: '4px', verticalAlign: '-1px', borderRadius: '1px', opacity: 0.8 }} />
                       )}
                     </>
@@ -1451,6 +1562,49 @@ ${languageDirective}
             </div>
           </div>
         ))}
+        {/* Placeholder de pensamiento de la IA si la lista termina en mensaje de usuario mientras se genera */}
+        {isSending && messages.length > 0 && messages[messages.length - 1].from === 'user' && (
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%', marginTop: '10px' }}>
+            <div className="chat-message-bubble ai" style={{ flex: 1 }}>
+              <div className="msg-header">
+                <span className="msg-author">
+                  {appData?.scenarios?.find(s => s.id === chat.scenarioId)?.narrator ? '🧙 Narrador (IA)' : 'Narrador (IA)'}
+                </span>
+              </div>
+              <div className="msg-body">
+                <div className="ai-thinking-box" style={{
+                  background: 'rgba(255, 211, 107, 0.05)',
+                  border: '1px solid rgba(255, 211, 107, 0.25)',
+                  borderRadius: '8px',
+                  padding: '12px 16px',
+                  margin: '4px 0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.84rem', color: '#ffd36b', fontWeight: '600' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                      <FontAwesomeIcon icon={faBrain} className="fa-pulse" />
+                      <span>{generationProgress.status || 'La IA está pensando...'}</span>
+                    </span>
+                    <span style={{ fontFamily: 'monospace', fontSize: '0.88rem', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(255,211,107,0.2)' }}>
+                      {generationProgress.percent}%
+                    </span>
+                  </div>
+                  <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${generationProgress.percent}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                      borderRadius: '3px',
+                      transition: 'width 0.25s ease-out'
+                    }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Marcador invisible para auto-scroll hacia la última interacción */}
         <div ref={messagesEndRef} style={{ height: '1px', width: '100%' }} />
       </div>
@@ -1769,6 +1923,12 @@ ${languageDirective}
           onInspectCharacter={(c) => setActiveEntityModal({ draftTitle: c.title || c.name, existing: c })}
           onGeneratePortrait={handleGenerateSidebarPortrait}
           isGeneratingPortrait={isGeneratingSidebarPortrait}
+          availableCharacters={scenarioCharacters}
+          onSelectCharacter={(c) => {
+            setManualCharacterOverride(c);
+            setManualCharacterImageId(null);
+          }}
+          onOpenCreateModal={onOpenCreateModal}
           onClose={() => setIsCharacterSidebarClosed(true)}
         />
       )}

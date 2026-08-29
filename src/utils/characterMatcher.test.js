@@ -118,11 +118,71 @@ describe('characterMatcher utilities', () => {
       expect(matched.url).toBe('https://example.com/azgael-default.jpg');
     });
 
-    test('handles characters without images array gracefully', () => {
-      const bareChar = { id: 'bare', title: 'Bare NPC', cover: 'https://example.com/bare.jpg' };
-      const matched = matchCharacterExpression(bareChar, 'Hola');
+    test('matches tags field (e.g. bikini, happy) using synonym expansion', () => {
+      const charWithTags = {
+        id: 'char-tags-1',
+        title: 'Ty Lee',
+        cover: 'https://example.com/tylee-default.jpg',
+        images: [
+          { id: 'img-1', url: 'https://example.com/tylee-default.jpg', label: 'Default', isDefault: true },
+          { id: 'img-2', url: 'https://example.com/tylee-bikini.jpg', label: 'Playa', tags: 'bikini, happy', isDefault: false },
+          { id: 'img-3', url: 'https://example.com/tylee-armor.jpg', label: 'Guerra', tags: 'armor, combat', isDefault: false }
+        ]
+      };
+
+      const messageText = 'Ty Lee está nadando feliz en el mar con su traje de baño.';
+      const matched = matchCharacterExpression(charWithTags, messageText);
       expect(matched).toBeDefined();
-      expect(matched.url).toBe('https://example.com/bare.jpg');
+      expect(matched.url).toBe('https://example.com/tylee-bikini.jpg');
+    });
+
+    test('matches English tags for characters experiencing pleasure in underwear', () => {
+      const mariChar = {
+        id: 'char-mari',
+        title: 'Mari Setogaya',
+        cover: 'https://example.com/mari-default.jpg',
+        images: [
+          { id: 'img-m1', url: 'https://example.com/mari-uniform-advancing.jpg', tags: 'highschool uniform, advancing to genitals', isDefault: true },
+          { id: 'img-m2', url: 'https://example.com/mari-neko-heat.jpg', tags: 'nude, nekomimi form, in heat, pleading', isDefault: false },
+          { id: 'img-m3', url: 'https://example.com/mari-ecstasy.jpg', tags: 'topless, panties, underwear, aroused, pleasure, seductive, bat wings', isDefault: false },
+          { id: 'img-m4', url: 'https://example.com/mari-sport-knowing.jpg', tags: 'sport clothes, knowing look', isDefault: false }
+        ]
+      };
+
+      // Test 1: Entrepierna / Genitales
+      const advancingContext = 'Mari se arrastra por el suelo hacia su entrepierna con una mirada fija.';
+      const matchedAdvancing = matchCharacterExpression(mariChar, advancingContext);
+      expect(matchedAdvancing.url).toBe('https://example.com/mari-uniform-advancing.jpg');
+
+      // Test 2: Nekomimi / En celo / Súplica
+      const nekoHeatContext = 'Mari adopta su forma de gata nekomimi desnuda, ardiendo en celo y suplicando con ojos húmedos.';
+      const matchedNeko = matchCharacterExpression(mariChar, nekoHeatContext);
+      expect(matchedNeko.url).toBe('https://example.com/mari-neko-heat.jpg');
+
+      // Test 3: Mirada cómplice / Sport
+      const knowingContext = 'Mari te mira con ropa deportiva y una sonrisa cómplice sabiendo lo que planeas.';
+      const matchedKnowing = matchCharacterExpression(mariChar, knowingContext);
+      expect(matchedKnowing.url).toBe('https://example.com/mari-sport-knowing.jpg');
+    });
+
+    test('matches location multi-image variant with English tags like night, rain, ruins', () => {
+      const locWithVariants = {
+        id: 'loc-var-1',
+        type: 'Lugar',
+        title: 'Garrison',
+        cover: 'https://example.com/garrison-day.jpg',
+        images: [
+          { id: 'img-g-1', url: 'https://example.com/garrison-day.jpg', label: 'Día', tags: 'day, sunny, intact', isDefault: true },
+          { id: 'img-g-2', url: 'https://example.com/garrison-night-rain.jpg', label: 'Noche Lluvia', tags: 'night, rain, storm, ruins', isDefault: false }
+        ]
+      };
+
+      const messages = [
+        { from: 'narrator', text: 'Llegas a las murallas de Garrison bajo una intensa lluvia en plena noche oscura.' }
+      ];
+
+      const wallpaper = resolveLocationWallpaper(messages, mockScenario, [locWithVariants], { showLocationBackground: true });
+      expect(wallpaper).toBe('https://example.com/garrison-night-rain.jpg');
     });
   });
 

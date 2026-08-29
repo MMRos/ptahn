@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { 
-  faUser, 
-  faEdit, 
-  faUserPlus, 
-  faHeart, 
+import {
+  faUser,
+  faEdit,
+  faUserPlus,
+  faHeart,
   faLayerGroup,
   faSignInAlt,
   faSignOutAlt,
@@ -27,28 +27,28 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 
 import ASSET_LIBRARY from '../data/assets';
-import { 
-  changeUserPassword, 
-  fetchAllUsersAdmin, 
-  createUserAdmin, 
-  updateUserRoleAdmin, 
+import {
+  changeUserPassword,
+  fetchAllUsersAdmin,
+  createUserAdmin,
+  updateUserRoleAdmin,
   deleteUserAdmin,
-  validatePasswordRule 
+  validatePasswordRule
 } from '../utils/authApi';
 import { relinkAllCreationsToUser } from '../utils/storage';
 import MediaPickerModal from '../components/MediaPickerModal';
 import './profile.css';
 
-export default function Profile({ 
-  appData = {}, 
+export default function Profile({
+  appData = {},
   currentUser = null,
   onOpenAuthModal,
   onLogout,
   onUpdateUser,
   onUpdateAppData,
-  onNavigate, 
-  onOpenChat, 
-  onOpenScenario 
+  onNavigate,
+  onOpenChat,
+  onOpenScenario
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [profileName, setProfileName] = useState(currentUser?.username || 'Creador Ptah');
@@ -332,15 +332,15 @@ export default function Profile({
   ];
 
   const userScenarios = currentUser
-    ? allUserCreations.filter(item => 
-        !item.creatorId || 
-        item.creatorId === currentUser.id || 
-        item.creatorId === 'usr-master-admin' ||
-        item.creatorName?.toLowerCase() === currentUser.username?.toLowerCase() ||
-        item.creatorName === 'Creador Ptah' ||
-        item.creatorName === 'Azgael' ||
-        currentUser.role === 'admin'
-      )
+    ? allUserCreations.filter(item =>
+      !item.creatorId ||
+      item.creatorId === currentUser.id ||
+      item.creatorId === 'usr-master-admin' ||
+      item.creatorName?.toLowerCase() === currentUser.username?.toLowerCase() ||
+      item.creatorName === 'Creador Ptah' ||
+      item.creatorName === 'Azgael' ||
+      currentUser.role === 'admin'
+    )
     : allUserCreations;
   const scenariosCount = userScenarios.length;
 
@@ -351,14 +351,14 @@ export default function Profile({
   return (
     <div className="profile-page-redesigned">
       {/* 1. Portada como cabecera con avatar e info */}
-      <div 
+      <div
         className="profile-cover-banner"
         style={{ backgroundImage: `linear-gradient(180deg, rgba(13, 14, 22, 0.4) 0%, rgba(13, 14, 22, 0.95) 100%), url(${coverUrl})` }}
       >
         <div className="banner-top-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {/* Botón cambiar fondo de cabecera */}
-          <button 
-            type="button" 
+          <button
+            type="button"
             className="cover-edit-floating-btn"
             onClick={() => setMediaModal({
               isOpen: true,
@@ -373,17 +373,17 @@ export default function Profile({
 
           {currentUser ? (
             <>
-              <button 
-                type="button" 
-                className="edit-profile-btn" 
+              <button
+                type="button"
+                className="edit-profile-btn"
                 style={{ background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#93c5fd' }}
                 onClick={() => setShowPasswordModal(true)}
               >
                 <FontAwesomeIcon icon={faKey} /> Cambiar Contraseña
               </button>
-              <button 
-                type="button" 
-                className="edit-profile-btn" 
+              <button
+                type="button"
+                className="edit-profile-btn"
                 style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5' }}
                 onClick={onLogout}
               >
@@ -391,9 +391,9 @@ export default function Profile({
               </button>
             </>
           ) : (
-            <button 
-              type="button" 
-              className="edit-profile-btn" 
+            <button
+              type="button"
+              className="edit-profile-btn"
               style={{ background: 'rgba(255, 211, 107, 0.25)', borderColor: '#ffd36b', color: '#ffd36b' }}
               onClick={() => onOpenAuthModal && onOpenAuthModal('login')}
             >
@@ -401,9 +401,9 @@ export default function Profile({
             </button>
           )}
 
-          <button 
+          <button
             type="button"
-            className="edit-profile-btn" 
+            className="edit-profile-btn"
             onClick={() => isEditing ? handleSaveProfile() : setIsEditing(true)}
           >
             <FontAwesomeIcon icon={isEditing ? faCheck : faEdit} /> {isEditing ? 'Guardar Cambios' : 'Editar Perfil'}
@@ -412,7 +412,7 @@ export default function Profile({
 
         <div className="profile-banner-bottom">
           {/* Avatar con botón interactivo de cámara para personalizar */}
-          <div 
+          <div
             className="avatar-container"
             onClick={() => setMediaModal({
               isOpen: true,
@@ -540,7 +540,7 @@ export default function Profile({
               <div className="auth-input-group">
                 <label><FontAwesomeIcon icon={faLock} /> Contraseña Actual</label>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <input 
+                  <input
                     type={showCurrentPass ? 'text' : 'password'}
                     placeholder="Tu contraseña actual"
                     value={currentPassword}
@@ -548,7 +548,7 @@ export default function Profile({
                     style={{ width: '100%', paddingRight: '38px' }}
                     required
                   />
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setShowCurrentPass(!showCurrentPass)}
                     style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.65)', cursor: 'pointer', padding: '4px' }}
@@ -561,7 +561,7 @@ export default function Profile({
               <div className="auth-input-group">
                 <label><FontAwesomeIcon icon={faKey} /> Nueva Contraseña</label>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <input 
+                  <input
                     type={showNewPass ? 'text' : 'password'}
                     placeholder="Mínimo 8 car., Mayús, Minús, Núm, Símbolo"
                     value={newPassword}
@@ -569,7 +569,7 @@ export default function Profile({
                     style={{ width: '100%', paddingRight: '38px' }}
                     required
                   />
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setShowNewPass(!showNewPass)}
                     style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.65)', cursor: 'pointer', padding: '4px' }}
@@ -582,7 +582,7 @@ export default function Profile({
               <div className="auth-input-group">
                 <label><FontAwesomeIcon icon={faLock} /> Confirmar Nueva Contraseña</label>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <input 
+                  <input
                     type={showConfirmNewPass ? 'text' : 'password'}
                     placeholder="Repite la nueva contraseña"
                     value={confirmNewPassword}
@@ -590,7 +590,7 @@ export default function Profile({
                     style={{ width: '100%', paddingRight: '38px' }}
                     required
                   />
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setShowConfirmNewPass(!showConfirmNewPass)}
                     style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.65)', cursor: 'pointer', padding: '4px' }}
@@ -628,9 +628,9 @@ export default function Profile({
                 </span>
               </div>
 
-              <button 
-                type="submit" 
-                className="auth-submit-btn" 
+              <button
+                type="submit"
+                className="auth-submit-btn"
                 disabled={passChangeLoading}
                 style={{ marginTop: '8px' }}
               >
@@ -684,15 +684,15 @@ export default function Profile({
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => onOpenAuthModal && onOpenAuthModal('login')}
               style={{ background: '#ffd36b', color: '#000', border: 'none', borderRadius: '6px', padding: '8px 16px', fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer' }}
             >
               <FontAwesomeIcon icon={faSignInAlt} /> Iniciar Sesión
             </button>
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => onOpenAuthModal && onOpenAuthModal('register')}
               style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '8px 14px', fontWeight: '600', fontSize: '0.82rem', cursor: 'pointer' }}
             >
@@ -722,7 +722,7 @@ export default function Profile({
                 </small>
               </div>
             </div>
-            <button 
+            <button
               type="button"
               onClick={() => setShowCreateModal(true)}
               style={{
@@ -785,7 +785,7 @@ export default function Profile({
                         <td style={{ padding: '10px 8px', color: 'rgba(255,255,255,0.7)' }}>{u.email}</td>
                         <td style={{ padding: '10px 8px' }}>
                           {canEditThis ? (
-                            <select 
+                            <select
                               value={u.role}
                               onChange={(e) => handleRoleChange(u.id, e.target.value)}
                               style={{ background: '#1e1e2f', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.78rem' }}
@@ -841,8 +841,8 @@ export default function Profile({
             <form onSubmit={handleCreateUserSubmit} className="auth-form" style={{ marginTop: '12px' }}>
               <div className="auth-input-group">
                 <label>Correo Electrónico</label>
-                <input 
-                  type="email" 
+                <input
+                  type="email"
                   placeholder="usuario@ejemplo.com"
                   value={newAccountEmail}
                   onChange={(e) => setNewAccountEmail(e.target.value)}
@@ -852,8 +852,8 @@ export default function Profile({
 
               <div className="auth-input-group">
                 <label>Nombre de Usuario</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   placeholder="Nombre de Creador / Técnico"
                   value={newAccountUsername}
                   onChange={(e) => setNewAccountUsername(e.target.value)}
@@ -863,8 +863,8 @@ export default function Profile({
 
               <div className="auth-input-group">
                 <label>Rol de la Cuenta</label>
-                <select 
-                  value={newAccountRole} 
+                <select
+                  value={newAccountRole}
                   onChange={(e) => setNewAccountRole(e.target.value)}
                   style={{ width: '100%', padding: '10px 12px', background: '#1a1b2b', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', color: '#fff', fontSize: '0.85rem' }}
                 >
@@ -878,7 +878,7 @@ export default function Profile({
               <div className="auth-input-group">
                 <label>Contraseña Temporal / Asignada</label>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <input 
+                  <input
                     type={showNewAccountPass ? 'text' : 'password'}
                     placeholder="Mínimo 8 car., Mayús, Minús, Núm, Símbolo"
                     value={newAccountPassword}
@@ -886,7 +886,7 @@ export default function Profile({
                     style={{ width: '100%', paddingRight: '38px' }}
                     required
                   />
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setShowNewAccountPass(!showNewAccountPass)}
                     style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.65)', cursor: 'pointer', padding: '4px' }}
@@ -896,9 +896,9 @@ export default function Profile({
                 </div>
               </div>
 
-              <button 
-                type="submit" 
-                className="auth-submit-btn" 
+              <button
+                type="submit"
+                className="auth-submit-btn"
                 disabled={createAccountLoading}
                 style={{ marginTop: '8px' }}
               >
@@ -915,7 +915,7 @@ export default function Profile({
         <div className="psection-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
           <h3><FontAwesomeIcon icon={faLayerGroup} /> Mis Creaciones Modulares ({userScenarios.length})</h3>
           {currentUser && (
-            <button 
+            <button
               type="button"
               onClick={handleRelinkCreations}
               style={{
@@ -1023,7 +1023,7 @@ export default function Profile({
       </div>
 
       {/* Modal Reutilizable de Medios (Avatar / Portada) */}
-      <MediaPickerModal 
+      <MediaPickerModal
         isOpen={mediaModal.isOpen}
         onClose={() => setMediaModal({ ...mediaModal, isOpen: false })}
         title={mediaModal.title}

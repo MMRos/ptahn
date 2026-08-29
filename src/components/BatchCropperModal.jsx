@@ -14,20 +14,21 @@ import {
   faSmile
 } from '@fortawesome/free-solid-svg-icons';
 import { calculateViewportDimensions, computeBaseFit, exportCroppedCanvas } from '../utils/imageCropUtils';
+import { toggleTagInString } from '../utils/imageTagging';
 import './scenario.css';
 
-const QUICK_LABELS = ['Normal', 'Alegre', 'Enfadado', 'Triste', 'Sorprendido', 'Armadura', 'Combate', 'Gala', 'Casual'];
+const QUICK_LABELS = ['Normal', 'Alegre', 'Enfadado', 'Triste', 'Bikini', 'Armadura', 'Combate', 'Gala', 'Casual', 'Noche', 'Lluvia', 'Ruinas'];
 
 export default function BatchCropperModal({
   isOpen = false,
-  items = [], // Array de { id, originalSrc, label, isDefault }
+  items = [], // Array de { id, originalSrc, label, tags, isDefault }
   aspectRatio = 3 / 4, // 3/4 para personajes
   onClose = () => {},
   onSaveBatch = () => {}
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [batchItems, setBatchItems] = useState([]);
-  const [cropStates, setCropStates] = useState({}); // { [id]: { zoom, position, baseFit, imgNatural, label, isDefault } }
+  const [cropStates, setCropStates] = useState({}); // { [id]: { zoom, position, baseFit, imgNatural, label, tags, isDefault } }
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isProcessing, setIsProcessing] = useState(false);
@@ -52,6 +53,7 @@ export default function BatchCropperModal({
           baseFit: { scale: 1, width: 0, height: 0, initX: 0, initY: 0 },
           imgNatural: { width: 0, height: 0 },
           label: it.label || (idx === 0 ? 'Normal / Principal' : `Expresión ${idx + 1}`),
+          tags: it.tags || it.label || '',
           isDefault: it.isDefault !== undefined ? it.isDefault : (idx === 0),
           isConfigured: false
         };
@@ -192,16 +194,24 @@ export default function BatchCropperModal({
     }));
   };
 
-  // Actualizar etiqueta
+  // Actualizar etiqueta o tags
   const updateActiveLabel = (newLabel) => {
     if (!activeItem) return;
     setCropStates(prev => ({
       ...prev,
       [activeItem.id]: {
         ...prev[activeItem.id],
-        label: newLabel
+        label: newLabel,
+        tags: newLabel
       }
     }));
+  };
+
+  const toggleActiveTag = (tag) => {
+    if (!activeItem) return;
+    const current = activeCropState?.tags || activeCropState?.label || '';
+    const next = toggleTagInString(current, tag);
+    updateActiveLabel(next);
   };
 
   // Establecer como default
@@ -261,10 +271,12 @@ export default function BatchCropperModal({
         const it = batchItems[i];
         const state = cropStates[it.id] || {};
         const croppedUrl = await generateSingleCrop(it, state);
+        const tagLabel = state.tags?.trim() || state.label?.trim() || it.label?.trim() || (i === 0 ? 'Normal / Principal' : `Expresión ${i + 1}`);
         results.push({
           id: it.id || `img-${Date.now()}-${i}`,
           url: croppedUrl,
-          label: state.label?.trim() || it.label?.trim() || (i === 0 ? 'Normal / Principal' : `Expresión ${i + 1}`),
+          label: tagLabel,
+          tags: tagLabel,
           isDefault: !!state.isDefault
         });
       }
@@ -603,45 +615,54 @@ export default function BatchCropperModal({
               </button>
             </div>
 
-            <input
-              type="text"
+            <textarea
+              rows={3}
               value={activeCropState?.label || ''}
               onChange={(e) => updateActiveLabel(e.target.value)}
-              placeholder="Ej: Alegre, Enfadado, Con armadura, Batalla..."
+              placeholder="Ej: school uniform, kneeling, crawling, blushing..."
               style={{
                 width: '100%',
+                minHeight: '60px',
                 padding: '6px 10px',
                 background: '#1e1e2c',
                 border: '1px solid rgba(255,255,255,0.15)',
                 borderRadius: '5px',
-                color: '#fff',
+                color: '#ffd36b',
                 fontSize: '0.8rem',
+                fontWeight: '600',
+                lineHeight: '1.3',
                 boxSizing: 'border-box',
-                marginBottom: '8px'
+                marginBottom: '8px',
+                resize: 'vertical'
               }}
             />
 
             {/* Chips de sugerencias rápidas */}
             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', alignSelf: 'center', marginRight: '2px' }}>Sugerencias:</span>
-              {QUICK_LABELS.map(tag => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => updateActiveLabel(tag)}
-                  style={{
-                    background: activeCropState?.label === tag ? 'rgba(255, 211, 107, 0.25)' : 'rgba(255,255,255,0.04)',
-                    border: activeCropState?.label === tag ? '1px solid #ffd36b' : '1px solid rgba(255,255,255,0.08)',
-                    color: activeCropState?.label === tag ? '#ffd36b' : 'rgba(255,255,255,0.7)',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontSize: '0.68rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {tag}
-                </button>
-              ))}
+              {QUICK_LABELS.map(tag => {
+                const currentText = activeCropState?.tags || activeCropState?.label || '';
+                const isSelected = currentText.toLowerCase().includes(tag.toLowerCase());
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleActiveTag(tag)}
+                    style={{
+                      background: isSelected ? 'rgba(255, 211, 107, 0.25)' : 'rgba(255,255,255,0.04)',
+                      border: isSelected ? '1px solid #ffd36b' : '1px solid rgba(255,255,255,0.08)',
+                      color: isSelected ? '#ffd36b' : 'rgba(255,255,255,0.7)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontSize: '0.68rem',
+                      fontWeight: isSelected ? '700' : 'normal',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

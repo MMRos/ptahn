@@ -1,4 +1,7 @@
 
+import { saveAppDataToIndexedDB } from './db';
+import { saveAppDataToServer, saveSettingsToServer } from './serverApi';
+
 const STORAGE_KEY = 'ptah-app-data';
 
 const defaultAppData = {
@@ -7,6 +10,18 @@ const defaultAppData = {
   narrators: [],
   tools: [],
 };
+
+// In-memory cache for instant synchronous access across React components
+let memoryAppData = null;
+let memoryChatSettings = null;
+
+export function setMemoryAppData(data) {
+  memoryAppData = data;
+}
+
+export function setMemoryChatSettings(settings) {
+  memoryChatSettings = settings;
+}
 
 // ----------------------------------------------------
 // IndexedDB para persistir el Handle de la carpeta
@@ -64,7 +79,7 @@ async function verifyPermission(handle, write = true) {
     try {
       if (await handle.queryPermission() === 'granted') return true;
       if (await handle.requestPermission() === 'granted') return true;
-    } catch (err) {}
+    } catch (err) { }
   }
   return false;
 }
@@ -142,7 +157,7 @@ export async function loadAppDataFromFolder(rootDirHandle) {
     if (!await verifyPermission(rootDirHandle, false)) return loadAppData();
 
     const baseDir = await getDirectoryHandleFromPath(rootDirHandle, 'ptah-data', true);
-    
+
     // 1. Intentar cargar app-data.json master
     const masterData = await readJsonFile(baseDir, 'app-data.json');
     if (masterData && (masterData.scenarios?.length || masterData.cards?.length)) {
@@ -163,7 +178,7 @@ export async function loadAppDataFromFolder(rootDirHandle) {
           if (item && (item.title || item.name)) scannedScenarios.push(item);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       const cardsDir = await baseDir.getDirectoryHandle('cards', { create: false });
@@ -173,7 +188,7 @@ export async function loadAppDataFromFolder(rootDirHandle) {
           if (item && (item.title || item.name)) scannedCards.push(item);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     try {
       const narratorsDir = await baseDir.getDirectoryHandle('narrators', { create: false });
@@ -183,7 +198,7 @@ export async function loadAppDataFromFolder(rootDirHandle) {
           if (item) scannedNarrators.push(item);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     let scannedTools = [];
     try {
@@ -194,7 +209,7 @@ export async function loadAppDataFromFolder(rootDirHandle) {
           if (item) scannedTools.push(item);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     if (scannedScenarios.length || scannedCards.length || scannedNarrators.length || scannedTools.length) {
       const loadedFolderData = {
@@ -246,7 +261,7 @@ export async function saveChatToFolder(chat, rootDirHandle) {
 
   const baseDir = await getDirectoryHandleFromPath(rootDirHandle, 'ptah-data', true);
   const chatsDir = await getDirectoryHandleFromPath(baseDir, 'chats', true);
-  
+
   const singleChatDir = await getDirectoryHandleFromPath(chatsDir, chat.id, true);
   await writeJsonFile(singleChatDir, 'chat-data.json', chat);
 
@@ -262,16 +277,17 @@ export function clearAllLocalData() {
   try {
     window.localStorage.removeItem(STORAGE_KEY);
     window.localStorage.clear();
-  } catch (err) {}
+  } catch (err) { }
 }
 
 export const CHAT_SETTINGS_KEY = 'ptah-chat-settings';
 
 export const DEFAULT_CHAT_SETTINGS = {
-  preferredModel: 'Precog-Magnum-31B-i1-GGUF',
+  preferredModel: 'Precog-Magnum-31B.i1-Q3_K_S.gguf',
   preferredLanguage: 'auto',
   responseLength: 1000,
-  lmStudioUrl: 'http://localhost:1234',
+  llmServerUrl: 'http://localhost:3001',
+  lmStudioUrl: 'http://localhost:3001',
   imageServerUrl: 'http://127.0.0.1:42016',
   fontFamily: 'default',
   fontSize: 'normal',
@@ -286,18 +302,21 @@ export const DEFAULT_CHAT_SETTINGS = {
   showLocationBackground: true,
   showCharacterSidebar: true,
   chatBackgroundOpacity: 0.85,
-  preferredImageModel: 'DreamShaperXL_Lightning.safetensors',
-  orchestratorModel: '', // Lightweight SLM assistant
+  preferredImageModel: 'malaAnimeMixNSFW_v70WithoutVAE.safetensors',
+  orchestratorModel: 'mistral-nemo-instruct-2407-gguf-Q4-K-M.gguf', // Lightweight GGUF SLM assistant / intermediary
   autoCardCreation: 'auto', // 'auto' | 'manual' | 'off'
   autoImageDiffusion: 'manual' // 'auto' | 'manual' | 'off'
 };
 
 export function loadChatSettings() {
-  if (typeof window === 'undefined') return DEFAULT_CHAT_SETTINGS;
+  if (typeof window === 'undefined') return memoryChatSettings || DEFAULT_CHAT_SETTINGS;
   try {
     const stored = window.localStorage.getItem(CHAT_SETTINGS_KEY);
-    if (!stored) return DEFAULT_CHAT_SETTINGS;
+    if (!stored) return memoryChatSettings || DEFAULT_CHAT_SETTINGS;
     const parsed = JSON.parse(stored);
+    const rawServerUrl = (parsed.llmServerUrl && !parsed.llmServerUrl.includes(':1234') && parsed.llmServerUrl !== DEFAULT_CHAT_SETTINGS.llmServerUrl)
+      ? parsed.llmServerUrl
+      : (parsed.lmStudioUrl && !parsed.lmStudioUrl.includes(':1234') ? parsed.lmStudioUrl : (parsed.llmServerUrl || DEFAULT_CHAT_SETTINGS.llmServerUrl));
     return {
       preferredModel: parsed.preferredModel || DEFAULT_CHAT_SETTINGS.preferredModel,
       orchestratorModel: parsed.orchestratorModel || DEFAULT_CHAT_SETTINGS.orchestratorModel,
@@ -305,7 +324,8 @@ export function loadChatSettings() {
       autoImageDiffusion: parsed.autoImageDiffusion || DEFAULT_CHAT_SETTINGS.autoImageDiffusion,
       preferredLanguage: parsed.preferredLanguage || DEFAULT_CHAT_SETTINGS.preferredLanguage,
       responseLength: parsed.responseLength || DEFAULT_CHAT_SETTINGS.responseLength,
-      lmStudioUrl: parsed.lmStudioUrl || DEFAULT_CHAT_SETTINGS.lmStudioUrl,
+      llmServerUrl: rawServerUrl,
+      lmStudioUrl: rawServerUrl,
       imageServerUrl: parsed.imageServerUrl || DEFAULT_CHAT_SETTINGS.imageServerUrl,
       preferredImageModel: parsed.preferredImageModel || DEFAULT_CHAT_SETTINGS.preferredImageModel,
       fontFamily: parsed.fontFamily || DEFAULT_CHAT_SETTINGS.fontFamily,
@@ -331,19 +351,21 @@ export function loadChatSettings() {
 
 
 export function saveChatSettings(settings) {
+  memoryChatSettings = settings;
+  saveSettingsToServer(settings).catch(() => {});
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(CHAT_SETTINGS_KEY, JSON.stringify(settings));
   } catch (error) {
-    console.warn('[Storage]: Could not save chatSettings to localStorage:', error);
+    // Silent in case of quota limit
   }
 }
 
 export function loadAppData() {
-  if (typeof window === 'undefined') return defaultAppData;
+  if (typeof window === 'undefined') return memoryAppData || defaultAppData;
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (!stored) return defaultAppData;
+    if (!stored) return memoryAppData || defaultAppData;
     const parsed = JSON.parse(stored);
     return {
       scenarios: Array.isArray(parsed.scenarios) ? parsed.scenarios : [],
@@ -352,17 +374,19 @@ export function loadAppData() {
       tools: Array.isArray(parsed.tools) ? parsed.tools : [],
     };
   } catch (error) {
-    return defaultAppData;
+    return memoryAppData || defaultAppData;
   }
 }
 
 export function saveAppData(data) {
+  memoryAppData = data;
   if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (error) {
-    console.warn('Could not save fallback data to localStorage', error);
-  }
+  
+  // 1. Primary: Save directly to local computer disk (ptah-data/appData.json)
+  saveAppDataToServer(data).catch(() => {});
+
+  // 2. Local IndexedDB replication (unlimited storage capacity)
+  saveAppDataToIndexedDB(data).catch(() => {});
 }
 
 /**

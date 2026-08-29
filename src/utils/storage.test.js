@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { 
   loadChatSettings, 
   saveChatSettings, 
@@ -17,12 +20,12 @@ describe('Storage Module Tests', () => {
     const settings = loadChatSettings();
     expect(settings).toEqual(DEFAULT_CHAT_SETTINGS);
     expect(settings.preferredLanguage).toBe('auto');
-    expect(settings.lmStudioUrl).toBe('http://localhost:1234');
+    expect(settings.llmServerUrl).toBe('http://localhost:3001');
     expect(settings.sendOnShiftEnter).toBe(true);
     expect(settings.showLocationBackground).toBe(true);
     expect(settings.showCharacterSidebar).toBe(true);
     expect(settings.chatBackgroundOpacity).toBe(0.85);
-    expect(settings.preferredImageModel).toBe('DreamShaperXL_Lightning.safetensors');
+    expect(settings.preferredImageModel).toBe('malaAnimeMixNSFW_v70WithoutVAE.safetensors');
   });
 
   test('saveChatSettings correctly writes to localStorage and loadChatSettings retrieves it', () => {

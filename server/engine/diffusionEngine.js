@@ -58,11 +58,11 @@ class DiffusionEngine {
    */
   getStatus() {
     const models = this.getAvailableModels();
-    const defaultModel = models.find(m => m.subType === 'checkpoint') || models[0];
     return {
       ready: true,
       isGenerating: this.isGenerating,
-      activeModel: this.activeModel || (defaultModel?.filename || null),
+      activeModel: this.isGenerating ? this.activeModel : null,
+      status: this.isGenerating ? 'generating' : 'idle_on_demand',
       availableModelsCount: models.length,
       models: models.map(m => ({ id: m.id, name: m.filename, size: m.formattedSize, type: m.subType || 'diffusion' })),
       pythonRuntime: this.findPythonExecutable(),
@@ -188,11 +188,28 @@ class DiffusionEngine {
         targetModelObj = models.slice().sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0))[0];
       }
 
+      this.activeModel = targetModelObj.filename;
+
       const modelPath = path.isAbsolute(targetModelObj.filename)
         ? targetModelObj.filename
         : path.join(MODELS_DIR, targetModelObj.filename);
 
       let generatedBase64 = null;
+
+      const isPony = /pony|malaanime|v6\.safetensors|autismmix|ebara/i.test(targetModelObj.filename);
+      let effectivePrompt = (prompt || '').trim();
+      let effectiveNegative = (negativePrompt || '').trim();
+
+      if (isPony) {
+        if (!effectivePrompt.includes('score_9')) {
+          const isNsfw = /nsfw|erotic|nude|naked|desnud|lenceria|underwear|topless|sex|aroused/i.test(effectivePrompt);
+          const rating = isNsfw ? 'rating:explicit' : 'rating:general';
+          effectivePrompt = `score_9, score_8_up, score_7_up, score_6_up, score_5_up, score_4_up, ${rating}, ${effectivePrompt}, masterpiece, best quality`.replace(/,\s*,+/g, ', ');
+        }
+        if (!effectiveNegative.includes('score_6')) {
+          effectiveNegative = `score_6, score_5, score_4, score_3, score_2, score_1, worst quality, low quality, bad anatomy, bad hands, text, watermark, signature, frame, border, multiple people, group photo, ${effectiveNegative}`.replace(/,\s*,+/g, ', ');
+        }
+      }
 
       // 1. Explicit mock for test suites if requested via _mockForTest
       if (_mockForTest) {
@@ -202,7 +219,7 @@ class DiffusionEngine {
       } else {
         // 2. Primary: Execute Native Subprocess Worker via GPU PyTorch + Diffusers
         try {
-          const workerRes = await this.runNativeWorker(prompt, {
+          const workerRes = await this.runNativeWorker(effectivePrompt, {
             width,
             height,
             steps,
@@ -210,7 +227,7 @@ class DiffusionEngine {
             seed,
             modelPath,
             outputPath,
-            negativePrompt
+            negativePrompt: effectiveNegative
           });
           if (workerRes && workerRes.success && workerRes.base64) {
             generatedBase64 = workerRes.base64;
@@ -259,7 +276,6 @@ class DiffusionEngine {
         }
       }
 
-      this.activeModel = targetModelObj.filename;
       return {
         success: true,
         url: `/api/images/files/${filename}`,
@@ -270,6 +286,7 @@ class DiffusionEngine {
       };
     } finally {
       this.isGenerating = false;
+      this.activeModel = null;
     }
   }
 }

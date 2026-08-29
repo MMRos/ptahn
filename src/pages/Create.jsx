@@ -1,7 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { loadAppData } from '../utils/storage';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowLeft, faPlay, faPause, faVideo, faMicrophone, faImage } from '@fortawesome/free-solid-svg-icons';
+import { 
+  faArrowLeft, 
+  faPlay, 
+  faPause, 
+  faVideo, 
+  faMicrophone, 
+  faImage,
+  faSearch,
+  faSortAmountDown,
+  faFilter,
+  faTimes,
+  faLayerGroup
+} from '@fortawesome/free-solid-svg-icons';
 import { generateImageLocal, generateVideoLocal, generateAudioLocal, getAvailableModels } from '../utils/localAIStudio';
 import { speakBrowserUtterance, cancelBrowserSpeech, getBrowserVoices } from '../utils/speechTTS';
 import ConfirmModal from '../components/ConfirmModal';
@@ -31,12 +43,102 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
   const [selectedCard, setSelectedCard] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
 
+  // Search & Filtering states for "Elementos creados"
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('recent'); // 'recent' | 'oldest' | 'name_asc' | 'name_desc' | 'type'
+  const [cardTypeFilter, setCardTypeFilter] = useState('all');
+  const [scenarioCategoryFilter, setScenarioCategoryFilter] = useState('all');
+
   useEffect(() => {
     if (appData) {
       setData(appData);
     }
   }, [appData]);
 
+  // Sort and filter scenarios
+  const filteredScenarios = useMemo(() => {
+    let list = [...(data.scenarios || [])];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(s => 
+        (s.title || '').toLowerCase().includes(q) ||
+        (s.category || '').toLowerCase().includes(q) ||
+        (s.description || '').toLowerCase().includes(q) ||
+        (s.intro || '').toLowerCase().includes(q)
+      );
+    }
+    if (scenarioCategoryFilter !== 'all') {
+      list = list.filter(s => (s.category || '').toLowerCase() === scenarioCategoryFilter.toLowerCase());
+    }
+    list.sort((a, b) => {
+      if (sortBy === 'name_asc') return (a.title || '').localeCompare(b.title || '');
+      if (sortBy === 'name_desc') return (b.title || '').localeCompare(a.title || '');
+      if (sortBy === 'type') return (a.category || '').localeCompare(b.category || '');
+      if (sortBy === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+    });
+    return list;
+  }, [data.scenarios, searchQuery, scenarioCategoryFilter, sortBy]);
+
+  // Sort and filter cards
+  const filteredCards = useMemo(() => {
+    let list = [...(data.cards || [])];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(c => 
+        (c.title || c.name || '').toLowerCase().includes(q) ||
+        (c.type || '').toLowerCase().includes(q) ||
+        (c.subtype || '').toLowerCase().includes(q) ||
+        (c.description || c.intro || c.text || '').toLowerCase().includes(q) ||
+        (c.tags && c.tags.some(t => t.toLowerCase().includes(q))) ||
+        (c.images && c.images.some(img => (img.label || '').toLowerCase().includes(q) || (img.tags || '').toLowerCase().includes(q)))
+      );
+    }
+    if (cardTypeFilter !== 'all') {
+      list = list.filter(c => (c.type || '').toLowerCase() === cardTypeFilter.toLowerCase());
+    }
+    list.sort((a, b) => {
+      if (sortBy === 'name_asc') return (a.title || a.name || '').localeCompare(b.title || b.name || '');
+      if (sortBy === 'name_desc') return (b.title || b.name || '').localeCompare(a.title || a.name || '');
+      if (sortBy === 'type') {
+        const typePriority = { 'personaje': 1, 'lugar': 2, 'objeto': 3, 'faccion': 4, 'facción': 4, 'memoria': 5, 'inventario': 6 };
+        const pA = typePriority[(a.type || '').toLowerCase()] || 99;
+        const pB = typePriority[(b.type || '').toLowerCase()] || 99;
+        if (pA !== pB) return pA - pB;
+        return (a.title || a.name || '').localeCompare(b.title || b.name || '');
+      }
+      if (sortBy === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+    });
+    return list;
+  }, [data.cards, searchQuery, cardTypeFilter, sortBy]);
+
+  // Filter narrators & tools
+  const filteredNarrators = useMemo(() => {
+    let list = [...(data.narrators || [])];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(n => (n.name || '').toLowerCase().includes(q) || (n.bio || '').toLowerCase().includes(q));
+    }
+    return list;
+  }, [data.narrators, searchQuery]);
+
+  const filteredTools = useMemo(() => {
+    let list = [...(data.tools || [])];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(t => (t.name || '').toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q) || (t.toolType || '').toLowerCase().includes(q));
+    }
+    return list;
+  }, [data.tools, searchQuery]);
+
+  const hasActiveFilters = searchQuery.trim() !== '' || sortBy !== 'recent' || cardTypeFilter !== 'all' || scenarioCategoryFilter !== 'all';
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setSortBy('recent');
+    setCardTypeFilter('all');
+    setScenarioCategoryFilter('all');
+  };
 
   const handleActionClick = (type, prefilled = null) => {
     if (!currentUser || currentUser.role === 'guest') {
@@ -366,7 +468,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
 
     const textToSpeak = voiceScript.trim() || '¡Hola, estoy emocionado de ayudarte hoy!';
 
-    if (voiceEngine === 'lmstudio') {
+    if (voiceEngine === 'native_tts' || voiceEngine === 'lmstudio') {
       setPlayingPreviewId(preview.id);
       try {
         // Enviar la descripción, pitch y speed en la síntesis local
@@ -399,7 +501,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
           playPreviewSpeechSynthesis(preview, textToSpeak);
         }
       } catch (err) {
-        console.warn("LM Studio TTS no devolvió audio binario (endpoint /v1/audio/speech no habilitado en LM Studio). Usando sintetizador del sistema:", err.message);
+        console.warn("TTS local no devolvió audio binario. Usando sintetizador del sistema:", err.message);
         playPreviewSpeechSynthesis(preview, textToSpeak);
       }
     } else {
@@ -417,7 +519,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
       id: `narrator-user-${Date.now()}`,
       name: newVoiceName.trim(),
       bio: voiceDesc.trim() || 'Voz creada localmente con IA',
-      style: `${voiceEngine === 'lmstudio' ? 'LM Studio' : 'Navegador'}`,
+      style: `${(voiceEngine === 'native_tts' || voiceEngine === 'lmstudio') ? 'TTS Local' : 'Navegador'}`,
       tone: `Tono: ${voicePitch.toFixed(1)}x`,
       rules: `Voz preset: ${selectedVoicePreset}. Pitch: ${voicePitch}, Rate: ${voiceRate}`,
       voiceEngine,
@@ -431,7 +533,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
         ? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&q=80'
         : 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=100&q=80',
       gender: newVoiceGender,
-      tags: `${voiceEngine === 'lmstudio' ? 'LM Studio' : 'Browser'} | Pitch: ${voicePitch.toFixed(1)}x`
+      tags: `${(voiceEngine === 'native_tts' || voiceEngine === 'lmstudio') ? 'TTS Local' : 'Browser'} | Pitch: ${voicePitch.toFixed(1)}x`
     };
 
     const updatedNarrators = [...(data.narrators || []), nextNarrator];
@@ -756,10 +858,10 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                           </button>
                           <button 
                             type="button"
-                            onClick={() => setVoiceEngine('lmstudio')}
-                            style={{ flex: 1, padding: '8px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', background: voiceEngine === 'lmstudio' ? 'rgba(255,211,107,0.15)' : 'transparent', color: voiceEngine === 'lmstudio' ? '#ffd36b' : '#fff', fontWeight: 'bold', fontSize: '0.78rem', cursor: 'pointer' }}
+                            onClick={() => setVoiceEngine('native_tts')}
+                            style={{ flex: 1, padding: '8px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', background: (voiceEngine === 'native_tts' || voiceEngine === 'lmstudio') ? 'rgba(255,211,107,0.15)' : 'transparent', color: (voiceEngine === 'native_tts' || voiceEngine === 'lmstudio') ? '#ffd36b' : '#fff', fontWeight: 'bold', fontSize: '0.78rem', cursor: 'pointer' }}
                           >
-                            LM Studio (audio.cpp)
+                            TTS Local (Kokoro / audio.cpp)
                           </button>
                         </div>
                       </div>
@@ -791,7 +893,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                       ) : (
                         <>
                           <div style={{ background: 'rgba(255, 211, 107, 0.08)', border: '1px solid rgba(255, 211, 107, 0.2)', padding: '8px 10px', borderRadius: '6px', fontSize: '0.72rem', color: '#ffd36b', marginBottom: '8px' }}>
-                            ℹ️ <strong>Información TTS:</strong> LM Studio sirve inferencia de texto. Si usas un servidor TTS local independiente (Kokoro-FastAPI, AllTalk, etc.), especifica su URL abajo. Si no responde con audio en <code>/v1/audio/speech</code>, se usará la voz del navegador.
+                            ℹ️ <strong>Información TTS:</strong> Si usas un servidor TTS local independiente (Kokoro-FastAPI, AllTalk, etc.), especifica su URL abajo. Si no responde con audio en <code>/v1/audio/speech</code>, se usará la voz del navegador.
                           </div>
 
                           {/* URL del Servidor TTS Local */}
@@ -801,7 +903,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                               type="text" 
                               value={ttsServerUrl}
                               onChange={(e) => setTtsServerUrl(e.target.value)}
-                              placeholder="http://localhost:8880 o http://localhost:1234"
+                              placeholder="http://localhost:8880 o http://localhost:3001"
                               style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', color: '#fff', fontSize: '0.8rem', boxSizing: 'border-box' }}
                             />
                             <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.45)', display: 'block', marginTop: '3px', marginBottom: '8px' }}>
@@ -811,7 +913,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
 
                           {/* Modelo de Voz Local */}
                           <div>
-                            <label style={{ fontSize: '0.82rem', color: '#fff', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Modelo de Voz Local (LM Studio)</label>
+                            <label style={{ fontSize: '0.82rem', color: '#fff', fontWeight: '600', display: 'block', marginBottom: '6px' }}>Modelo de Voz Local (TTS)</label>
                             <select 
                               value={selectedAudioModel} 
                               onChange={(e) => setSelectedAudioModel(e.target.value)}
@@ -1023,8 +1125,8 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                       {/* Resumen de configuración */}
                       <div style={{ background: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)', fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>
                         <div style={{ fontWeight: 'bold', color: '#ffd36b', marginBottom: '4px' }}>Parámetros de Voz configurados:</div>
-                        <div>Motor: {voiceEngine === 'lmstudio' ? `LM Studio (${selectedAudioModel})` : 'Navegador/Sistema'}</div>
-                        <div>Preset/Voz: {voiceEngine === 'lmstudio' ? selectedVoicePreset : selectedVoiceURI}</div>
+                        <div>Motor: {(voiceEngine === 'native_tts' || voiceEngine === 'lmstudio') ? `TTS Nativo (${selectedAudioModel})` : 'Navegador/Sistema'}</div>
+                        <div>Preset/Voz: {(voiceEngine === 'native_tts' || voiceEngine === 'lmstudio') ? selectedVoicePreset : selectedVoiceURI}</div>
                         <div>Tono: {voicePitch.toFixed(1)}x | Velocidad: {voiceRate.toFixed(1)}x</div>
                       </div>
 
@@ -1551,24 +1653,132 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
 
       <div className="create-body">
         <section className="created-section">
-          <div className="created-header">
+          <div className="created-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
             <div>
               <h2>Elementos creados</h2>
-              <p>Explora tus elementos por categoría en listas desplegables.</p>
+              <p>Explora, busca y organiza tus elementos por categoría, tipo o fecha.</p>
+            </div>
+
+            {/* Barra de Control: Buscador y Ordenación General */}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', width: '100%', maxWidth: '580px', marginTop: '4px' }}>
+              {/* Buscador en Vivo */}
+              <div style={{ position: 'relative', flex: '1 1 260px', minWidth: '220px' }}>
+                <FontAwesomeIcon icon={faSearch} style={{ position: 'absolute', left: '12px', top: '11px', color: 'rgba(255,255,255,0.4)', fontSize: '0.85rem' }} />
+                <input
+                  type="text"
+                  placeholder="Buscar por título, tipo, descripción o etiquetas..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 32px 8px 34px',
+                    background: '#1a1b2b',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    fontSize: '0.84rem',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    style={{ position: 'absolute', right: '10px', top: '9px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', padding: 0 }}
+                  >
+                    <FontAwesomeIcon icon={faTimes} />
+                  </button>
+                )}
+              </div>
+
+              {/* Selector de Ordenación General */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#1a1b2b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', padding: '0 10px' }}>
+                <FontAwesomeIcon icon={faSortAmountDown} style={{ color: '#ffd36b', fontSize: '0.8rem' }} />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  style={{
+                    background: 'transparent',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '8px 0',
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    outline: 'none'
+                  }}
+                >
+                  <option value="recent" style={{ background: '#1a1b2b', color: '#fff' }}>📅 Más reciente</option>
+                  <option value="oldest" style={{ background: '#1a1b2b', color: '#fff' }}>📅 Más antiguo</option>
+                  <option value="name_asc" style={{ background: '#1a1b2b', color: '#fff' }}>🔤 Nombre (A - Z)</option>
+                  <option value="name_desc" style={{ background: '#1a1b2b', color: '#fff' }}>🔤 Nombre (Z - A)</option>
+                  <option value="type" style={{ background: '#1a1b2b', color: '#fff' }}>🏷️ Por Tipo / Clasificación</option>
+                </select>
+              </div>
+
+              {/* Botón Restablecer Filtros */}
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    color: '#fca5a5',
+                    padding: '7px 12px',
+                    borderRadius: '8px',
+                    fontSize: '0.78rem',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                  title="Restablecer búsqueda y filtros"
+                >
+                  Limpiar
+                </button>
+              )}
             </div>
           </div>
 
           <div className="created-accordion-list" style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '16px' }}>
-            {/* Categoría 1: Escenarios (Colapsable) */}
+            {/* Categoría 1: Escenarios (Colapsable con filtro de categoría in-situ) */}
             <details className="created-details" open style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px' }}>
-              <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer' }}>
-                Escenarios creados ({data.scenarios.length})
+              <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <span>Escenarios creados ({filteredScenarios.length}{data.scenarios.length !== filteredScenarios.length ? ` / ${data.scenarios.length}` : ''})</span>
+                
+                {/* Filtro Categoría Escenarios Dedicado */}
+                <div 
+                  onClick={(e) => e.stopPropagation()} 
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#141523', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px 8px' }}
+                >
+                  <FontAwesomeIcon icon={faLayerGroup} style={{ color: '#ffd36b', fontSize: '0.75rem' }} />
+                  <select
+                    value={scenarioCategoryFilter}
+                    onChange={(e) => setScenarioCategoryFilter(e.target.value)}
+                    style={{
+                      background: 'transparent',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '4px 0',
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="all" style={{ background: '#1a1b2b', color: '#fff' }}>🪐 Todas las categorías</option>
+                    <option value="Fantasía" style={{ background: '#1a1b2b', color: '#fff' }}>🏰 Fantasía</option>
+                    <option value="Cyberpunk" style={{ background: '#1a1b2b', color: '#fff' }}>🌆 Cyberpunk</option>
+                    <option value="Ciencia Ficción" style={{ background: '#1a1b2b', color: '#fff' }}>🚀 Ciencia Ficción</option>
+                    <option value="Moderno" style={{ background: '#1a1b2b', color: '#fff' }}>🏙️ Moderno</option>
+                    <option value="Misterio" style={{ background: '#1a1b2b', color: '#fff' }}>🔍 Misterio / Terror</option>
+                  </select>
+                </div>
               </summary>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', padding: '12px 0 6px 0' }}>
-                {data.scenarios.length === 0 ? (
-                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>No hay escenarios aún.</span>
+                {filteredScenarios.length === 0 ? (
+                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>
+                    {searchQuery || scenarioCategoryFilter !== 'all' ? 'No hay escenarios que coincidan con los filtros.' : 'No hay escenarios aún.'}
+                  </span>
                 ) : (
-                  data.scenarios.map(s => (
+                  filteredScenarios.map(s => (
                     <div 
                       key={s.id} 
                       className="scenario-card-visual" 
@@ -1586,16 +1796,47 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
               </div>
             </details>
 
-            {/* Categoría 2: Tarjetas (Colapsable y tarjetas de acción rápidas) */}
+            {/* Categoría 2: Tarjetas (Colapsable con filtro de tipo in-situ) */}
             <details className="created-details" open style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px' }}>
-              <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer' }}>
-                Tarjetas creadas ({data.cards.length})
+              <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <span>Tarjetas creadas ({filteredCards.length}{data.cards.length !== filteredCards.length ? ` / ${data.cards.length}` : ''})</span>
+                
+                {/* Filtro Tipo de Tarjeta Dedicado */}
+                <div 
+                  onClick={(e) => e.stopPropagation()} 
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#141523', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px 8px' }}
+                >
+                  <FontAwesomeIcon icon={faFilter} style={{ color: '#ffd36b', fontSize: '0.75rem' }} />
+                  <select
+                    value={cardTypeFilter}
+                    onChange={(e) => setCardTypeFilter(e.target.value)}
+                    style={{
+                      background: 'transparent',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '4px 0',
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="all" style={{ background: '#1a1b2b', color: '#fff' }}>🃏 Todos los tipos</option>
+                    <option value="Personaje" style={{ background: '#1a1b2b', color: '#fff' }}>🎭 Personajes</option>
+                    <option value="Lugar" style={{ background: '#1a1b2b', color: '#fff' }}>🏛️ Lugares</option>
+                    <option value="Objeto" style={{ background: '#1a1b2b', color: '#fff' }}>📦 Objetos</option>
+                    <option value="Faccion" style={{ background: '#1a1b2b', color: '#fff' }}>🐾 Facciones</option>
+                    <option value="Memoria" style={{ background: '#1a1b2b', color: '#fff' }}>🧠 Memorias</option>
+                    <option value="Inventario" style={{ background: '#1a1b2b', color: '#fff' }}>🎒 Inventario</option>
+                  </select>
+                </div>
               </summary>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', padding: '12px 0 6px 0' }}>
-                {data.cards.length === 0 ? (
-                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>No hay tarjetas aún.</span>
+                {filteredCards.length === 0 ? (
+                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>
+                    {searchQuery || cardTypeFilter !== 'all' ? 'No hay tarjetas que coincidan con los filtros.' : 'No hay tarjetas aún.'}
+                  </span>
                 ) : (
-                  data.cards.map(c => {
+                  filteredCards.map(c => {
                     const isChar = (c.type || '').toLowerCase() === 'personaje';
                     const isMemory = (c.type || '').toLowerCase() === 'memoria';
                     const isInv = (c.type || '').toLowerCase() === 'inventario';
@@ -1644,13 +1885,13 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
             {/* Categoría 3: Narradores (Colapsable) */}
             <details className="created-details" open style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px' }}>
               <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer' }}>
-                Narradores creados ({data.narrators.length})
+                Narradores creados ({filteredNarrators.length}{data.narrators.length !== filteredNarrators.length ? ` / ${data.narrators.length}` : ''})
               </summary>
               <div style={{ display: 'flex', gap: '14px', overflowX: 'auto', padding: '12px 0 6px 0' }}>
-                {data.narrators.length === 0 ? (
-                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>No hay narradores aún.</span>
+                {filteredNarrators.length === 0 ? (
+                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>No hay narradores que coincidan con la búsqueda.</span>
                 ) : (
-                  data.narrators.map(n => (
+                  filteredNarrators.map(n => (
                     <div 
                       key={n.id} 
                       style={{ minWidth: '180px', width: '180px', background: 'rgba(20,18,30,0.8)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '10px', cursor: 'pointer' }}
@@ -1672,13 +1913,13 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
             {/* Categoría 4: Herramientas y Funciones del Taller (Colapsable) */}
             <details className="created-details" open style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px' }}>
               <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer' }}>
-                Herramientas y Funciones del Taller ({data.tools?.length || 0})
+                Herramientas y Funciones del Taller ({filteredTools.length}{data.tools?.length !== filteredTools.length ? ` / ${data.tools?.length || 0}` : ''})
               </summary>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', padding: '12px 0 6px 0' }}>
-                {(!data.tools || data.tools.length === 0) ? (
-                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>No hay herramientas creadas en el taller aún.</span>
+                {filteredTools.length === 0 ? (
+                  <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>No hay herramientas que coincidan con la búsqueda.</span>
                 ) : (
-                  data.tools.map(tool => {
+                  filteredTools.map(tool => {
                     const toolIcons = {
                       attributes: '📊',
                       progression: '📈',

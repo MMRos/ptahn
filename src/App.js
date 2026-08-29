@@ -13,17 +13,18 @@ import CharacterPopup from './components/CharacterPopup';
 import ConfirmModal from './components/ConfirmModal';
 import AuthModal from './components/AuthModal';
 
-import { getAllChats, addChat } from './utils/db';
+import { getAllChats, addChat, getChatActivityTimestamp, loadAppDataFromIndexedDB } from './utils/db';
 import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, loadAppDataFromFolder, saveAppDataToFolder, saveChatToFolder, loadChatSettings, saveChatSettings, DEFAULT_CHAT_SETTINGS } from './utils/storage';
+import { loadDualModels } from './utils/localAIStudio';
 
-import { fetchCurrentUser, logoutUser, updateUserProfile as apiUpdateUserProfile } from './utils/authApi';
-import { fetchAppDataFromServer, saveAppDataToServer, getServerBaseUrl } from './utils/serverApi';
+import { fetchCurrentUser, logoutUser, updateUserProfile as apiUpdateUserProfile, getStoredAuth } from './utils/authApi';
+import { fetchAppDataFromServer, saveAppDataToServer, getServerBaseUrl, fetchChatsFromServer, saveChatsToServer } from './utils/serverApi';
 
 import Profile from './pages/Profile';
 import MusicView from './pages/MusicView';
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => getStoredAuth().user);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState('login');
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -103,23 +104,13 @@ function App() {
     try {
       const data = await getAllChats();
       if (Array.isArray(data)) {
-        // Sort by most recent activity descending (updatedAt, latest message, or createdAt)
-        const getLatestActivity = (c) => {
-          if (c.updatedAt) return new Date(c.updatedAt).getTime();
-          if (c.messages && c.messages.length > 0) {
-            const last = c.messages[c.messages.length - 1];
-            if (last.timestamp) return new Date(last.timestamp).getTime();
-            if (last.createdAt) return new Date(last.createdAt).getTime();
-          }
-          return new Date(c.createdAt || 0).getTime();
-        };
-        const sorted = data.slice().sort((a, b) => getLatestActivity(b) - getLatestActivity(a));
+        const sorted = data.slice().sort((a, b) => getChatActivityTimestamp(b) - getChatActivityTimestamp(a));
         setRecentChats(sorted);
       }
     } catch (e) { console.warn('refreshChats failed', e); }
   };
 
-  useEffect(()=>{ refreshChats(); }, []);
+  useEffect(() => { refreshChats(); }, []);
 
   const [view, setView] = useState(() => localStorage.getItem('ptah_last_view') || 'home');
   useEffect(() => localStorage.setItem('ptah_last_view', view), [view]);
@@ -134,6 +125,28 @@ function App() {
   }, [view, selectedChat, recentChats]);
 
 
+  // Restore full rich appData from IndexedDB on startup
+  useEffect(() => {
+    loadAppDataFromIndexedDB().then(idbData => {
+      if (idbData && (idbData.scenarios?.length || idbData.cards?.length)) {
+        const cleanList = (list = []) => list.filter(item => item && item.id && item.id !== 's1');
+        const cleanScenarios = cleanList(idbData.scenarios);
+        const cleanCards = cleanList(idbData.cards);
+        const cleanNarrators = cleanList(idbData.narrators);
+        const cleanTools = cleanList(idbData.tools);
+        setAppData(prev => {
+          if (!prev) return { scenarios: cleanScenarios, cards: cleanCards, narrators: cleanNarrators, tools: cleanTools };
+          return {
+            scenarios: (cleanScenarios.length >= (prev?.scenarios?.length || 0)) ? cleanScenarios : prev.scenarios,
+            cards: (cleanCards.length >= (prev?.cards?.length || 0)) ? cleanCards : prev.cards,
+            narrators: (cleanNarrators.length >= (prev?.narrators?.length || 0)) ? cleanNarrators : prev.narrators,
+            tools: (cleanTools.length >= (prev?.tools?.length || 0)) ? cleanTools : prev.tools
+          };
+        });
+      }
+    }).catch(() => { });
+  }, []);
+
   // Restore user session on mount and auto-attribute legacy creations
   useEffect(() => {
     fetchCurrentUser().then(res => {
@@ -144,12 +157,12 @@ function App() {
           const { data: relinked, modifiedCount } = relinkAllCreationsToUser(prevData, res.user);
           if (modifiedCount > 0) {
             saveAppData(relinked);
-            saveAppDataToServer(relinked).catch(() => {});
+            saveAppDataToServer(relinked).catch(() => { });
           }
           return relinked;
         });
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // Restore linked folder handle from IndexedDB on startup
@@ -177,7 +190,7 @@ function App() {
                 tools: mergeLists(prev.tools, folderData.tools)
               };
               saveAppData(combined);
-              saveAppDataToServer(combined).catch(() => {});
+              saveAppDataToServer(combined).catch(() => { });
               return combined;
             });
             setStorageStatus('Carpeta local de datos conectada.');
@@ -186,7 +199,7 @@ function App() {
           console.warn('Auto-read from folder handle failed', e);
         }
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // Synchronize appData and chats with server storage (ptah-data/) on boot
@@ -206,37 +219,45 @@ function App() {
         };
 
         const sData = (sRes && sRes.success && sRes.data) ? sRes.data : { scenarios: [], cards: [], narrators: [], tools: [] };
+        const cleanList = (list = []) => list.filter(item => item && item.id && item.id !== 's1');
         const merged = {
-          scenarios: mergeLists(sData.scenarios, localData.scenarios),
-          cards: mergeLists(sData.cards, localData.cards),
-          narrators: mergeLists(sData.narrators, localData.narrators),
-          tools: mergeLists(sData.tools, localData.tools)
+          scenarios: cleanList(mergeLists(sData.scenarios, localData.scenarios)),
+          cards: cleanList(mergeLists(sData.cards, localData.cards)),
+          narrators: cleanList(mergeLists(sData.narrators, localData.narrators)),
+          tools: cleanList(mergeLists(sData.tools, localData.tools))
         };
 
         setAppData(merged);
         saveAppData(merged);
-        saveAppDataToServer(merged).catch(() => {});
+        saveAppDataToServer(merged).catch(() => { });
 
-        // Sync chats with server
+        // Sync chats with server without overwriting newer local chats
         const baseUrl = getServerBaseUrl();
-        const chatsRes = await fetch(`${baseUrl}/api/storage/chats`).then(r => r.json()).catch(() => ({}));
-        if (chatsRes.success && Array.isArray(chatsRes.chats)) {
-          if (chatsRes.chats.length > 0) {
-            for (const c of chatsRes.chats) {
-              await addChat(c).catch(() => {});
-            }
-            refreshChats();
-          } else {
-            const localChats = await getAllChats();
-            if (localChats.length > 0) {
-              fetch(`${baseUrl}/api/storage/chats`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chats: localChats })
-              }).catch(() => {});
+        const chatsRes = await fetchChatsFromServer(baseUrl);
+        const serverChats = (chatsRes && chatsRes.success && Array.isArray(chatsRes.chats)) ? chatsRes.chats : [];
+        const localChats = await getAllChats();
+
+        const chatMap = new Map();
+        for (const c of [...serverChats, ...localChats]) {
+          if (c && c.id) {
+            const existing = chatMap.get(c.id);
+            if (!existing) {
+              chatMap.set(c.id, c);
+            } else {
+              // Keep the one with newer activity
+              if (getChatActivityTimestamp(c) >= getChatActivityTimestamp(existing)) {
+                chatMap.set(c.id, c);
+              }
             }
           }
         }
+
+        const mergedChats = Array.from(chatMap.values());
+        for (const c of mergedChats) {
+          await addChat(c).catch(() => { });
+        }
+        await saveChatsToServer(mergedChats, baseUrl).catch(() => { });
+        refreshChats();
       } catch (e) {
         console.warn('Sync with server disk storage failed', e);
       }
@@ -251,7 +272,12 @@ function App() {
   const updateAppData = async (nextData) => {
     setAppData(nextData);
     saveAppData(nextData);
-    saveAppDataToServer(nextData).catch(() => {});
+    try {
+      const res = await saveAppDataToServer(nextData);
+      if (res && res.success && res.data) {
+        setAppData(res.data);
+      }
+    } catch (e) {}
     if (folderHandle) {
       try {
         await saveAppDataToFolder(nextData, folderHandle);
@@ -351,7 +377,7 @@ function App() {
     const { addChat } = await import('./utils/db');
     await addChat(newChat);
     if (folderHandle) {
-      try { await saveChatToFolder(newChat, folderHandle); } catch (e) {}
+      try { await saveChatToFolder(newChat, folderHandle); } catch (e) { }
     }
     refreshChats();
   };
@@ -400,10 +426,18 @@ function App() {
     }
   }, [currentUser]);
 
+  // Ensure dual models (Storyteller + Orchestrator) are resident in LM Studio on startup
+  useEffect(() => {
+    if (chatSettings?.preferredModel || chatSettings?.orchestratorModel) {
+      loadDualModels(chatSettings.preferredModel, chatSettings.orchestratorModel, chatSettings.lmStudioUrl);
+    }
+  }, [chatSettings?.preferredModel, chatSettings?.orchestratorModel, chatSettings?.lmStudioUrl]);
+
   // Función para guardar y actualizar la configuración de chat del usuario (global y en perfil)
   const handleUpdateChatSettings = (nextSettings) => {
     setChatSettings(nextSettings);
     saveChatSettings(nextSettings);
+    loadDualModels(nextSettings.preferredModel, nextSettings.orchestratorModel, nextSettings.lmStudioUrl);
     if (currentUser) {
       const updatedPrefs = {
         ...(currentUser.preferences || {}),
@@ -430,10 +464,10 @@ function App() {
   return (
     <div className="App">
       <section className="Side-bar-panel">
-        <Sidebar 
+        <Sidebar
           appData={appData}
-          onNavigate={navigate} 
-          onOpenChat={openChat} 
+          onNavigate={navigate}
+          onOpenChat={openChat}
           recentChats={recentChats}
           onInspectScenario={handleInspectScenarioFromChat}
           onCopyChat={handleCopyChat}
@@ -442,10 +476,10 @@ function App() {
       </section>
 
       <main className="main">
-        <TopBar 
-          currentView={view} 
-          onNavigate={navigate} 
-          onChooseFolder={chooseFolder} 
+        <TopBar
+          currentView={view}
+          onNavigate={navigate}
+          onChooseFolder={chooseFolder}
           storageStatus={storageStatus}
           currentUser={currentUser}
           onOpenAuthModal={handleOpenAuthModal}
@@ -455,15 +489,15 @@ function App() {
           onUpdateChatCustomStyle={handleUpdateChatCustomStyle}
           activeChat={selectedChat}
           dmName={
-            selectedChat 
+            selectedChat
               ? (() => {
-                  const sc = (appData.scenarios || []).find(s => s.id === selectedChat.scenarioId);
-                  if (sc && sc.narrator) {
-                    const narr = (appData.narrators || []).find(n => n.id === sc.narrator);
-                    return narr ? narr.name : null;
-                  }
-                  return null;
-                })()
+                const sc = (appData.scenarios || []).find(s => s.id === selectedChat.scenarioId);
+                if (sc && sc.narrator) {
+                  const narr = (appData.narrators || []).find(n => n.id === sc.narrator);
+                  return narr ? narr.name : null;
+                }
+                return null;
+              })()
               : null
           }
           onOpenScenarioPopup={(chat) => {
@@ -505,8 +539,8 @@ function App() {
 
         {view === 'chats' && !selectedChat && (
           <div className="page-container">
-            <ChatsList 
-              onOpen={(chat) => openChat(chat)} 
+            <ChatsList
+              onOpen={(chat) => openChat(chat)}
               appData={appData}
               onOpenScenario={openScenario}
             />
@@ -514,12 +548,12 @@ function App() {
         )}
 
         {(view === 'chat' || (view === 'chats' && selectedChat)) && selectedChat && (
-          <ChatView 
-            chat={selectedChat} 
+          <ChatView
+            chat={selectedChat}
             onBack={() => {
               setSelectedChat(null);
               setView('chats');
-            }} 
+            }}
             onUpdateChat={(updated) => {
               setSelectedChat(updated);
               refreshChats();
@@ -535,10 +569,10 @@ function App() {
 
         {view === 'create' && (
           <div className="page-container">
-            <Create 
-              appData={appData} 
-              onUpdateAppData={updateAppData} 
-              onOpenScenario={openScenario} 
+            <Create
+              appData={appData}
+              onUpdateAppData={updateAppData}
+              onOpenScenario={openScenario}
               onOpenCreateModal={openCreateModal}
               currentUser={currentUser}
               onOpenAuthModal={handleOpenAuthModal}
@@ -548,17 +582,17 @@ function App() {
 
         {view === 'profile' && (
           <div className="page-container">
-            <Profile 
-              appData={appData} 
+            <Profile
+              appData={appData}
               currentUser={currentUser}
               onOpenAuthModal={handleOpenAuthModal}
               onLogout={handleLogout}
               onUpdateUser={handleUpdateUser}
               onUpdateAppData={updateAppData}
-              folderHandle={folderHandle} 
-              storageStatus={storageStatus} 
-              onNavigate={navigate} 
-              onOpenChat={openChat} 
+              folderHandle={folderHandle}
+              storageStatus={storageStatus}
+              onNavigate={navigate}
+              onOpenChat={openChat}
               onOpenScenario={openScenario}
             />
 
@@ -568,32 +602,32 @@ function App() {
 
 
       {popupScenario && (popupScenario.type?.toLowerCase() === 'personaje' || popupScenario.category === 'Personaje') ? (
-        <CharacterPopup 
-          scenario={popupScenario} 
-          isOpen={scenarioOpen} 
-          onClose={closeScenario} 
-          onStartChat={startChat} 
+        <CharacterPopup
+          scenario={popupScenario}
+          isOpen={scenarioOpen}
+          onClose={closeScenario}
+          onStartChat={startChat}
         />
       ) : (
-        <ScenarioPopup 
-          scenario={popupScenario} 
-          isOpen={scenarioOpen} 
-          onClose={closeScenario} 
-          onStartChat={startChat} 
+        <ScenarioPopup
+          scenario={popupScenario}
+          isOpen={scenarioOpen}
+          onClose={closeScenario}
+          onStartChat={startChat}
           onModifyScenario={handleModifyScenario}
         />
       )}
-      <CharacterModal 
-        isOpen={charOpen} 
-        onClose={closeChar} 
-        onSelect={handleSelectChar} 
+      <CharacterModal
+        isOpen={charOpen}
+        onClose={closeChar}
+        onSelect={handleSelectChar}
         onOpenCreateCard={() => openCreateModal('Personaje')}
         userCards={appData.cards || []}
         scenarioCharacters={popupScenario?.characters || popupScenario?.cards || []}
         allCards={appData.cards || []}
       />
 
-      <CreateModal 
+      <CreateModal
         isOpen={createModalOpen}
         onClose={() => {
           setCreateModalOpen(false);

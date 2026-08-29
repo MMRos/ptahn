@@ -8,7 +8,7 @@ describe('LM Studio URL Resolution Tests', () => {
 
   test('should return fallback default URL when localStorage is empty', () => {
     const url = getBaseUrl();
-    expect(url).toBe('http://localhost:1234');
+    expect(url).toBe('http://localhost:3001');
   });
 
   test('should return custom URL from localStorage when configured', () => {
@@ -16,7 +16,7 @@ describe('LM Studio URL Resolution Tests', () => {
       preferredModel: 'deepseek-r1-distill-qwen-7b',
       preferredLanguage: 'Español',
       responseLength: 1000,
-      lmStudioUrl: 'http://127.0.0.1:62594'
+      llmServerUrl: 'http://127.0.0.1:62594'
     };
     localStorage.setItem('ptah-chat-settings', JSON.stringify(mockSettings));
 
@@ -26,7 +26,7 @@ describe('LM Studio URL Resolution Tests', () => {
 
   test('should strip trailing slash from resolved URL', () => {
     const mockSettings = {
-      lmStudioUrl: 'http://127.0.0.1:62594/'
+      llmServerUrl: 'http://127.0.0.1:62594/'
     };
     localStorage.setItem('ptah-chat-settings', JSON.stringify(mockSettings));
 
@@ -36,7 +36,7 @@ describe('LM Studio URL Resolution Tests', () => {
 
   test('should prioritize passed baseUrl argument over localStorage', () => {
     const mockSettings = {
-      lmStudioUrl: 'http://127.0.0.1:62594'
+      llmServerUrl: 'http://127.0.0.1:62594'
     };
     localStorage.setItem('ptah-chat-settings', JSON.stringify(mockSettings));
 
@@ -49,6 +49,6 @@ describe('LM Studio URL Resolution Tests', () => {
     
     // Should fall back to default URL rather than throwing an exception
     const url = getBaseUrl();
-    expect(url).toBe('http://localhost:1234');
+    expect(url).toBe('http://localhost:3001');
   });
 });

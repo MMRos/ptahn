@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { scanModelsDirectory } = require('../engine/modelScanner');
+const { scanLlmModels } = require('../engine/modelScanner');
 const { llamaEngine } = require('../engine/llamaEngine');
 const { MODELS_DIR } = require('../config');
 
 // GET /api/models - List all available .gguf files
 router.get('/', (req, res) => {
   try {
-    const models = scanModelsDirectory(MODELS_DIR);
+    const models = scanLlmModels(MODELS_DIR);
     const engineStatus = llamaEngine.getStatus();
     res.json({
       success: true,

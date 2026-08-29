@@ -8,7 +8,7 @@ describe('Local AI Studio Tests', () => {
 
   test('should return fallback default URL when localStorage is empty', () => {
     const url = getBaseUrl();
-    expect(url).toBe('http://localhost:1234');
+    expect(url).toBe('http://localhost:3001');
   });
 
   test('should return custom URL from localStorage when configured', () => {
@@ -16,7 +16,7 @@ describe('Local AI Studio Tests', () => {
       preferredModel: 'deepseek-r1-distill-qwen-7b',
       preferredLanguage: 'auto',
       responseLength: 1000,
-      lmStudioUrl: 'http://127.0.0.1:62594'
+      llmServerUrl: 'http://127.0.0.1:62594'
     };
     localStorage.setItem('ptah-chat-settings', JSON.stringify(mockSettings));
 
@@ -26,7 +26,7 @@ describe('Local AI Studio Tests', () => {
 
   test('should strip trailing slash from resolved URL', () => {
     const mockSettings = {
-      lmStudioUrl: 'http://127.0.0.1:62594/'
+      llmServerUrl: 'http://127.0.0.1:62594/'
     };
     localStorage.setItem('ptah-chat-settings', JSON.stringify(mockSettings));
 
@@ -36,7 +36,7 @@ describe('Local AI Studio Tests', () => {
 
   test('should prioritize passed baseUrl argument over localStorage', () => {
     const mockSettings = {
-      lmStudioUrl: 'http://127.0.0.1:62594'
+      llmServerUrl: 'http://127.0.0.1:62594'
     };
     localStorage.setItem('ptah-chat-settings', JSON.stringify(mockSettings));
 
@@ -47,13 +47,13 @@ describe('Local AI Studio Tests', () => {
   test('should safely handle corrupted localStorage JSON', () => {
     localStorage.setItem('ptah-chat-settings', '{corrupted_json');
     const url = getBaseUrl();
-    expect(url).toBe('http://localhost:1234');
+    expect(url).toBe('http://localhost:3001');
   });
 
   test('should expose recommended models with descriptive metadata', () => {
     expect(RECOMMENDED_MODELS.chat).toBeDefined();
-    expect(RECOMMENDED_MODELS.image).toBeDefined();
-    expect(RECOMMENDED_MODELS.image.id).toContain('DreamShaper');
+    expect(RECOMMENDED_MODELS.orchestrator).toBeDefined();
+    expect(RECOMMENDED_MODELS.chat.id).toContain('Precog-Magnum-31B');
   });
 
   test('should translate message using local completions endpoint', async () => {

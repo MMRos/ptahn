@@ -12,6 +12,7 @@ const networkRouter = require('./routes/network');
 const imagesRouter = require('./routes/images');
 const lifecycleRouter = require('./routes/lifecycle');
 const authRouter = require('./routes/auth');
+const systemRouter = require('./routes/system');
 
 
 
@@ -47,6 +48,7 @@ function createApp() {
   app.use('/api/images', imagesRouter);
   app.use('/api/lifecycle', lifecycleRouter);
   app.use('/api/auth', authRouter);
+  app.use('/api/system', systemRouter);
 
 
 

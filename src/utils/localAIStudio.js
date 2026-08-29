@@ -1,7 +1,18 @@
-import { enrichImagePrompt, resolveTargetLanguage, createTranslationPrompt, createVisualPromptTranslationPrompt, detectLanguage, STYLE_PROMPT_PRESETS } from './language';
+import { 
+  enrichImagePrompt, 
+  resolveTargetLanguage, 
+  createTranslationPrompt, 
+  createVisualPromptTranslationPrompt, 
+  detectLanguage, 
+  STYLE_PROMPT_PRESETS,
+  adaptPromptForDiffusionArchitecture,
+  getNegativePromptForModel
+} from './language';
 import { loadChatSettings } from './storage';
 import { findMatchingEntity } from './textFormatter';
 import { generateNativeImage, getServerBaseUrl } from './serverApi';
+import { emitAILog } from './aiLogEmitter';
+import { recordTokensTelemetry, calculateTokensSpeed } from './systemTelemetry';
 
 /**
  * Local AI Studio Multimodal Manager for Ptahn
@@ -13,90 +24,70 @@ import { generateNativeImage, getServerBaseUrl } from './serverApi';
  */
 
 /**
- * Resolves the active base URL for the LM Studio API server.
+ * Resolves the active base URL for the Ptahn Native Server.
  * 
  * @param {string} [baseUrl] - Optional explicit base URL.
  * @returns {string} The resolved base URL without a trailing slash.
  */
 export function getBaseUrl(baseUrl) {
-  if (baseUrl) {
-    return baseUrl.replace(/\/$/, '');
+  if (baseUrl && typeof baseUrl === 'string' && baseUrl.trim()) {
+    if (!baseUrl.includes(':1234/') && !baseUrl.endsWith(':1234')) {
+      return baseUrl.trim().replace(/\/$/, '');
+    }
   }
   
   const settings = loadChatSettings();
-  return (settings.lmStudioUrl || 'http://localhost:1234').replace(/\/$/, '');
+  const url = settings.llmServerUrl || settings.lmStudioUrl || 'http://localhost:3001';
+  if (url.includes(':1234/') || url.endsWith(':1234')) {
+    return 'http://localhost:3001';
+  }
+  return url.replace(/\/$/, '');
 }
 
 // Recommended local models by task
 export const RECOMMENDED_MODELS = {
   chat: {
-    id: 'precog-magnum-31b-i1',
+    id: 'Precog-Magnum-31B.i1-Q3_K_S.gguf',
     name: 'Precog-Magnum 31B (mradermacher)',
     type: 'Narrative & Roleplay (Uncensored / High Quality)',
     description: 'Maximum depth of prose, initiative, and narrative reasoning in 16GB VRAM.'
   },
+  orchestrator: {
+    id: 'mistral-nemo-instruct-2407-gguf-Q4-K-M.gguf',
+    name: 'Mistral Nemo Instruct 2407 (12B)',
+    type: 'Intermediario / Orquestador SLM',
+    description: 'Fast, precise JSON tool caller and lore extractor.'
+  },
   dark_rp: {
-    id: 'magnum_lyra_darkness_12b-heretic',
-    name: 'Magnum Lyra Darkness 12B Heretic',
+    id: 'magnum-v4-12b-Q4_K_M.gguf',
+    name: 'Magnum v4 12B (anthracite-org)',
     type: 'Dark Fiction & Mature Roleplay',
     description: 'Ultra-fast, immersive, uncensored with rich sensory prose.'
   },
-  heretic: {
-    id: 'magnum-v4-12b',
-    name: 'Magnum v4 12B Heretic',
-    type: 'Creative Storytelling',
-    description: 'Balanced uncensored roleplay with fast token generation.'
-  },
-  moe_dark: {
-    id: 'mistral-moe-4x7b-dark-multiverse-uncensored-enhanced32-24b',
-    name: 'Mistral MoE 4x7B Dark Multiverse (DavidAU)',
-    type: 'Dark Fantasy & MoE',
-    description: 'Multi-expert merge for dark worlds.'
-  },
-  context: {
-    id: 'mistral-nemo-instruct-2407-k-m',
-    name: 'Mistral Nemo 12B Instruct',
-    type: 'Memory & Context Summarization',
-    description: 'High coherence for processing roleplay events and long-term memory.'
-  },
-  image: {
-    id: 'DreamShaperXL_Lightning.safetensors',
-    name: 'DreamShaperXL Lightning (SDXL Vulkan)',
-    type: 'Scene Staging & Scenario Covers',
-    description: 'Fast 8-step image diffusion via sd-vulkan / Pinokio.'
-  },
-  video: {
-    id: 'nsfw_wan_14b',
-    name: 'Wan 14B Video (NSFW-API)',
-    type: 'Video & Animation Loops',
-    description: 'Short animated loops loaded dynamically.'
-  },
-  audio: {
-    id: 'audio.cpp',
-    name: 'Audio.cpp (Kokoro / TTS)',
-    type: 'Voices / TTS',
-    description: 'Local speech synthesis and sound effects loaded on demand.'
+  moe: {
+    id: 'L3.2-8X3B-MOE-Dark-Champion-Inst-18.4B-uncen-ablit_D_AU-Q4_k_s.gguf',
+    name: 'L3.2 MoE Dark Champion (18.4B)',
+    type: 'Complex Multi-Character Fiction',
+    description: 'Specialized mixture of experts for diverse dialogue voices.'
   }
 };
 
-export const AVAILABLE_IMAGE_MODELS = [
-  { id: 'DreamShaperXL_Lightning.safetensors', name: 'DreamShaperXL Lightning (SDXL Rápido 8-Step)' },
-  { id: 'v6.safetensors', name: 'Anime / Illustrious v6 (Personajes & Retratos)' },
-  { id: 'flux1-schnell.safetensors', name: 'Flux.1 Schnell (Ultra Detallado)' },
-  { id: 'sd_xl_base_1.0.safetensors', name: 'SDXL Base 1.0 (Realismo / Escenarios)' },
-  { id: 'juggernautXL_v9.safetensors', name: 'Juggernaut XL v9 (Fantasía Oscura)' },
-  { id: 'ponyDiffusionV6XL.safetensors', name: 'Pony Diffusion V6 XL' }
+// Recommended local diffusion checkpoints (available in ./models/)
+export const RECOMMENDED_IMAGE_MODELS = [
+  { id: 'malaAnimeMixNSFW_v70WithoutVAE.safetensors', name: 'Mala Anime Mix NSFW (SDXL Checkpoint)' },
+  { id: 'v6.safetensors', name: 'Pony / Illustrious V6 (SDXL Checkpoint)' },
+  { id: 'dmd2_sdxl_4step_lora.safetensors', name: 'DMD2 SDXL 4-Step (Acelerador LoRA)' },
+  { id: 'MysticToon-V1.safetensors', name: 'MysticToon V1 (LoRA)' }
 ];
 
 /**
- * Intelligent HTTP fetch for local AI endpoints.
- * Handles direct CORS requests with transparent internal proxy fallback (/api/lmstudio).
+ * Intelligent HTTP fetch for Ptahn local AI endpoints.
  */
 export async function apiFetch(endpoint, options = {}, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  // 1. Direct attempt
+  // 1. Direct attempt to native backend
   try {
     const directUrl = `${finalBaseUrl}${cleanEndpoint}`;
     const directRes = await fetch(directUrl, options);
@@ -104,55 +95,46 @@ export async function apiFetch(endpoint, options = {}, baseUrl) {
       return directRes;
     }
   } catch (directErr) {
-    // Network / CORS preflight fallback
+    // Network fallback
   }
 
-  // 2. Transparent fallback via internal proxy
+  // 2. Relative endpoint fallback
   try {
-    const proxyUrl = `/api/lmstudio${cleanEndpoint}`;
-    const proxyOptions = {
-      ...options,
-      headers: {
-        ...(options.headers || {}),
-        'x-target-url': finalBaseUrl
-      }
-    };
-    return await fetch(proxyUrl, proxyOptions);
-  } catch (proxyErr) {
-    throw proxyErr;
+    return await fetch(cleanEndpoint, options);
+  } catch (fallbackErr) {
+    throw fallbackErr;
   }
 }
 
 /**
- * Retrieves available/downloaded models in LM Studio.
+ * Retrieves available GGUF LLM models from Ptahn Native Server.
  */
 export async function getAvailableModels(baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    const response = await apiFetch('/v1/models', {}, finalBaseUrl);
+    const response = await apiFetch('/api/models', {}, finalBaseUrl).catch(() => apiFetch('/v1/models', {}, finalBaseUrl));
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
-    return data.data || [];
+    return data.models || data.data || [];
   } catch (error) {
-    console.warn('[Local AI Studio]: LM Studio server offline or unreachable:', error.message);
+    console.warn('[Ptahn AI Engine]: Native AI server offline or unreachable:', error.message);
     return [];
   }
 }
 
 /**
- * Retrieves currently loaded model in GPU/VRAM from LM Studio (if available).
+ * Retrieves currently active model in GPU/VRAM from Ptahn Native Server.
  */
 export async function getLoadedModel(baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    const response = await apiFetch('/api/v0/models', {}, finalBaseUrl);
+    const response = await apiFetch('/api/models', {}, finalBaseUrl);
     if (response.ok) {
       const data = await response.json();
-      const loaded = (data.data || []).find(m => m.state === 'loaded');
-      if (loaded) return loaded.id;
+      if (data.activeModel) return data.activeModel;
     }
   } catch (e) {
-    // Silent if api/v0 is not supported
+    // Silent
   }
   return null;
 }
@@ -212,35 +194,101 @@ export async function resolveModelId(searchTerm, baseUrl) {
 }
 
 /**
- * Loads a model into GPU/RAM in LM Studio.
+ * Resolves the lightweight Intermediary SLM model ID (GGUF menor) for middleware tasks.
+ * Avoids defaulting to heavy 31B Storyteller models.
+ */
+export async function resolveIntermediaryModelId(preferredIntermediary, baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
+  const settings = loadChatSettings();
+  const targetTerm = preferredIntermediary || settings.orchestratorModel || 'mistral-nemo';
+
+  try {
+    const models = await getAvailableModels(finalBaseUrl);
+    if (!models || models.length === 0) {
+      return targetTerm;
+    }
+
+    if (targetTerm) {
+      const exactMatch = models.find(m => m.id.toLowerCase() === targetTerm.toLowerCase());
+      if (exactMatch) return exactMatch.id;
+
+      const partialMatch = models.find(m => m.id.toLowerCase().includes(targetTerm.toLowerCase()));
+      if (partialMatch) return partialMatch.id;
+    }
+
+    const slmKeywords = [
+      'mistral-nemo',
+      'nemo',
+      'magnum-v4-12b',
+      'magnum-12b',
+      '12b',
+      '8b',
+      '7b',
+      '3b',
+      'qwen',
+      'llama-3'
+    ];
+
+    for (const kw of slmKeywords) {
+      const found = models.find(m => m.id.toLowerCase().includes(kw));
+      if (found) return found.id;
+    }
+
+    return models[0]?.id || targetTerm;
+  } catch (e) {
+    return targetTerm;
+  }
+}
+
+/**
+ * Loads a model into GPU/RAM in Ptahn Native Server.
  */
 export async function loadModel(modelId, baseUrl) {
+  if (!modelId) return false;
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
-    if (currentlyLoaded && currentlyLoaded.toLowerCase() === modelId.toLowerCase()) {
-      return true;
-    }
-    return true;
+    const res = await apiFetch('/api/models/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modelName: modelId })
+    }, finalBaseUrl);
+    return res.ok;
   } catch (error) {
     return false;
   }
 }
 
 /**
- * Unloads a model from GPU/RAM in LM Studio.
+ * Ensures both Principal (Storyteller) and Intermediary (Orchestrator) models are active in Ptahn Engine.
+ */
+export async function loadDualModels(storytellerId, orchestratorId, baseUrl) {
+  const finalBaseUrl = getBaseUrl(baseUrl);
+  const results = { storyteller: false, orchestrator: false };
+  try {
+    if (storytellerId) {
+      results.storyteller = await loadModel(storytellerId, finalBaseUrl);
+    }
+    if (orchestratorId && orchestratorId !== storytellerId) {
+      results.orchestrator = await loadModel(orchestratorId, finalBaseUrl);
+    }
+  } catch (e) {}
+  return results;
+}
+
+/**
+ * Unloads a model from GPU/RAM in Ptahn Engine.
  */
 export async function unloadModel(modelId, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    await fetch(`${finalBaseUrl}/api/v0/models/unload`, {
+    await apiFetch('/api/models/unload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId })
-    });
+      body: JSON.stringify({ modelName: modelId })
+    }, finalBaseUrl);
     return true;
   } catch (error) {
-    console.warn(`[Local AI Studio]: Error unloading model ${modelId}:`, error);
+    console.warn(`[Ptahn AI Engine]: Error unloading model ${modelId}:`, error);
     return false;
   }
 }
@@ -319,26 +367,33 @@ export async function startImageBackend(model = 'v6.safetensors', imageServerUrl
  * @param {string} [modelId] - LLM model ID.
  * @returns {Promise<string>} Fully enriched English visual prompt.
  */
-export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fantasía Oscura / Entornos', baseUrl = '', modelId = '') {
+export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fantasía Oscura / Entornos', baseUrl = '', modelId = '', targetModel = '') {
   if (!rawPrompt || typeof rawPrompt !== 'string' || !rawPrompt.trim()) {
-    return enrichImagePrompt('', style);
+    return enrichImagePrompt('', style, targetModel);
   }
 
   const trimmed = rawPrompt.trim();
   const lang = detectLanguage(trimmed);
   const isLikelySpanish = lang === 'es' || /[áéíóúñ¿¡]/i.test(trimmed) || /\b(es|un|una|su|torso|forma|armadura|maza|colosal|bipeda|bipedo|orejas|ojos|rasgos|taparrabos)\b/i.test(trimmed);
 
-  // If text is already strictly in English and not narrative prose, return enriched prompt directly
-  if (!isLikelySpanish && lang === 'en' && trimmed.includes(',') && !trimmed.includes('. ')) {
-    return enrichImagePrompt(trimmed, style);
+  // If text is already strictly in English and not narrative prose
+  if (!isLikelySpanish && lang === 'en' && trimmed.includes(',') && !trimmed.includes('. ') && !trimmed.includes(' daughter ') && !trimmed.includes(' grew up ')) {
+    return adaptPromptForDiffusionArchitecture(trimmed, targetModel);
   }
 
-  // Try LLM translation into English SDXL visual tokens
+  // Try LLM translation into English visual tokens with Intermediary SLM
   const finalBaseUrl = getBaseUrl(baseUrl);
+  const resolvedModelId = await resolveIntermediaryModelId(modelId, finalBaseUrl);
+  emitAILog({
+    from: 'INTERMEDIARY_SLM',
+    to: 'DIFFUSION_PIPELINE',
+    type: 'PROMPT_TRANSLATION',
+    summary: `Traducción visual de prompt con modelo intermediario (${resolvedModelId}): "${trimmed.substring(0, 45)}..."`,
+    payload: { raw: trimmed, style, model: resolvedModelId, targetModel }
+  });
+
   try {
-    const { system, user } = createVisualPromptTranslationPrompt(trimmed, style);
-    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
-    const resolvedModelId = currentlyLoaded || (await resolveModelId(modelId, finalBaseUrl)) || modelId || 'default';
+    const { system, user } = createVisualPromptTranslationPrompt(trimmed, style, targetModel);
 
     const response = await apiFetch('/v1/chat/completions', {
       method: 'POST',
@@ -363,7 +418,16 @@ export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fa
         translated = translated.replace(/^```[a-z]*\s*/i, '').replace(/```$/i, '').trim();
         if (translated.length > 5) {
           const styleModifier = STYLE_PROMPT_PRESETS[style] || STYLE_PROMPT_PRESETS['Fantasía Oscura'] || 'cinematic lighting, masterpiece, high quality, highly detailed';
-          return `${translated}, style: ${styleModifier}, sharp focus, detailed composition`;
+          const combined = `${translated}, style: ${styleModifier}, sharp focus, detailed composition`;
+          const finalResult = adaptPromptForDiffusionArchitecture(combined, targetModel);
+          emitAILog({
+            from: 'PROMPT_TRANSLATOR',
+            to: 'DIFFUSION_PIPELINE',
+            type: 'PROMPT_TRANSLATION',
+            summary: `Prompt convertido a tokens en inglés (${finalResult.substring(0, 50)}...)`,
+            payload: { fullPrompt: finalResult, targetModel }
+          });
+          return finalResult;
         }
       }
     }
@@ -372,7 +436,15 @@ export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fa
   }
 
   // Heuristic dictionary fallback
-  return enrichImagePrompt(trimmed, style);
+  const fallbackResult = enrichImagePrompt(trimmed, style, targetModel);
+  emitAILog({
+    from: 'PROMPT_TRANSLATOR_HEURISTIC',
+    to: 'DIFFUSION_PIPELINE',
+    type: 'PROMPT_TRANSLATION',
+    summary: `Prompt traducido mediante diccionario heurístico (${fallbackResult.substring(0, 50)}...)`,
+    payload: { fullPrompt: fallbackResult, targetModel }
+  });
+  return fallbackResult;
 }
 
 /**
@@ -384,8 +456,17 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
   const isLightning = selectedModel.toLowerCase().includes('lightning') || selectedModel.toLowerCase().includes('4step');
   const steps = isLightning ? 8 : 20;
 
-  // Translate and convert visual prompt to English SDXL tokens
-  const fullPrompt = await translateVisualPromptToEnglish(prompt, style, settings.lmStudioUrl, settings.preferredModel);
+  // Translate and convert visual prompt to English SDXL / Pony tokens
+  const fullPrompt = await translateVisualPromptToEnglish(prompt, style, settings.lmStudioUrl, settings.preferredModel, selectedModel);
+  const negativePrompt = getNegativePromptForModel(selectedModel);
+
+  emitAILog({
+    from: 'DIFFUSION_PIPELINE',
+    to: 'NATIVE_DIFFUSION_WORKER',
+    type: 'DIFFUSION_TASK',
+    summary: `Generando imagen ${customWidth}x${customHeight} (${steps} pasos, modelo: ${selectedModel})`,
+    payload: { prompt: fullPrompt, negativePrompt, model: selectedModel, width: customWidth, height: customHeight, steps }
+  });
 
   // 1. Prioritize Ptahn Native Server Diffusion Endpoint (/api/images/generate)
   try {
@@ -394,7 +475,8 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
       height: customHeight,
       steps: steps,
       model: selectedModel,
-      style: style
+      style: style,
+      negativePrompt: negativePrompt
     });
     if (nativeRes && nativeRes.success && (nativeRes.base64 || nativeRes.url)) {
       if (nativeRes.base64) return nativeRes.base64;
@@ -546,9 +628,17 @@ export async function generateAudioLocal(text, voice = 'default', description = 
   const finalBaseUrl = getBaseUrl(baseUrl);
   const defaultId = 'audio-cpp/audio.cpp';
   const resolvedId = (await resolveModelId('audio.cpp', finalBaseUrl)) || defaultId;
+  const startTime = Date.now();
 
   console.log(`[Dynamic TTS Load]: Loading voice model ${resolvedId}`);
   await loadModel(resolvedId, finalBaseUrl);
+  emitAILog({
+    from: 'CHAT_NARRATOR',
+    to: 'TTS_KOKORO',
+    type: 'TTS_AUDIO',
+    summary: `Generando síntesis de voz ("${text.substring(0, 40)}...", voz: ${voice}, velocidad: ${speed}x)`,
+    payload: { text: text.substring(0, 100), voice, pitch, speed }
+  });
 
   try {
     const response = await fetch(`${finalBaseUrl}/v1/audio/speech`, {
@@ -576,9 +666,22 @@ export async function generateAudioLocal(text, voice = 'default', description = 
     }
     
     const blob = await response.blob();
+    emitAILog({
+      from: 'TTS_KOKORO',
+      to: 'AUDIO_PLAYER',
+      type: 'TTS_AUDIO',
+      summary: `Síntesis de voz completada (${blob.size} bytes generados en ${Date.now() - startTime}ms)`,
+      metrics: { sizeBytes: blob.size, durationMs: Date.now() - startTime }
+    });
     return URL.createObjectURL(blob);
   } catch (error) {
     console.error('[Local AI Studio TTS Error]:', error);
+    emitAILog({
+      from: 'TTS_KOKORO',
+      to: 'AUDIO_PLAYER',
+      type: 'ERROR',
+      summary: `Error en síntesis de voz: ${error.message}`
+    });
     throw error;
   } finally {
     console.log(`[Dynamic TTS Unload]: Unloading voice model ${resolvedId}`);
@@ -587,18 +690,20 @@ export async function generateAudioLocal(text, voice = 'default', description = 
 }
 
 /**
- * Sends a chat completion request to LM Studio with tag context weighting and streaming.
+ * Sends a chat completion request to native Ptahn engine with tag context weighting and streaming.
  */
 export async function sendChatMessage({
   messages,
   systemInstruction = '',
   contextDocuments = [],
-  modelId = 'Precog-Magnum-31B-i1-GGUF',
+  modelId = 'Precog-Magnum-31B.i1-Q3_K_S.gguf',
   temperature = 0.85,
   baseUrl,
-  onChunk = null
+  onChunk = null,
+  callerType = 'STORYTELLER_LLM'
 }) {
   const finalBaseUrl = getBaseUrl(baseUrl);
+  const chatStartTime = Date.now();
   try {
     const recentText = messages.slice(-3).map(m => m.text).join(' ').toLowerCase();
     
@@ -643,6 +748,16 @@ export async function sendChatMessage({
     const narrationId = (await resolveModelId(modelId, finalBaseUrl)) || modelId;
     await loadModel(narrationId, finalBaseUrl);
 
+    emitAILog({
+      from: callerType === 'INTERMEDIARY_SLM' ? 'INTERMEDIARY_SLM' : 'CHAT_VIEW',
+      to: callerType === 'INTERMEDIARY_SLM' ? 'INTERMEDIARY_SLM' : 'STORYTELLER_LLM',
+      type: callerType === 'INTERMEDIARY_SLM' ? 'INTER_AI' : 'STORYTELLER',
+      summary: callerType === 'INTERMEDIARY_SLM'
+        ? `Petición procesada con modelo intermediario ${narrationId}`
+        : `Petición de turno narrativo al modelo principal ${narrationId} (${messages.length} mensajes previos)`,
+      payload: { model: narrationId, messageCount: messages.length, contextDocs: weightedDocs.length }
+    });
+
     const isStream = typeof onChunk === 'function';
 
     const requestBody = JSON.stringify({
@@ -652,11 +767,30 @@ export async function sendChatMessage({
       stream: isStream
     });
 
-    const response = await apiFetch('/v1/chat/completions', {
+    let response = await apiFetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: requestBody
     }, finalBaseUrl);
+
+    if (!response.ok) {
+      // If the specific requested model failed (e.g. model not loaded in LM Studio single-model mode), retry with currently loaded model
+      const currentlyLoaded = await getLoadedModel(finalBaseUrl);
+      if (currentlyLoaded && currentlyLoaded !== narrationId) {
+        console.warn(`[Local AI Studio]: Model '${narrationId}' not loaded, retrying with active model '${currentlyLoaded}'...`);
+        const fallbackBody = JSON.stringify({
+          model: currentlyLoaded,
+          messages: formattedMessages,
+          temperature: temperature,
+          stream: isStream
+        });
+        response = await apiFetch('/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: fallbackBody
+        }, finalBaseUrl);
+      }
+    }
 
     if (!response.ok) {
       const errText = await response.text().catch(() => response.statusText);
@@ -719,6 +853,19 @@ export async function sendChatMessage({
       }
       fullContent = text || 'No response received from model.';
     }
+
+    const elapsed = Date.now() - chatStartTime;
+    const approxTokens = Math.max(1, Math.round(fullContent.length / 4));
+    const speed = calculateTokensSpeed(approxTokens, elapsed);
+    recordTokensTelemetry(approxTokens, speed);
+
+    emitAILog({
+      from: 'STORYTELLER_LLM',
+      to: 'CHAT_VIEW',
+      type: 'STORYTELLER',
+      summary: `Turno narrativo completado (~${approxTokens} tokens a ${speed} tok/s en ${(elapsed / 1000).toFixed(1)}s)`,
+      metrics: { tokens: approxTokens, speedTokPerSec: speed, elapsedMs: elapsed }
+    });
     
     return {
       text: fullContent,
@@ -726,6 +873,12 @@ export async function sendChatMessage({
     };
   } catch (error) {
     console.error('[Local AI Studio Chat Error]:', error);
+    emitAILog({
+      from: 'STORYTELLER_LLM',
+      to: 'CHAT_VIEW',
+      type: 'ERROR',
+      summary: `Error en turno narrativo: ${error.message}`
+    });
     return {
       text: `[Simulation Mode / Local AI Studio server not detected at ${finalBaseUrl}]: Ensure your LLM server is active.\n\n*The game master watches the room in silence...*`,
       usedContextDocs: []
@@ -754,8 +907,15 @@ Current memories: ${existingMem}.
 Language: Write the memory sentence strictly in ${targetLang.name} (${targetLang.code}).
 Respond ONLY with a short, evocative sentence to add to memory, or the word NONE if not relevant.`;
 
-    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
-    const summarizerId = currentlyLoaded || (await resolveModelId(modelId, finalBaseUrl)) || (await resolveModelId('magnum', finalBaseUrl)) || modelId;
+    const summarizerId = await resolveIntermediaryModelId(modelId, finalBaseUrl);
+
+    emitAILog({
+      from: 'STORYTELLER_LLM',
+      to: 'INTERMEDIARY_SLM',
+      type: 'INTER_AI',
+      summary: `Petición de resumen y extracción de memorias al modelo intermediario (${summarizerId})`,
+      payload: { model: summarizerId, messageCount: messages.length }
+    });
 
     const requestBody = JSON.stringify({
       model: summarizerId,
@@ -842,11 +1002,7 @@ Allowed types: "Personaje", "Lugar", "Objeto", "Historia".
 If no new entity is found, reply ONLY with: []
 Do not add any explanation or text outside the JSON.`;
 
-    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
-    let targetModelId = currentlyLoaded || modelId;
-    if (!targetModelId) {
-      targetModelId = (await resolveModelId('nemo', finalBaseUrl)) || (await resolveModelId('magnum', finalBaseUrl)) || 'default';
-    }
+    const targetModelId = await resolveIntermediaryModelId(modelId, finalBaseUrl);
 
     const requestBody = JSON.stringify({
       model: targetModelId,
@@ -856,6 +1012,14 @@ Do not add any explanation or text outside the JSON.`;
       ],
       temperature: 0.2,
       stream: false
+    });
+
+    emitAILog({
+      from: 'STORYTELLER_LLM',
+      to: 'INTERMEDIARY_SLM',
+      type: 'INTER_AI',
+      summary: `Petición de extracción de entidades al modelo intermediario (${targetModelId})`,
+      payload: { model: targetModelId, existingEntitiesCount: existingNames.length, preferredLanguage: targetLang.code }
     });
 
     const response = await apiFetch('/v1/chat/completions', {
@@ -875,22 +1039,44 @@ Do not add any explanation or text outside the JSON.`;
 
     const jsonStart = rawContent.indexOf('[');
     const jsonEnd = rawContent.lastIndexOf(']');
-    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-      rawContent = rawContent.substring(jsonStart, jsonEnd + 1);
+    if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+      return [];
     }
 
-    const parsed = JSON.parse(rawContent);
-    if (Array.isArray(parsed)) {
-      return parsed.filter(item => {
-        if (!item || !item.title || typeof item.title !== 'string') return false;
-        // Strict duplicate check against all existing entities using findMatchingEntity
-        const duplicate = findMatchingEntity(item.title, allExisting);
-        return !duplicate;
-      });
+    rawContent = rawContent.substring(jsonStart, jsonEnd + 1);
+
+    try {
+      const parsed = JSON.parse(rawContent);
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter(item => {
+          if (!item || !item.title || typeof item.title !== 'string') return false;
+          // Strict duplicate check against all existing entities using findMatchingEntity
+          const duplicate = findMatchingEntity(item.title, allExisting);
+          return !duplicate;
+        });
+
+        emitAILog({
+          from: 'INTERMEDIARY_SLM',
+          to: 'CHAT_COMPENDIUM_VIEW',
+          type: 'CARD_EXTRACTOR',
+          summary: `Extracción completada por intermediario: ${filtered.length} nuevas entidades (${filtered.map(c => c.title).join(', ') || 'Ninguna'})`,
+          payload: filtered
+        });
+
+        return filtered;
+      }
+    } catch (parseErr) {
+      return [];
     }
     return [];
   } catch (error) {
     console.warn('[Local AI Studio Extraction Error]:', error.message);
+    emitAILog({
+      from: 'INTERMEDIARY_SLM',
+      to: 'CHAT_COMPENDIUM_VIEW',
+      type: 'ERROR',
+      summary: `Error en extracción de entidades con intermediario: ${error.message}`
+    });
     return [];
   }
 }
@@ -918,8 +1104,15 @@ export async function translateChatMessage({
     const resolvedLang = resolveTargetLanguage(targetLanguage, text);
     const { system, user } = createTranslationPrompt(text, resolvedLang);
 
-    const currentlyLoaded = await getLoadedModel(finalBaseUrl);
-    const resolvedModelId = currentlyLoaded || (await resolveModelId(modelId, finalBaseUrl)) || modelId || 'default';
+    const resolvedModelId = await resolveIntermediaryModelId(modelId, finalBaseUrl);
+
+    emitAILog({
+      from: 'CHAT_VIEW',
+      to: 'INTERMEDIARY_SLM',
+      type: 'INTER_AI',
+      summary: `Traducción de mensaje con modelo intermediario (${resolvedModelId})`,
+      payload: { model: resolvedModelId, targetLanguage: resolvedLang.code }
+    });
 
     const response = await apiFetch('/v1/chat/completions', {
       method: 'POST',

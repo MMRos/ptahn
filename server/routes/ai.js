@@ -21,14 +21,23 @@ async function handleChatCompletion(req, res) {
       return res.status(400).json({ success: false, error: 'messages array is required' });
     }
 
-    const isStreaming = stream || options.stream;
+    const mergedOptions = {
+      ...req.body,
+      ...(options || {}),
+      model: req.body.model || options.model,
+      maxTokens: req.body.max_tokens || req.body.maxTokens || options.maxTokens || options.max_tokens,
+      temperature: req.body.temperature !== undefined ? req.body.temperature : options.temperature,
+      topP: req.body.top_p !== undefined ? req.body.top_p : options.topP
+    };
+
+    const isStreaming = stream || options.stream || req.body.stream;
 
     if (isStreaming) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
 
-      await llamaEngine.generateCompletion(messages, options, (chunkText) => {
+      await llamaEngine.generateCompletion(messages, mergedOptions, (chunkText) => {
         const payload = JSON.stringify({
           choices: [{ delta: { content: chunkText } }]
         });
@@ -38,8 +47,18 @@ async function handleChatCompletion(req, res) {
       res.write(`data: [DONE]\n\n`);
       res.end();
     } else {
-      const reply = await llamaEngine.generateCompletion(messages, options);
+      const reply = await llamaEngine.generateCompletion(messages, mergedOptions);
       res.json({
+        id: `chatcmpl-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: typeof reply === 'string' ? reply : (reply?.content || '') },
+            finish_reason: 'stop'
+          }
+        ],
         success: true,
         reply,
         activeModel: llamaEngine.getStatus().activeModel

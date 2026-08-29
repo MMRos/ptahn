@@ -31,18 +31,18 @@ import {
   faSpinner
 } from '@fortawesome/free-solid-svg-icons';
 
-import { getAvailableModels, AVAILABLE_IMAGE_MODELS } from '../utils/localAIStudio';
 import { SUPPORTED_LANGUAGES } from '../utils/language';
 import { 
   fetchServerStatus, 
   fetchAvailableModels, 
-  loadModelOnServer,
+  fetchNativeImageModels,
   startServerService,
   stopServerService,
   restartServerService,
   pollServerOnline
 } from '../utils/serverApi';
 import RemoteConnectModal from './RemoteConnectModal';
+import TelemetryHUD from './TelemetryHUD';
 import './topbar.css';
 
 
@@ -55,21 +55,24 @@ const FONT_FAMILIES = [
 ];
 
 const FONT_SIZES = [
-  { id: 'small', name: 'Pequeña (13.5px)' },
-  { id: 'normal', name: 'Normal (15px)' },
-  { id: 'medium', name: 'Mediana (17px)' },
-  { id: 'large', name: 'Grande (19.5px)' },
-  { id: 'xlarge', name: 'Muy Grande (22px)' }
+  { id: 'small', name: 'Pequeña (14px)' },
+  { id: 'normal', name: 'Normal (16px)' },
+  { id: 'large', name: 'Grande (18px)' }
 ];
 
-export default function TopBar({ 
-  currentView, 
-  onNavigate, 
-  onChooseFolder, 
+export default function TopBar({
+  currentView = 'home',
+  onNavigate = () => {},
+  onChooseFolder = () => {},
   storageStatus,
-  isFavorite,
-  onToggleFavorite,
-  onShareChat,
+  currentUser = { username: 'Admin', role: 'admin' },
+  onOpenAuthModal = () => {},
+  onLogout = () => {},
+  onOpenProfile = () => {},
+  onOpenMusic = () => {},
+  isFavorite = false,
+  onToggleFavorite = () => {},
+  onShareChat = () => {},
   chatSettings = {},
   onUpdateChatSettings = () => {},
   onUpdateChatCustomStyle = () => {},
@@ -82,23 +85,18 @@ export default function TopBar({
   onChangeConstantPrompt = () => {},
   memoryCards = [],
   onAddMemory = () => {},
-  onRemoveMemory = () => {},
-  currentUser = null,
-  onOpenAuthModal,
-  onLogout
+  onRemoveMemory = () => {}
 }) {
-
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState('appearance'); // 'appearance' | 'ai' | 'chat'
+  const [settingsTab, setSettingsTab] = useState('ai'); // 'ai' | 'appearance' | 'chat'
   const [styleScope, setStyleScope] = useState('specific'); // 'specific' | 'global'
   const [showPromptInput, setShowPromptInput] = useState(false);
   const [showMemoryInput, setShowMemoryInput] = useState(false);
   const [newMemoryText, setNewMemoryText] = useState('');
-  const [availableLmModels, setAvailableLmModels] = useState([]);
   const [remoteModalOpen, setRemoteModalOpen] = useState(false);
   const [serverInfo, setServerInfo] = useState({ online: false });
   const [nativeGgufModels, setNativeGgufModels] = useState([]);
-  const [loadingModel, setLoadingModel] = useState(false);
+  const [nativeDiffusionModels, setNativeDiffusionModels] = useState([]);
   const [lifecycleStatus, setLifecycleStatus] = useState('idle'); // 'idle' | 'starting' | 'stopping' | 'restarting'
   const [serverNotice, setServerNotice] = useState(null);
   const dropdownRef = useRef(null);
@@ -120,6 +118,13 @@ export default function TopBar({
       const res = await fetchAvailableModels();
       if (res && res.success && Array.isArray(res.models)) {
         setNativeGgufModels(res.models);
+      }
+    } catch (e) {}
+
+    try {
+      const imgRes = await fetchNativeImageModels();
+      if (imgRes && imgRes.success && Array.isArray(imgRes.models)) {
+        setNativeDiffusionModels(imgRes.models);
       }
     } catch (e) {}
   };
@@ -167,19 +172,6 @@ export default function TopBar({
     refreshServerInfo();
   }, [settingsOpen]);
 
-  const handleSwitchNativeModel = async (modelName) => {
-    setLoadingModel(true);
-    try {
-      await loadModelOnServer(modelName);
-      refreshServerInfo();
-    } catch (e) {
-      console.warn('Failed to switch native model:', e);
-    } finally {
-      setLoadingModel(false);
-    }
-  };
-
-
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -189,19 +181,6 @@ export default function TopBar({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  // Cargar modelos reales conectados desde LM Studio al abrir ajustes o cambiar URL
-  useEffect(() => {
-    if (settingsOpen) {
-      getAvailableModels(chatSettings.lmStudioUrl)
-        .then(models => {
-          if (Array.isArray(models) && models.length > 0) {
-            setAvailableLmModels(models);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [settingsOpen, chatSettings.lmStudioUrl]);
 
   const isChatView = currentView === 'chat';
 
@@ -254,37 +233,42 @@ export default function TopBar({
     }
   };
 
-  const preferredModel = chatSettings.preferredModel || 'Precog-Magnum-31B-i1-GGUF';
+  const preferredModel = chatSettings.preferredModel || 'Precog-Magnum-31B.i1-Q3_K_S.gguf';
   const preferredLanguage = chatSettings.preferredLanguage || 'auto';
   const responseLength = chatSettings.responseLength || 1000;
 
   return (
     <header className="top-bar">
-      {/* Título de la cabecera del escenario (pequeña e interactiva) si estamos en un chat */}
-      {isChatView && activeChat ? (
-        <div className="top-bar-title-click" onClick={() => onOpenScenarioPopup(activeChat)}>
-          <span className="top-bar-scenario-name">
-            {activeChat.scenario || 'Escenario Ptah'}
-            {dmName && (
-              <span style={{ 
-                marginLeft: '10px', 
-                fontSize: '0.78rem', 
-                color: '#ffd36b', 
-                background: 'rgba(255, 211, 107, 0.1)', 
-                padding: '2px 8px', 
-                borderRadius: '4px', 
-                border: '1px solid rgba(255, 211, 107, 0.2)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}>
-                🧙 DM: {dmName}
-              </span>
-            )}
-          </span>
-          <span className="top-bar-scenario-meta">👁️ 534 • ★ 7.0/10</span>
-        </div>
-      ) : <div />}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+        {/* Título de la cabecera del escenario (pequeña e interactiva) si estamos en un chat */}
+        {isChatView && activeChat ? (
+          <div className="top-bar-title-click" onClick={() => onOpenScenarioPopup(activeChat)}>
+            <span className="top-bar-scenario-name">
+              {activeChat.scenario || 'Escenario Ptah'}
+              {dmName && (
+                <span style={{ 
+                  marginLeft: '10px', 
+                  fontSize: '0.78rem', 
+                  color: '#ffd36b', 
+                  background: 'rgba(255, 211, 107, 0.1)', 
+                  padding: '2px 8px', 
+                  borderRadius: '4px', 
+                  border: '1px solid rgba(255, 211, 107, 0.2)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  🧙 DM: {dmName}
+                </span>
+              )}
+            </span>
+            <span className="top-bar-scenario-meta">👁️ 534 • ★ 7.0/10</span>
+          </div>
+        ) : null}
+
+        {/* Telemetría HUD (ubicada a la derecha del título del escenario) */}
+        <TelemetryHUD currentUser={currentUser} />
+      </div>
 
       <div className="top-bar-actions" ref={dropdownRef}>
         {isChatView ? (
@@ -751,43 +735,42 @@ export default function TopBar({
                   <FontAwesomeIcon icon={faMobileAlt} /> Conectar Móvil / Ver Código QR
                 </button>
 
-                {/* Selector de Modelos GGUF Nativos en ./models/ */}
-                {nativeGgufModels.length > 0 && (
-                  <div className="settings-group">
-                    <label><FontAwesomeIcon icon={faMicrochip} /> Modelo GGUF Nativo (en ./models/)</label>
-                    <select 
-                      value={serverInfo.activeModel || ''}
-                      onChange={(e) => handleSwitchNativeModel(e.target.value)}
-                      disabled={loadingModel}
-                    >
-                      {nativeGgufModels.map(m => (
-                        <option key={m.id} value={m.filename}>{m.filename} ({m.formattedSize})</option>
-                      ))}
-                    </select>
+                {/* Motor Nativo Ptahn */}
+                <div className="settings-group" style={{ background: 'rgba(255, 211, 107, 0.06)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 211, 107, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FontAwesomeIcon icon={faServer} style={{ color: '#ffd36b' }} />
+                    <div>
+                      <div style={{ color: '#ffd36b', fontWeight: 'bold', fontSize: '0.78rem' }}>Motor Nativo Ptahn (:3001)</div>
+                      <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.68rem' }}>Inferencia GPU local con modelos .gguf en ./models/</div>
+                    </div>
                   </div>
-                )}
+                  <span style={{ background: 'rgba(110, 231, 183, 0.15)', color: '#6ee7b7', border: '1px solid rgba(110, 231, 183, 0.3)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 'bold' }}>
+                    Nativo Activo
+                  </span>
+                </div>
 
-                {/* Modelo Favorito (LM Studio / Fallback) */}
+                {/* Modelo Principal / Storyteller */}
                 <div className="settings-group">
-                  <label><FontAwesomeIcon icon={faSlidersH} /> Modelo de Narración & Rol (Externo)</label>
+                  <label><FontAwesomeIcon icon={faSlidersH} /> Modelo Principal / Storyteller (Narración & Rol)</label>
                   <select 
                     value={preferredModel}
                     onChange={(e) => onUpdateChatSettings({ ...chatSettings, preferredModel: e.target.value })}
                   >
-                    {availableLmModels.length > 0 && (
-                      <optgroup label="🟢 Detectados en tu LM Studio">
-                        {availableLmModels.map(m => (
-                          <option key={m.id} value={m.id}>{m.id}</option>
+                    <optgroup label="👑 Modelos Recomendados (Prioridad)">
+                      <option value="Precog-Magnum-31B.i1-Q3_K_S.gguf">Precog-Magnum 31B I1 (Máxima Profundidad)</option>
+                      <option value="magnum-v4-12b-Q4_K_M.gguf">Magnum v4 12B (Narrativa Oscura & Roleplay)</option>
+                      <option value="mistral-nemo-instruct-2407-gguf-Q4-K-M.gguf">Mistral Nemo Instruct 2407 (12B)</option>
+                      <option value="L3.2-8X3B-MOE-Dark-Champion-Inst-18.4B-uncen-ablit_D_AU-Q4_k_s.gguf">L3.2 MoE Dark Champion (18.4B)</option>
+                      <option value="M-MOE-4X7B-Dark-MultiVerse-UC-E32-24B-D_AU-Q4_k_s.gguf">MultiVerse MoE (24B)</option>
+                    </optgroup>
+                    
+                    {nativeGgufModels.length > 0 && (
+                      <optgroup label="📁 Todos los Modelos GGUF en ./models/">
+                        {nativeGgufModels.map(m => (
+                          <option key={m.id} value={m.filename}>{m.filename} ({m.formattedSize})</option>
                         ))}
                       </optgroup>
                     )}
-                    
-                    <optgroup label="👑 Modelos Recomendados">
-                      <option value="Precog-Magnum-31B-i1-GGUF">Precog-Magnum 31B I1 (mradermacher)</option>
-                      <option value="Magnum_Lyra_Darkness_12B-Heretic-GGUF">Magnum Lyra Darkness 12B Heretic</option>
-                      <option value="Magnum-v4-12B-GGUF">Magnum v4 12B (anthracite-org)</option>
-                      <option value="Mistral-Nemo-Instruct-2407-GGUF">Mistral Nemo Instruct 2407</option>
-                    </optgroup>
                   </select>
                 </div>
 
@@ -798,20 +781,19 @@ export default function TopBar({
                     value={chatSettings.orchestratorModel || ''}
                     onChange={(e) => onUpdateChatSettings({ ...chatSettings, orchestratorModel: e.target.value })}
                   >
-                    <option value="">⚡ Automático (Usar modelo principal o SLM rápido)</option>
-                    {availableLmModels.length > 0 && (
-                      <optgroup label="🟢 Detectados en LM Studio">
-                        {availableLmModels.map(m => (
-                          <option key={`orch-${m.id}`} value={m.id}>{m.id}</option>
+                    <optgroup label="👑 Modelos Recomendados (Orquestación & Lore)">
+                      <option value="mistral-nemo-instruct-2407-gguf-Q4-K-M.gguf">Mistral Nemo Instruct 12B (Ideal para Lore & JSON)</option>
+                      <option value="magnum-v4-12b-Q4_K_M.gguf">Magnum v4 12B (Rápido)</option>
+                      <option value="">⚡ Automático (Usar modelo principal o SLM rápido)</option>
+                    </optgroup>
+
+                    {nativeGgufModels.length > 0 && (
+                      <optgroup label="📁 Modelos GGUF en ./models/">
+                        {nativeGgufModels.map(m => (
+                          <option key={`orch-${m.id}`} value={m.filename}>{m.filename} ({m.formattedSize})</option>
                         ))}
                       </optgroup>
                     )}
-                    <optgroup label="⚡ Modelos Ligeros Recomendados (0.5B - 3B)">
-                      <option value="Qwen2.5-1.5B-Instruct-GGUF">Qwen 2.5 1.5B Instruct (Ultra Rápido)</option>
-                      <option value="Llama-3.2-1B-Instruct-GGUF">Llama 3.2 1B Instruct</option>
-                      <option value="Llama-3.2-3B-Instruct-GGUF">Llama 3.2 3B Instruct</option>
-                      <option value="gemma-2-2b-it-GGUF">Gemma 2 2B IT</option>
-                    </optgroup>
                   </select>
                   <small style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.72rem', display: 'block', marginTop: '3px' }}>
                     Se encarga de pre-filtrar lore, traducir, formatear diálogos/acciones y preparar prompts de difusión.
@@ -859,14 +841,23 @@ export default function TopBar({
                 <div className="settings-group">
                   <label><FontAwesomeIcon icon={faPalette} /> Modelo de Generación de Imágenes (Difusión)</label>
                   <select 
-                    value={chatSettings.preferredImageModel || 'DreamShaperXL_Lightning.safetensors'}
+                    value={chatSettings.preferredImageModel || 'malaAnimeMixNSFW_v70WithoutVAE.safetensors'}
                     onChange={(e) => onUpdateChatSettings({ ...chatSettings, preferredImageModel: e.target.value })}
                   >
-                    {AVAILABLE_IMAGE_MODELS.map(model => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
+                    <optgroup label="👑 Checkpoints & Aceleradores Recomendados">
+                      <option value="malaAnimeMixNSFW_v70WithoutVAE.safetensors">Mala Anime Mix NSFW (SDXL Checkpoint 6.9 GB)</option>
+                      <option value="v6.safetensors">Pony / Illustrious V6 (SDXL Checkpoint 6.9 GB)</option>
+                      <option value="dmd2_sdxl_4step_lora.safetensors">DMD2 SDXL 4-Step (Acelerador LoRA 787 MB)</option>
+                      <option value="MysticToon-V1.safetensors">MysticToon V1 (LoRA Estilo 153 MB)</option>
+                    </optgroup>
+
+                    {nativeDiffusionModels.length > 0 && (
+                      <optgroup label="📁 Archivos de Difusión en ./models/">
+                        {nativeDiffusionModels.map(m => (
+                          <option key={m.id} value={m.filename}>{m.filename} ({m.formattedSize || ''})</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
 
