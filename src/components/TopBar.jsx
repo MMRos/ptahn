@@ -43,6 +43,7 @@ import {
 } from '../utils/serverApi';
 import RemoteConnectModal from './RemoteConnectModal';
 import TelemetryHUD from './TelemetryHUD';
+import ModelManagerModal from './ModelManagerModal';
 import './topbar.css';
 
 
@@ -94,6 +95,7 @@ export default function TopBar({
   const [showMemoryInput, setShowMemoryInput] = useState(false);
   const [newMemoryText, setNewMemoryText] = useState('');
   const [remoteModalOpen, setRemoteModalOpen] = useState(false);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [serverInfo, setServerInfo] = useState({ online: false });
   const [nativeGgufModels, setNativeGgufModels] = useState([]);
   const [nativeDiffusionModels, setNativeDiffusionModels] = useState([]);
@@ -316,6 +318,16 @@ export default function TopBar({
           style={currentUser ? { color: '#ffd36b', background: 'rgba(255, 211, 107, 0.12)' } : {}}
         >
           <FontAwesomeIcon icon={faUser} />
+        </button>
+
+        <button 
+          className={`top-bar-btn ${modelManagerOpen ? 'active' : ''}`}
+          title="Gestor e Instalador de Modelos de IA (Hugging Face / Local)" 
+          aria-label="Gestor de Modelos"
+          onClick={() => setModelManagerOpen(true)}
+          style={{ color: '#818cf8', background: 'rgba(129, 140, 248, 0.12)' }}
+        >
+          <FontAwesomeIcon icon={faBrain} />
         </button>
 
         <button 
@@ -627,6 +639,29 @@ export default function TopBar({
             {/* PESTAÑA 2: MOTOR IA & CONEXIÓN */}
             {settingsTab === 'ai' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => { setSettingsOpen(false); setModelManagerOpen(true); }}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: '#fff',
+                    fontWeight: 600,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)'
+                  }}
+                >
+                  <span>📦 Abrir Gestor de Modelos & Descargador</span>
+                </button>
+
                 {/* Panel de Control de Ciclo de Vida del Servidor */}
                 <div className={`server-lifecycle-card ${serverInfo.online ? 'online' : 'offline'} ${lifecycleStatus !== 'idle' ? 'transitioning' : ''}`}>
                   <div className="server-lifecycle-header">
@@ -991,6 +1026,12 @@ export default function TopBar({
       <RemoteConnectModal 
         isOpen={remoteModalOpen} 
         onClose={() => setRemoteModalOpen(false)} 
+      />
+
+      <ModelManagerModal 
+        isOpen={modelManagerOpen} 
+        onClose={() => setModelManagerOpen(false)} 
+        onModelLoaded={refreshServerInfo}
       />
     </header>
   );

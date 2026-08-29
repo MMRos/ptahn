@@ -160,28 +160,27 @@ describe('Auth API Routes (/api/auth)', () => {
     let standardUserId;
 
     beforeEach(async () => {
-      const adminReg = await makeRequest(`${baseUrl}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: {
-          email: 'marcmr_88@hotmail.com',
-          username: 'Azgael',
-          password: 'Earthian#00'
-        }
-      });
-      adminToken = adminReg.data.token;
+      const localOwnerRes = await makeRequest(`${baseUrl}/api/auth/local-owner`);
+      adminToken = localOwnerRes.data.token;
 
-      const userReg = await makeRequest(`${baseUrl}/api/auth/register`, {
+      let userLog = await makeRequest(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: {
-          email: 'normal@ptahn.local',
-          username: 'NormalUser',
-          password: 'Password123@#'
-        }
+        body: { identifier: 'normal@ptahn.local', password: 'Password123@#' }
       });
-      userToken = userReg.data.token;
-      standardUserId = userReg.data.user.id;
+      if (userLog.status !== 200) {
+        userLog = await makeRequest(`${baseUrl}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: {
+            email: 'normal@ptahn.local',
+            username: 'NormalUser',
+            password: 'Password123@#'
+          }
+        });
+      }
+      userToken = userLog.data?.token;
+      standardUserId = userLog.data?.user?.id;
 
       // Admin creates an IT user
       const itCreateRes = await makeRequest(`${baseUrl}/api/auth/admin/users`, {

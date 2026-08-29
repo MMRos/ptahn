@@ -18,8 +18,14 @@ export default function RemoteConnectModal({ isOpen, onClose }) {
           }
         })
         .finally(() => setLoading(false));
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Escape') onClose();
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -32,9 +38,15 @@ export default function RemoteConnectModal({ isOpen, onClose }) {
   };
 
   return (
-    <div className="popup-overlay" style={{ zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div 
+      className="popup-overlay" 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div 
         className="scenario-popup-card" 
+        onClick={(e) => e.stopPropagation()}
         style={{ 
           maxWidth: '460px', 
           width: '92%', 

@@ -87,8 +87,10 @@ export async function apiFetch(endpoint, options = {}, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  // Default timeout of 1200ms if no signal provided, preventing offline hangs and test timeouts
-  const defaultTimeout = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(1200) : undefined;
+  // Dynamic timeout: Long (180s) for LLM/SLM inference & diffusion; short (3.5s) for discovery & health checks
+  const isHeavyEndpoint = cleanEndpoint.includes('/chat/completions') || cleanEndpoint.includes('/images/') || cleanEndpoint.includes('/models/load') || cleanEndpoint.includes('/completions');
+  const defaultTimeoutMs = isHeavyEndpoint ? 180000 : 3500;
+  const defaultTimeout = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(defaultTimeoutMs) : undefined;
   const fetchOptions = {
     ...options,
     signal: options.signal || defaultTimeout
