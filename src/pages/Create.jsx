@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { loadAppData } from '../utils/storage';
+import { isChildCard, getCardProvenance, filterCreationsCards } from '../utils/creationsFilter';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faArrowLeft, 
@@ -48,12 +49,54 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
   const [sortBy, setSortBy] = useState('recent'); // 'recent' | 'oldest' | 'name_asc' | 'name_desc' | 'type'
   const [cardTypeFilter, setCardTypeFilter] = useState('all');
   const [scenarioCategoryFilter, setScenarioCategoryFilter] = useState('all');
+  const [showChildVersions, setShowChildVersions] = useState(false); // Ocultar hijos por defecto
 
   useEffect(() => {
     if (appData) {
       setData(appData);
     }
   }, [appData]);
+
+  const handleDeleteCard = (id) => {
+    const nextCards = (data.cards || []).filter(c => c.id !== id);
+    const nextData = { ...data, cards: nextCards };
+    setData(nextData);
+    if (onUpdateAppData) onUpdateAppData(nextData);
+    setSelectedCard(null);
+  };
+
+  const handleCopyCard = async (card) => {
+    if (!card) return;
+    const { cloneCard } = await import('../utils/cloning');
+    const cloned = cloneCard(card, {
+      creatorId: currentUser?.id,
+      creatorName: currentUser?.username
+    });
+    const nextData = { ...data, cards: [cloned, ...(data.cards || [])] };
+    setData(nextData);
+    if (onUpdateAppData) onUpdateAppData(nextData);
+    setSelectedCard(null);
+  };
+
+  const handleConvertToScenario = (card) => {
+    if (!card) return;
+    const newScenario = {
+      id: `scenario-${Date.now()}`,
+      title: `Aventura de ${card.title || card.name || 'Personaje'}`,
+      intro: card.intro || card.description || `Un escenario centrado en ${card.title || card.name}.`,
+      category: card.type === 'Lugar' ? 'Misterio' : 'Fantasía',
+      cover: card.cover,
+      cards: [card.id],
+      creatorId: currentUser?.id,
+      creatorName: currentUser?.username,
+      createdAt: new Date().toISOString()
+    };
+    const nextData = { ...data, scenarios: [newScenario, ...(data.scenarios || [])] };
+    setData(nextData);
+    if (onUpdateAppData) onUpdateAppData(nextData);
+    setSelectedCard(null);
+    if (onOpenScenario) onOpenScenario(newScenario);
+  };
 
   // Sort and filter scenarios
   const filteredScenarios = useMemo(() => {
@@ -80,38 +123,15 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
     return list;
   }, [data.scenarios, searchQuery, scenarioCategoryFilter, sortBy]);
 
-  // Sort and filter cards
+  // Sort and filter cards (incorporates child exclusion and type filter)
   const filteredCards = useMemo(() => {
-    let list = [...(data.cards || [])];
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(c => 
-        (c.title || c.name || '').toLowerCase().includes(q) ||
-        (c.type || '').toLowerCase().includes(q) ||
-        (c.subtype || '').toLowerCase().includes(q) ||
-        (c.description || c.intro || c.text || '').toLowerCase().includes(q) ||
-        (c.tags && c.tags.some(t => t.toLowerCase().includes(q))) ||
-        (c.images && c.images.some(img => (img.label || '').toLowerCase().includes(q) || (img.tags || '').toLowerCase().includes(q)))
-      );
-    }
-    if (cardTypeFilter !== 'all') {
-      list = list.filter(c => (c.type || '').toLowerCase() === cardTypeFilter.toLowerCase());
-    }
-    list.sort((a, b) => {
-      if (sortBy === 'name_asc') return (a.title || a.name || '').localeCompare(b.title || b.name || '');
-      if (sortBy === 'name_desc') return (b.title || b.name || '').localeCompare(a.title || a.name || '');
-      if (sortBy === 'type') {
-        const typePriority = { 'personaje': 1, 'lugar': 2, 'objeto': 3, 'faccion': 4, 'facción': 4, 'memoria': 5, 'inventario': 6 };
-        const pA = typePriority[(a.type || '').toLowerCase()] || 99;
-        const pB = typePriority[(b.type || '').toLowerCase()] || 99;
-        if (pA !== pB) return pA - pB;
-        return (a.title || a.name || '').localeCompare(b.title || b.name || '');
-      }
-      if (sortBy === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
-      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+    return filterCreationsCards(data.cards || [], {
+      searchQuery,
+      cardTypeFilter,
+      showChildVersions,
+      sortBy
     });
-    return list;
-  }, [data.cards, searchQuery, cardTypeFilter, sortBy]);
+  }, [data.cards, searchQuery, cardTypeFilter, showChildVersions, sortBy]);
 
   // Filter narrators & tools
   const filteredNarrators = useMemo(() => {
@@ -232,58 +252,6 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
   const [imagePrompt, setImagePrompt] = useState('');
   const [aiImages, setAiImages] = useState(INITIAL_IMAGES);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-
-  useEffect(() => {
-    if (appData) {
-      setData(appData);
-    }
-  }, [appData]);
-
-  const handleCopyCard = (card) => {
-    const newCard = {
-      ...card,
-      id: `card-${Date.now()}`,
-      title: `${card.title} (Copia)`,
-      createdAt: new Date().toISOString()
-    };
-    const nextData = {
-      ...data,
-      cards: [newCard, ...(data.cards || [])]
-    };
-    setData(nextData);
-    if (typeof onUpdateAppData === 'function') onUpdateAppData(nextData);
-    setSelectedCard(null);
-  };
-
-  const handleConvertToScenario = (card) => {
-    const prefilledScenario = {
-      title: card.title,
-      category: 'Aventura',
-      intro: card.intro || (card.text ? card.text.substring(0, 80) + '...' : ''),
-      cover: card.cover || '',
-      presentation: '',
-      baseContext: `[${card.type}]: ${card.text || ''}`,
-      aiInstructions: '',
-      tags: card.tags || [],
-      cards: [card.id],
-      narrator: null
-    };
-
-    if (onOpenCreateModal) {
-      onOpenCreateModal('Escenario', prefilledScenario);
-    }
-    setSelectedCard(null);
-  };
-
-  const handleDeleteCard = (cardId) => {
-    const nextData = {
-      ...data,
-      cards: (data.cards || []).filter(c => c.id !== cardId)
-    };
-    setData(nextData);
-    if (typeof onUpdateAppData === 'function') onUpdateAppData(nextData);
-    setSelectedCard(null);
-  };
 
   // Video AI generator
   const handleGenerateVideo = async () => {
@@ -1796,54 +1764,94 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
               </div>
             </details>
 
-            {/* Categoría 2: Tarjetas (Colapsable con filtro de tipo in-situ) */}
+            {/* Categoría 2: Tarjetas (Colapsable con filtro de tipo in-situ y toggle de hijos) */}
             <details className="created-details" open style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '12px 16px' }}>
               <summary style={{ fontWeight: '700', fontSize: '1rem', color: '#ffd36b', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                 <span>Tarjetas creadas ({filteredCards.length}{data.cards.length !== filteredCards.length ? ` / ${data.cards.length}` : ''})</span>
                 
-                {/* Filtro Tipo de Tarjeta Dedicado */}
-                <div 
-                  onClick={(e) => e.stopPropagation()} 
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#141523', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px 8px' }}
-                >
-                  <FontAwesomeIcon icon={faFilter} style={{ color: '#ffd36b', fontSize: '0.75rem' }} />
-                  <select
-                    value={cardTypeFilter}
-                    onChange={(e) => setCardTypeFilter(e.target.value)}
-                    style={{
-                      background: 'transparent',
-                      color: '#fff',
-                      border: 'none',
-                      padding: '4px 0',
-                      fontSize: '0.78rem',
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+                  {/* Toggle para Mostrar Versiones Hijo */}
+                  <label 
+                    style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '6px', 
+                      background: showChildVersions ? 'rgba(99, 102, 241, 0.22)' : 'rgba(255, 255, 255, 0.04)', 
+                      border: `1px solid ${showChildVersions ? '#818cf8' : 'rgba(255, 255, 255, 0.12)'}`, 
+                      borderRadius: '6px', 
+                      padding: '3px 10px', 
                       cursor: 'pointer',
-                      outline: 'none'
+                      fontSize: '0.76rem',
+                      color: showChildVersions ? '#c7d2fe' : 'rgba(255,255,255,0.7)',
+                      userSelect: 'none',
+                      transition: 'all 0.15s ease'
                     }}
+                    title="Muestra las instancias derivadas/hijos vinculados a escenarios o chats específicos"
                   >
-                    <option value="all" style={{ background: '#1a1b2b', color: '#fff' }}>🃏 Todos los tipos</option>
-                    <option value="Personaje" style={{ background: '#1a1b2b', color: '#fff' }}>🎭 Personajes</option>
-                    <option value="Lugar" style={{ background: '#1a1b2b', color: '#fff' }}>🏛️ Lugares</option>
-                    <option value="Objeto" style={{ background: '#1a1b2b', color: '#fff' }}>📦 Objetos</option>
-                    <option value="Faccion" style={{ background: '#1a1b2b', color: '#fff' }}>🐾 Facciones</option>
-                    <option value="Memoria" style={{ background: '#1a1b2b', color: '#fff' }}>🧠 Memorias</option>
-                    <option value="Inventario" style={{ background: '#1a1b2b', color: '#fff' }}>🎒 Inventario</option>
-                  </select>
+                    <input 
+                      type="checkbox" 
+                      checked={showChildVersions} 
+                      onChange={(e) => setShowChildVersions(e.target.checked)} 
+                      style={{ cursor: 'pointer', accentColor: '#6366f1', margin: 0 }}
+                    />
+                    <span>👁️ Ver versiones hijo</span>
+                  </label>
+
+                  {/* Filtro Tipo de Tarjeta Dedicado */}
+                  <div 
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#141523', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '2px 8px' }}
+                  >
+                    <FontAwesomeIcon icon={faFilter} style={{ color: '#ffd36b', fontSize: '0.75rem' }} />
+                    <select
+                      value={cardTypeFilter}
+                      onChange={(e) => setCardTypeFilter(e.target.value)}
+                      style={{
+                        background: 'transparent',
+                        color: '#fff',
+                        border: 'none',
+                        padding: '4px 0',
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                        outline: 'none'
+                      }}
+                    >
+                      <option value="all" style={{ background: '#1a1b2b', color: '#fff' }}>🃏 Todos los tipos</option>
+                      <option value="Personaje" style={{ background: '#1a1b2b', color: '#fff' }}>🎭 Personajes</option>
+                      <option value="Lugar" style={{ background: '#1a1b2b', color: '#fff' }}>🏛️ Lugares</option>
+                      <option value="Objeto" style={{ background: '#1a1b2b', color: '#fff' }}>📦 Objetos</option>
+                      <option value="Faccion" style={{ background: '#1a1b2b', color: '#fff' }}>🐾 Facciones</option>
+                      <option value="Memoria" style={{ background: '#1a1b2b', color: '#fff' }}>🧠 Memorias</option>
+                      <option value="Inventario" style={{ background: '#1a1b2b', color: '#fff' }}>🎒 Inventario</option>
+                    </select>
+                  </div>
                 </div>
               </summary>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', padding: '12px 0 6px 0' }}>
                 {filteredCards.length === 0 ? (
                   <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)' }}>
-                    {searchQuery || cardTypeFilter !== 'all' ? 'No hay tarjetas que coincidan con los filtros.' : 'No hay tarjetas aún.'}
+                    {searchQuery || cardTypeFilter !== 'all' || !showChildVersions ? 'No hay tarjetas que coincidan con los filtros.' : 'No hay tarjetas aún.'}
                   </span>
                 ) : (
                   filteredCards.map(c => {
                     const isChar = (c.type || '').toLowerCase() === 'personaje';
                     const isMemory = (c.type || '').toLowerCase() === 'memoria';
                     const isInv = (c.type || '').toLowerCase() === 'inventario';
+                    const prov = getCardProvenance(c);
+
                     return (
                       <div 
                         key={c.id} 
-                        style={{ flex: isChar ? '0 1 150px' : '1 1 180px', maxWidth: isChar ? '180px' : '280px', minWidth: '140px', background: 'rgba(20,18,30,0.8)', border: `1px solid ${isMemory ? 'rgba(180, 100, 255, 0.3)' : isInv ? 'rgba(255, 211, 107, 0.3)' : 'rgba(255,255,255,0.08)'}`, borderRadius: '10px', overflow: 'hidden', cursor: 'pointer' }}
+                        style={{ 
+                          flex: isChar ? '0 1 150px' : '1 1 180px', 
+                          maxWidth: isChar ? '180px' : '280px', 
+                          minWidth: '140px', 
+                          background: 'rgba(20,18,30,0.8)', 
+                          border: `1px solid ${prov.isChild ? 'rgba(129, 140, 248, 0.4)' : (isMemory ? 'rgba(180, 100, 255, 0.3)' : isInv ? 'rgba(255, 211, 107, 0.3)' : 'rgba(255,255,255,0.08)')}`, 
+                          borderRadius: '10px', 
+                          overflow: 'hidden', 
+                          cursor: 'pointer',
+                          position: 'relative'
+                        }}
                         onClick={() => setSelectedCard(c)}
                       >
                         <div style={{ backgroundImage: `url(${c.cover || (isMemory ? 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=400&q=80' : isInv ? 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=400&q=80' : 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80')})`, height: isChar ? '160px' : '100px', backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative' }}>
@@ -1863,6 +1871,32 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                               {(c.isPlayable || c.characterRole === 'playable') ? '🎮 PJ' : (c.characterRole === 'npc') ? '👥 PNJ' : '🎭 Persona'}
                             </span>
                           )}
+
+                          {/* Badge de Proveniencia para Versiones Hijo */}
+                          {prov.isChild && (
+                            <div 
+                              style={{
+                                position: 'absolute',
+                                bottom: '6px',
+                                left: '6px',
+                                right: '6px',
+                                fontSize: '0.66rem',
+                                fontWeight: '600',
+                                padding: '3px 6px',
+                                borderRadius: '4px',
+                                background: 'rgba(15, 23, 42, 0.92)',
+                                border: '1px solid rgba(129, 140, 248, 0.45)',
+                                color: '#c7d2fe',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                boxShadow: '0 2px 5px rgba(0,0,0,0.7)'
+                              }} 
+                              title={prov.formattedLabel}
+                            >
+                              {prov.formattedLabel}
+                            </div>
+                          )}
                         </div>
                         <div style={{ padding: '8px' }}>
                           <h4 style={{ margin: 0, fontSize: '0.82rem', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -1870,8 +1904,8 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
                             {isInv && '🎒 '}
                             {c.title}
                           </h4>
-                          <small style={{ color: isMemory ? '#c084fc' : isInv ? '#ffd36b' : 'rgba(255,255,255,0.5)', fontSize: '0.72rem' }}>
-                            {c.type} {isChar && ((c.isPlayable || c.characterRole === 'playable') ? '• Jugable' : (c.characterRole === 'npc') ? '• PNJ' : '• Persona')}
+                          <small style={{ color: prov.isChild ? '#818cf8' : (isMemory ? '#c084fc' : isInv ? '#ffd36b' : 'rgba(255,255,255,0.5)'), fontSize: '0.72rem' }}>
+                            {prov.isChild ? '🔗 Versión Hijo' : c.type} {isChar && !prov.isChild && ((c.isPlayable || c.characterRole === 'playable') ? '• Jugable' : (c.characterRole === 'npc') ? '• PNJ' : '• Persona')}
                           </small>
                         </div>
                       </div>
@@ -1977,9 +2011,38 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
           <div className="char-modal" style={{ maxWidth: '420px', width: '90%', zIndex: 1201 }}>
             <button className="char-close" onClick={() => setSelectedCard(null)}>×</button>
             <h4 style={{ color: '#fff', fontSize: '1.2rem', marginBottom: '4px' }}>{selectedCard.title}</h4>
-            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 16px 0' }}>
+            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 12px 0' }}>
               Tarjeta de {selectedCard.type}
             </p>
+
+            {/* Si es una tarjeta hijo, mostrar su proveniencia explícita */}
+            {isChildCard(selectedCard) && (
+              <div style={{
+                background: 'rgba(99, 102, 241, 0.12)',
+                border: '1px solid rgba(129, 140, 248, 0.35)',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                marginBottom: '12px',
+                fontSize: '0.78rem',
+                color: '#c7d2fe'
+              }}>
+                <div style={{ fontWeight: '700', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>🔗 Instancia Derivada / Versión Hijo</span>
+                </div>
+                {(selectedCard.scenarioName || selectedCard.scenarioTitle || selectedCard.scenarioId) && (
+                  <div>🪐 <strong>Escenario:</strong> {selectedCard.scenarioName || selectedCard.scenarioTitle || selectedCard.scenarioId}</div>
+                )}
+                {(selectedCard.chatName || selectedCard.chatId) && (
+                  <div>💬 <strong>Chat:</strong> {selectedCard.chatName || `#${selectedCard.chatId}`}</div>
+                )}
+                {selectedCard.parentId && (
+                  <div style={{ fontSize: '0.72rem', opacity: 0.8, marginTop: '2px' }}>
+                    🧬 Vinculado al arquetipo: <code style={{ color: '#ffd36b' }}>{selectedCard.parentId}</code>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ 
               backgroundImage: `url(${selectedCard.cover || 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=400&q=80'})`, 
               height: '200px', 

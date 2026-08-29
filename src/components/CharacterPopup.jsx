@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTimes, faPlay, faTags, faEdit, faClone } from '@fortawesome/free-solid-svg-icons';
+import { faTimes, faPlay, faTags, faEdit, faClone, faTrash } from '@fortawesome/free-solid-svg-icons';
 import './scenario.css';
 
 export default function CharacterPopup({ 
@@ -9,7 +9,8 @@ export default function CharacterPopup({
   onClose, 
   onStartChat, 
   onModifyCharacter = () => {},
-  onCloneCharacter = () => {}
+  onCloneCharacter = () => {},
+  onDeleteCharacter = () => {}
 }) {
   if (!isOpen || !scenario) return null;
 
@@ -99,6 +100,14 @@ export default function CharacterPopup({
             <button className="secondary-btn" onClick={() => { onCloneCharacter && onCloneCharacter(scenario); onClose(); }} title="Duplicar como nuevo personaje independiente" style={{ padding: '9px 16px', fontSize: '0.95rem', background: 'rgba(255,211,107,0.12)', border: '1px solid rgba(255,211,107,0.3)', borderRadius: '8px', color: '#ffd36b', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <FontAwesomeIcon icon={faClone} /> Duplicar
             </button>
+            <button 
+              className="secondary-btn" 
+              onClick={() => { onDeleteCharacter && onDeleteCharacter(scenario); onClose(); }} 
+              title="Eliminar este personaje del compendio" 
+              style={{ padding: '9px 16px', fontSize: '0.95rem', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '8px', color: '#ef4444', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <FontAwesomeIcon icon={faTrash} /> Eliminar
+            </button>
             <button className="start-btn" onClick={() => { onStartChat && onStartChat(scenario); onClose(); }} style={{ padding: '9px 20px', fontSize: '1rem', background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)', border: 'none', borderRadius: '8px', color: '#000', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(255, 211, 107, 0.3)' }}>
               <FontAwesomeIcon icon={faPlay} /> Hablar
             </button>
@@ -109,3 +118,4 @@ export default function CharacterPopup({
     </div>
   );
 }
+

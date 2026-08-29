@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faShareAlt, faBookmark, faHeart, faPlay, faEdit, faClone } from '@fortawesome/free-solid-svg-icons';
+import { faShareAlt, faBookmark, faHeart, faPlay, faEdit, faClone, faTrash } from '@fortawesome/free-solid-svg-icons';
 import './scenario.css';
 
 export default function ScenarioPopup({ 
@@ -9,7 +9,8 @@ export default function ScenarioPopup({
   onClose = () => {}, 
   onStartChat = () => {}, 
   onModifyScenario = () => {},
-  onCloneScenario = () => {}
+  onCloneScenario = () => {},
+  onDeleteScenario = () => {}
 }) {
   if (!isOpen || !scenario) return null;
 
@@ -64,9 +65,18 @@ export default function ScenarioPopup({
             <button className="secondary" onClick={() => onCloneScenario(scenario)} title="Duplicar como nuevo escenario independiente" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <FontAwesomeIcon icon={faClone} /> Duplicar
             </button>
+            <button 
+              className="secondary" 
+              onClick={() => onDeleteScenario(scenario)} 
+              title="Eliminar este escenario" 
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.35)', background: 'rgba(239, 68, 68, 0.08)' }}
+            >
+              <FontAwesomeIcon icon={faTrash} /> Eliminar
+            </button>
           </div>
         </div>
       </div>
     </div>
   );
 }
+

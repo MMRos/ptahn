@@ -411,6 +411,80 @@ function App() {
     openCreateModal('Escenario', scenario);
   };
 
+  const handleCloneScenario = async (scenario) => {
+    if (!scenario) return;
+    const { cloneScenario } = await import('./utils/cloning');
+    const cloned = cloneScenario(scenario, {
+      creatorId: currentUser?.id,
+      creatorName: currentUser?.username
+    });
+    const nextData = {
+      ...appData,
+      scenarios: [cloned, ...(appData.scenarios || [])]
+    };
+    updateAppData(nextData);
+    setScenarioOpen(false);
+  };
+
+  const handleDeleteScenario = (scenario) => {
+    if (!scenario || !scenario.id) return;
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar escenario?',
+      message: `¿Estás seguro de que deseas eliminar el escenario "${scenario.title || 'este escenario'}"? Esta acción no se puede deshacer.`,
+      type: 'danger',
+      confirmText: 'Eliminar escenario',
+      cancelText: 'Cancelar',
+      onConfirm: () => {
+        setConfirmModal(null);
+        setScenarioOpen(false);
+        const nextData = {
+          ...appData,
+          scenarios: (appData.scenarios || []).filter(s => s.id !== scenario.id)
+        };
+        updateAppData(nextData);
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  };
+
+  const handleCloneCharacter = async (character) => {
+    if (!character) return;
+    const { cloneCard } = await import('./utils/cloning');
+    const cloned = cloneCard(character, {
+      creatorId: currentUser?.id,
+      creatorName: currentUser?.username
+    });
+    const nextData = {
+      ...appData,
+      cards: [cloned, ...(appData.cards || [])]
+    };
+    updateAppData(nextData);
+    setScenarioOpen(false);
+  };
+
+  const handleDeleteCharacter = (character) => {
+    if (!character || !character.id) return;
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar personaje?',
+      message: `¿Estás seguro de que deseas eliminar a "${character.title || character.name || 'este personaje'}" del compendio? Esta acción no se puede deshacer.`,
+      type: 'danger',
+      confirmText: 'Eliminar personaje',
+      cancelText: 'Cancelar',
+      onConfirm: () => {
+        setConfirmModal(null);
+        setScenarioOpen(false);
+        const nextData = {
+          ...appData,
+          cards: (appData.cards || []).filter(c => c.id !== character.id)
+        };
+        updateAppData(nextData);
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  };
+
   // Carga inicial segura de la configuración del usuario desde storage centralizado
   const [chatSettings, setChatSettings] = useState(() => loadChatSettings());
 
@@ -607,6 +681,9 @@ function App() {
           isOpen={scenarioOpen}
           onClose={closeScenario}
           onStartChat={startChat}
+          onModifyCharacter={handleModifyScenario}
+          onCloneCharacter={handleCloneCharacter}
+          onDeleteCharacter={handleDeleteCharacter}
         />
       ) : (
         <ScenarioPopup
@@ -615,6 +692,8 @@ function App() {
           onClose={closeScenario}
           onStartChat={startChat}
           onModifyScenario={handleModifyScenario}
+          onCloneScenario={handleCloneScenario}
+          onDeleteScenario={handleDeleteScenario}
         />
       )}
       <CharacterModal
