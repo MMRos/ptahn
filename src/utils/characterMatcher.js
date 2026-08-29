@@ -53,10 +53,26 @@ export function detectActiveCharacter(messages = [], characters = [], userChar =
     // 2. Buscar menciones directas por nombre de personaje
     for (const char of characters) {
       const name = char.title || char.name;
-      if (!name) continue;
-      const normName = normalizeString(name);
-      if (normName.length > 2 && normText.includes(normName)) {
-        return char;
+      if (name) {
+        const normName = normalizeString(name);
+        if (normName.length > 2 && normText.includes(normName)) {
+          return char;
+        }
+      }
+
+      // 3. Buscar coincidencias con Call Words
+      let callWordsList = [];
+      if (typeof char.callWords === 'string') {
+        callWordsList = char.callWords.split(',').map(s => s.trim()).filter(Boolean);
+      } else if (Array.isArray(char.callWords)) {
+        callWordsList = char.callWords.map(s => String(s).trim()).filter(Boolean);
+      }
+
+      for (const cw of callWordsList) {
+        const normCw = normalizeString(cw);
+        if (normCw.length > 2 && normText.includes(normCw)) {
+          return char;
+        }
       }
     }
   }

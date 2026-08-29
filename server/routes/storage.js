@@ -153,20 +153,14 @@ router.get('/images/:filename', (req, res) => {
   res.status(404).json({ success: false, error: 'Image not found' });
 });
 
+const { writeAtomicJson, readJsonSafe, cloneCardEntity, cloneScenarioEntity } = require('../storage/atomicStorage');
+
 // GET /api/storage/app-data
 router.get('/app-data', (req, res) => {
   ensureDataDir();
   const filePath = path.join(DATA_DIR, 'appData.json');
-  if (!fs.existsSync(filePath)) {
-    return res.json({ success: true, data: { scenarios: [], cards: [], narrators: [], tools: [] } });
-  }
-  try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const data = JSON.parse(raw);
-    res.json({ success: true, data });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
+  const data = readJsonSafe(filePath, { scenarios: [], cards: [], narrators: [], tools: [] });
+  res.json({ success: true, data });
 });
 
 // POST /api/storage/app-data
@@ -179,8 +173,61 @@ router.post('/app-data', (req, res) => {
   try {
     const sanitizedData = sanitizeAndPersistAssets(data);
     const filePath = path.join(DATA_DIR, 'appData.json');
-    fs.writeFileSync(filePath, JSON.stringify(sanitizedData, null, 2), 'utf-8');
+    const written = writeAtomicJson(filePath, sanitizedData, { createBackup: true });
+    if (!written) {
+      return res.status(500).json({ success: false, error: 'Failed to write appData atomically' });
+    }
     res.json({ success: true, data: sanitizedData });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/cards/:id/clone
+router.post('/cards/:id/clone', (req, res) => {
+  ensureDataDir();
+  const { id } = req.params;
+  const { creatorId, creatorName } = req.body;
+
+  try {
+    const filePath = path.join(DATA_DIR, 'appData.json');
+    const appData = readJsonSafe(filePath, { scenarios: [], cards: [], narrators: [], tools: [] });
+    const card = (appData.cards || []).find(c => c && c.id === id);
+
+    if (!card) {
+      return res.status(404).json({ success: false, error: 'Card not found' });
+    }
+
+    const clonedCard = cloneCardEntity(card, { creatorId, creatorName });
+    appData.cards.push(clonedCard);
+
+    writeAtomicJson(filePath, appData, { createBackup: true });
+    res.json({ success: true, card: clonedCard });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/scenarios/:id/clone
+router.post('/scenarios/:id/clone', (req, res) => {
+  ensureDataDir();
+  const { id } = req.params;
+  const { creatorId, creatorName } = req.body;
+
+  try {
+    const filePath = path.join(DATA_DIR, 'appData.json');
+    const appData = readJsonSafe(filePath, { scenarios: [], cards: [], narrators: [], tools: [] });
+    const scenario = (appData.scenarios || []).find(s => s && s.id === id);
+
+    if (!scenario) {
+      return res.status(404).json({ success: false, error: 'Scenario not found' });
+    }
+
+    const clonedScenario = cloneScenarioEntity(scenario, { creatorId, creatorName });
+    appData.scenarios.push(clonedScenario);
+
+    writeAtomicJson(filePath, appData, { createBackup: true });
+    res.json({ success: true, scenario: clonedScenario });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -190,16 +237,8 @@ router.post('/app-data', (req, res) => {
 router.get('/chats', (req, res) => {
   ensureDataDir();
   const filePath = path.join(DATA_DIR, 'chats.json');
-  if (!fs.existsSync(filePath)) {
-    return res.json({ success: true, chats: [] });
-  }
-  try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const chats = JSON.parse(raw);
-    res.json({ success: true, chats });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
+  const chats = readJsonSafe(filePath, []);
+  res.json({ success: true, chats: Array.isArray(chats) ? chats : [] });
 });
 
 // POST /api/storage/chats
@@ -211,7 +250,10 @@ router.post('/chats', (req, res) => {
   }
   try {
     const filePath = path.join(DATA_DIR, 'chats.json');
-    fs.writeFileSync(filePath, JSON.stringify(chats, null, 2), 'utf-8');
+    const written = writeAtomicJson(filePath, chats, { createBackup: true });
+    if (!written) {
+      return res.status(500).json({ success: false, error: 'Failed to write chats atomically' });
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -222,16 +264,8 @@ router.post('/chats', (req, res) => {
 router.get('/settings', (req, res) => {
   ensureDataDir();
   const filePath = path.join(DATA_DIR, 'settings.json');
-  if (!fs.existsSync(filePath)) {
-    return res.json({ success: true, settings: {} });
-  }
-  try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const settings = JSON.parse(raw);
-    res.json({ success: true, settings });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
+  const settings = readJsonSafe(filePath, {});
+  res.json({ success: true, settings });
 });
 
 // POST /api/storage/settings
@@ -240,8 +274,12 @@ router.post('/settings', (req, res) => {
   const { settings } = req.body;
   try {
     const filePath = path.join(DATA_DIR, 'settings.json');
-    fs.writeFileSync(filePath, JSON.stringify(settings || req.body || {}, null, 2), 'utf-8');
-    res.json({ success: true, settings: settings || req.body });
+    const payload = settings || req.body || {};
+    const written = writeAtomicJson(filePath, payload, { createBackup: true });
+    if (!written) {
+      return res.status(500).json({ success: false, error: 'Failed to write settings atomically' });
+    }
+    res.json({ success: true, settings: payload });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

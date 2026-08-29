@@ -258,9 +258,11 @@ RULES: Output ONLY comma-separated English tags. Never add conversational filler
         }
       ];
 
+      const visionSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(1000) : undefined;
       const res = await apiFetch('/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: visionSignal,
         body: JSON.stringify({
           model: modelId,
           messages: visionMessages,
@@ -300,9 +302,11 @@ Context / Outfit / Pose: "${currentLabel || currentTags || prompt || entityDesc 
 MANDATORY: Output ONLY 3 to 5 comma-separated tags in English (e.g. "highschool uniform, happy, looking at viewer"). Do NOT write explanations or conversational sentences.`;
 
   try {
+    const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(1000) : undefined;
     const res = await apiFetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: timeoutSignal,
       body: JSON.stringify({
         model: modelId,
         messages: [
@@ -356,7 +360,7 @@ MANDATORY: Output ONLY 3 to 5 comma-separated tags in English (e.g. "highschool 
     
     // Ropa / Clothing
     if (combined.includes('bikini') || combined.includes('bañador') || combined.includes('swimsuit')) tags.push('bikini', 'swimsuit');
-    else if (combined.includes('lenceria') || combined.includes('underwear') || combined.includes('panties') || combined.includes('bragas')) tags.push('underwear', 'lingerie');
+    else if (combined.includes('lenceria') || combined.includes('underwear') || combined.includes('panties') || combined.includes('bragas') || combined.includes('ropa interior')) tags.push('underwear', 'lingerie');
     else if (combined.includes('topless')) tags.push('topless', 'panties');
     else if (combined.includes('desnud') || combined.includes('nude') || combined.includes('naked') || combined.includes('sin ropa')) tags.push('nude');
     else if (combined.includes('uniform') || combined.includes('escolar') || combined.includes('colegial') || combined.includes('blazer')) tags.push('school uniform');

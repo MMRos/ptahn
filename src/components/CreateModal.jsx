@@ -156,9 +156,10 @@ export default function CreateModal({
   const [traitQuery, setTraitQuery] = useState('');
   const [showTraitDropdown, setShowTraitDropdown] = useState(false);
 
-  // States para etiquetas (Tags)
+  // States para etiquetas (Tags) y Llamadas (Call Words)
   const [selectedTags, setSelectedTags] = useState([]);
   const [tagQuery, setTagQuery] = useState('');
+  const [callWords, setCallWords] = useState('');
 
   // States para clasificación on-demand y presets de imágenes
   const [classifyingImgId, setClassifyingImgId] = useState(null);
@@ -303,6 +304,7 @@ export default function CreateModal({
           setCover(editItem.cover || '');
           setNsfw(!!editItem.nsfw);
           setSelectedTags(editItem.tags || []);
+          setCallWords(Array.isArray(editItem.callWords) ? editItem.callWords.join(', ') : (editItem.callWords || ''));
           setSelectedCards(editItem.connectedCards || []);
           setSelectedTraits(editItem.traits || []);
           setIsPublic(!!editItem.public);
@@ -382,6 +384,7 @@ export default function CreateModal({
         setBaseContext('');
         setAiInstructions('');
         setSelectedTags([]);
+        setCallWords('');
         setSelectedCards([]);
         setSelectedTraits([]);
         setScenarioNarrator('');
@@ -503,6 +506,7 @@ export default function CreateModal({
         images: itemType === 'Personaje' ? characterImages : (finalCover ? [{ id: 'img-1', url: finalCover, label: 'Principal', isDefault: true }] : []),
         nsfw: nsfw,
         tags: selectedTags,
+        callWords: typeof callWords === 'string' ? callWords.split(',').map(s => s.trim()).filter(Boolean) : (callWords || []),
         connectedCards: selectedCards,
         traits: itemType === 'Personaje' ? selectedTraits : [],
         characterRole: itemType === 'Personaje' ? characterRole : undefined,
@@ -2783,8 +2787,27 @@ export default function CreateModal({
 
             {/* Etiquetas para Tarjetas (Ubicadas al final) */}
             {itemType !== 'Escenario' && (
-              <div style={{ marginTop: '4px', marginBottom: '4px' }}>
+              <div style={{ marginTop: '4px', marginBottom: '8px' }}>
                 {renderTagsInput()}
+              </div>
+            )}
+
+            {/* Palabras de Llamada (Call Words / Keywords de Activación Rápida) */}
+            {itemType !== 'Escenario' && itemType !== 'Herramienta' && itemType !== 'Narrador' && (
+              <div className="field-group" style={{ marginBottom: '14px' }}>
+                <label style={{ fontSize: '0.82rem', color: '#ffd36b', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold' }}>
+                  📢 Palabras de Llamada (Call Words / Keywords)
+                </label>
+                <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', marginBottom: '6px' }}>
+                  Palabras o frases separadas por comas que, al detectarse en el chat, aumentan el peso de esta tarjeta e introducen su contexto inmediatamente.
+                </div>
+                <input
+                  type="text"
+                  value={callWords}
+                  onChange={(e) => handleFieldChange(setCallWords, e.target.value)}
+                  placeholder="ej: Ranma chica, trenza pelirroja, tetera mágica, artes marciales..."
+                  style={{ width: '100%', padding: '8px 12px', background: '#1e1e2c', border: '1px solid rgba(255, 211, 107, 0.25)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
+                />
               </div>
             )}
 

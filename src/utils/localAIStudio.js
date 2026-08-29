@@ -87,10 +87,17 @@ export async function apiFetch(endpoint, options = {}, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
+  // Default timeout of 1200ms if no signal provided, preventing offline hangs and test timeouts
+  const defaultTimeout = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(1200) : undefined;
+  const fetchOptions = {
+    ...options,
+    signal: options.signal || defaultTimeout
+  };
+
   // 1. Direct attempt to native backend
   try {
     const directUrl = `${finalBaseUrl}${cleanEndpoint}`;
-    const directRes = await fetch(directUrl, options);
+    const directRes = await fetch(directUrl, fetchOptions);
     if (directRes.ok) {
       return directRes;
     }
@@ -100,7 +107,7 @@ export async function apiFetch(endpoint, options = {}, baseUrl) {
 
   // 2. Relative endpoint fallback
   try {
-    return await fetch(cleanEndpoint, options);
+    return await fetch(cleanEndpoint, fetchOptions);
   } catch (fallbackErr) {
     throw fallbackErr;
   }

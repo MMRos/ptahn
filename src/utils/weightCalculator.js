@@ -20,24 +20,35 @@ export function detectLexicalMatch(card, text = '') {
   if (!card || !text) return { matched: false, score: 0, matches: [] };
 
   const normText = text.toLowerCase();
+
+  // Normalize callWords if string
+  let normalizedCallWords = [];
+  if (typeof card.callWords === 'string') {
+    normalizedCallWords = card.callWords.split(',').map(s => s.trim()).filter(Boolean);
+  } else if (Array.isArray(card.callWords)) {
+    normalizedCallWords = card.callWords.map(s => String(s).trim()).filter(Boolean);
+  }
+
   const candidates = [
     card.title,
     card.name,
-    ...(Array.isArray(card.tags) ? card.tags : [])
+    ...(Array.isArray(card.tags) ? card.tags : []),
+    ...normalizedCallWords
   ].filter(Boolean);
 
   const matchedTerms = [];
 
   for (const term of candidates) {
     const cleanTerm = term.trim().toLowerCase();
-    if (cleanTerm.length >= 3 && normText.includes(cleanTerm)) {
+    if (cleanTerm.length >= 2 && normText.includes(cleanTerm)) {
       matchedTerms.push(term);
     }
   }
 
   if (matchedTerms.length > 0) {
     const isTitleMatched = candidates.slice(0, 2).some(t => normText.includes(t.toLowerCase()));
-    const score = isTitleMatched ? 1.0 : 0.6;
+    const isCallWordMatched = normalizedCallWords.some(cw => normText.includes(cw.toLowerCase()));
+    const score = isTitleMatched ? 1.0 : (isCallWordMatched ? 0.9 : 0.6);
     return { matched: true, score, matches: matchedTerms };
   }
 

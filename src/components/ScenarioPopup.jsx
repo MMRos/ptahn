@@ -1,6 +1,6 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faShareAlt, faBookmark, faHeart, faPlay, faEdit } from '@fortawesome/free-solid-svg-icons';
+import { faShareAlt, faBookmark, faHeart, faPlay, faEdit, faClone } from '@fortawesome/free-solid-svg-icons';
 import './scenario.css';
 
 export default function ScenarioPopup({ 
@@ -8,7 +8,8 @@ export default function ScenarioPopup({
   isOpen = false, 
   onClose = () => {}, 
   onStartChat = () => {}, 
-  onModifyScenario = () => {} 
+  onModifyScenario = () => {},
+  onCloneScenario = () => {}
 }) {
   if (!isOpen || !scenario) return null;
 
@@ -53,12 +54,15 @@ export default function ScenarioPopup({
             </p>
           )}
 
-          <div className="scenario-buttons" style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+          <div className="scenario-buttons" style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'wrap' }}>
             <button className="primary" onClick={() => onStartChat(scenario)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <FontAwesomeIcon icon={faPlay} /> Empezar chat
             </button>
             <button className="secondary" onClick={() => onModifyScenario(scenario)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <FontAwesomeIcon icon={faEdit} /> Modificar
+            </button>
+            <button className="secondary" onClick={() => onCloneScenario(scenario)} title="Duplicar como nuevo escenario independiente" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FontAwesomeIcon icon={faClone} /> Duplicar
             </button>
           </div>
         </div>

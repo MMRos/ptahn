@@ -8,6 +8,14 @@ import {
 } from './imageTagging';
 
 describe('imageTagging utilities', () => {
+  beforeEach(() => {
+    jest.spyOn(global, 'fetch').mockImplementation(() => Promise.reject(new Error('ECONNREFUSED')));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   test('CHARACTER_TAG_PRESETS and LOCATION_TAG_PRESETS contain valid English taxonomies', () => {
     expect(CHARACTER_TAG_PRESETS.ropa.length).toBeGreaterThan(0);
     expect(CHARACTER_TAG_PRESETS.emocion.length).toBeGreaterThan(0);
