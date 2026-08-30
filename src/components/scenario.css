@@ -1,28 +1,42 @@
 /* Shared styles for ScenarioPopup, CharacterModal and Entity Popups */
 .scenario-backdrop, .char-backdrop {
   position: fixed !important;
-  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
   background: rgba(3, 4, 10, 0.88) !important;
   backdrop-filter: blur(8px) !important;
   -webkit-backdrop-filter: blur(8px) !important;
-  z-index: 2400 !important;
+  z-index: 1000000 !important;
+  padding: 20px !important;
+  box-sizing: border-box !important;
+  overflow-y: auto !important;
 }
 
 .popup-overlay {
   position: fixed !important;
-  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
   background: rgba(3, 4, 10, 0.88) !important;
   backdrop-filter: blur(8px) !important;
   -webkit-backdrop-filter: blur(8px) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  z-index: 2500 !important;
-  padding: 16px;
-  box-sizing: border-box;
+  z-index: 1000000 !important;
+  padding: 20px !important;
+  box-sizing: border-box !important;
+  overflow-y: auto !important;
 }
 
 .scenario-popup-card {
@@ -56,7 +70,20 @@
 .scenario-actions .icon { background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.04); color:#fff; padding:6px 8px; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 .scenario-actions .icon:hover { background: rgba(255,255,255,0.06); }
 
-.char-modal { width: 440px; background:#14141f; padding:20px; border-radius:14px; box-shadow: 0 16px 50px rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.12); position: relative; }
+.char-modal {
+  width: 100% !important;
+  max-width: 620px !important;
+  max-height: calc(100vh - 40px) !important;
+  overflow-y: auto !important;
+  margin: auto !important;
+  background: #14141f !important;
+  padding: 24px !important;
+  border-radius: 16px !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+}
 .char-modal h4 { margin: 0 0 6px 0; color: #ffffff; font-size: 1.1rem; }
 .char-select-btn { 
   width: 100%; 
@@ -84,3 +111,4 @@
   background: rgba(255, 255, 255, 0.05);
   border-style: dashed;
 }
+

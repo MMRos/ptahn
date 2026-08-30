@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faUser, 
@@ -52,7 +53,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
   const hasUpper = /[A-Z]/.test(password);
   const hasLower = /[a-z]/.test(password);
   const hasNumber = /[0-9]/.test(password);
-  const hasSymbol = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`§±]/.test(password);
+  const hasSymbol = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`Â§Â±]/.test(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
 
 
@@ -73,12 +74,12 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
 
       const passCheck = validatePasswordRule(password);
       if (!passCheck.valid) {
-        setErrorMsg(`La contraseña no cumple los requisitos: ${passCheck.errors.join(' ')}`);
+        setErrorMsg(`La contraseÃ±a no cumple los requisitos: ${passCheck.errors.join(' ')}`);
         return;
       }
 
       if (password !== confirmPassword) {
-        setErrorMsg('Las contraseñas no coinciden. Por favor verifícalas.');
+        setErrorMsg('Las contraseÃ±as no coinciden. Por favor verifÃ­calas.');
         return;
       }
 
@@ -93,7 +94,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
       setLoading(false);
 
       if (res.success && res.user) {
-        setSuccessMsg(res.offlineNotice || '¡Cuenta creada e identificada con éxito!');
+        setSuccessMsg(res.offlineNotice || 'Â¡Cuenta creada e identificada con Ã©xito!');
         if (res.user.userKey) {
           setCreatedUserKey(res.user.userKey);
         }
@@ -104,7 +105,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
       }
     } else {
       if (!cleanEmail || !password) {
-        setErrorMsg('Por favor ingresa tu correo o nombre de usuario y tu contraseña.');
+        setErrorMsg('Por favor ingresa tu correo o nombre de usuario y tu contraseÃ±a.');
         return;
       }
 
@@ -117,22 +118,22 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
       setLoading(false);
 
       if (res.success && res.user) {
-        setSuccessMsg('¡Sesión iniciada con éxito!');
+        setSuccessMsg('Â¡SesiÃ³n iniciada con Ã©xito!');
         if (onAuthSuccess) onAuthSuccess(res.user);
         setTimeout(() => onClose(), 800);
       } else {
-        setErrorMsg(res.error || 'Credenciales inválidas');
+        setErrorMsg(res.error || 'Credenciales invÃ¡lidas');
       }
     }
   };
 
-  return (
+  const modalContent = (
     <div className="auth-modal-overlay" onClick={onClose}>
       <div className="auth-modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="auth-modal-header">
           <div className="auth-modal-title">
             <FontAwesomeIcon icon={faShieldAlt} />
-            <span>Identificación & Seguridad Ptahn</span>
+            <span>IdentificaciÃ³n & Seguridad Ptahn</span>
           </div>
           <button type="button" className="auth-modal-close-btn" onClick={onClose}>
             <FontAwesomeIcon icon={faTimes} />
@@ -145,7 +146,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
             className={`auth-tab-btn ${mode === 'login' ? 'active' : ''}`}
             onClick={() => { setMode('login'); setErrorMsg(''); }}
           >
-            <FontAwesomeIcon icon={faSignInAlt} /> Iniciar Sesión
+            <FontAwesomeIcon icon={faSignInAlt} /> Iniciar SesiÃ³n
           </button>
           <button 
             type="button"
@@ -159,7 +160,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="auth-input-group">
             <label>
-              <FontAwesomeIcon icon={faEnvelope} /> {mode === 'register' ? 'Correo Electrónico (Asignación de Key)' : 'Correo o Nombre de Usuario'}
+              <FontAwesomeIcon icon={faEnvelope} /> {mode === 'register' ? 'Correo ElectrÃ³nico (AsignaciÃ³n de Key)' : 'Correo o Nombre de Usuario'}
             </label>
             <input 
               type={mode === 'register' ? 'email' : 'text'}
@@ -172,7 +173,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
 
           {mode === 'register' && (
             <div className="auth-input-group">
-              <label><FontAwesomeIcon icon={faUser} /> Nombre de Usuario Único</label>
+              <label><FontAwesomeIcon icon={faUser} /> Nombre de Usuario Ãšnico</label>
               <input 
                 type="text" 
                 placeholder="Nombre de Creador o Jugador"
@@ -184,11 +185,11 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
           )}
 
           <div className="auth-input-group">
-            <label><FontAwesomeIcon icon={faLock} /> Contraseña</label>
+            <label><FontAwesomeIcon icon={faLock} /> ContraseÃ±a</label>
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <input 
                 type={showPassword ? 'text' : 'password'} 
-                placeholder="••••••••••••"
+                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 style={{ width: '100%', paddingRight: '38px' }}
@@ -207,7 +208,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
                   padding: '4px',
                   fontSize: '0.9rem'
                 }}
-                title={showPassword ? 'Ocultar contraseña' : 'Hacer visible la contraseña'}
+                title={showPassword ? 'Ocultar contraseÃ±a' : 'Hacer visible la contraseÃ±a'}
               >
                 <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} />
               </button>
@@ -217,11 +218,11 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
           {mode === 'register' && (
             <>
               <div className="auth-input-group">
-                <label><FontAwesomeIcon icon={faLock} /> Confirmar Contraseña</label>
+                <label><FontAwesomeIcon icon={faLock} /> Confirmar ContraseÃ±a</label>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <input 
                     type={showConfirmPassword ? 'text' : 'password'} 
-                    placeholder="Repite tu contraseña exactamente"
+                    placeholder="Repite tu contraseÃ±a exactamente"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     style={{ width: '100%', paddingRight: '38px' }}
@@ -240,7 +241,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
                       padding: '4px',
                       fontSize: '0.9rem'
                     }}
-                    title={showConfirmPassword ? 'Ocultar contraseña' : 'Hacer visible la contraseña'}
+                    title={showConfirmPassword ? 'Ocultar contraseÃ±a' : 'Hacer visible la contraseÃ±a'}
                   >
                     <FontAwesomeIcon icon={showConfirmPassword ? faEyeSlash : faEye} />
                   </button>
@@ -260,19 +261,19 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
                 gap: '6px'
               }}>
                 <span style={{ color: hasMinLength ? '#6ee7b7' : 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <FontAwesomeIcon icon={hasMinLength ? faCheck : faTimesCircle} /> Mínimo 8 caracteres
+                  <FontAwesomeIcon icon={hasMinLength ? faCheck : faTimesCircle} /> MÃ­nimo 8 caracteres
                 </span>
                 <span style={{ color: hasUpper ? '#6ee7b7' : 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <FontAwesomeIcon icon={hasUpper ? faCheck : faTimesCircle} /> Mayúscula (A-Z)
+                  <FontAwesomeIcon icon={hasUpper ? faCheck : faTimesCircle} /> MayÃºscula (A-Z)
                 </span>
                 <span style={{ color: hasLower ? '#6ee7b7' : 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <FontAwesomeIcon icon={hasLower ? faCheck : faTimesCircle} /> Minúscula (a-z)
+                  <FontAwesomeIcon icon={hasLower ? faCheck : faTimesCircle} /> MinÃºscula (a-z)
                 </span>
                 <span style={{ color: hasNumber ? '#6ee7b7' : 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <FontAwesomeIcon icon={hasNumber ? faCheck : faTimesCircle} /> Número (0-9)
+                  <FontAwesomeIcon icon={hasNumber ? faCheck : faTimesCircle} /> NÃºmero (0-9)
                 </span>
                 <span style={{ color: hasSymbol ? '#6ee7b7' : 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <FontAwesomeIcon icon={hasSymbol ? faCheck : faTimesCircle} /> Símbolo (!@#$...)
+                  <FontAwesomeIcon icon={hasSymbol ? faCheck : faTimesCircle} /> SÃ­mbolo (!@#$...)
                 </span>
                 <span style={{ color: passwordsMatch ? '#6ee7b7' : 'rgba(255,255,255,0.45)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <FontAwesomeIcon icon={passwordsMatch ? faCheck : faTimesCircle} /> Coinciden
@@ -316,7 +317,7 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
                 <span>Verificando y Encriptando...</span>
               </>
             ) : (
-              <span>{mode === 'register' ? 'Crear Cuenta & Asignar Key' : 'Iniciar Sesión'}</span>
+              <span>{mode === 'register' ? 'Crear Cuenta & Asignar Key' : 'Iniciar SesiÃ³n'}</span>
             )}
           </button>
         </form>
@@ -324,16 +325,16 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
         <div className="auth-switch-prompt">
           {mode === 'login' ? (
             <>
-              ¿No tienes una cuenta aún?{' '}
+              Â¿No tienes una cuenta aÃºn?{' '}
               <button type="button" className="auth-switch-link" onClick={() => { setMode('register'); setErrorMsg(''); }}>
                 Crear cuenta
               </button>
             </>
           ) : (
             <>
-              ¿Ya tienes cuenta registrada?{' '}
+              Â¿Ya tienes cuenta registrada?{' '}
               <button type="button" className="auth-switch-link" onClick={() => { setMode('login'); setErrorMsg(''); }}>
-                Inicia sesión
+                Inicia sesiÃ³n
               </button>
             </>
           )}
@@ -354,11 +355,18 @@ export default function AuthModal({ isOpen, onClose, initialMode = 'login', onAu
               textDecoration: 'underline'
             }}
           >
-            🎟️ Continuar como Invitado (Solo Chats)
+            ðŸŽŸï¸ Continuar como Invitado (Solo Chats)
           </button>
         </div>
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }
+
+
 

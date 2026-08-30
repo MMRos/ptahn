@@ -494,7 +494,7 @@
   overflow: hidden;
 }
 
-/* Fondo de Pantalla Dinámico de Localización */
+/* Fondo de Pantalla DinÃ¡mico de LocalizaciÃ³n */
 .chat-wallpaper-backdrop {
   position: absolute;
   inset: 0;
@@ -688,7 +688,7 @@
   backdrop-filter: blur(8px);
 }
 
-/* Galería de variantes */
+/* GalerÃ­a de variantes */
 .zone-b-variants-section {
   display: flex;
   flex-direction: column;
@@ -762,16 +762,22 @@
 /* Modal Popup Overlays & High Z-Index Cards */
 .popup-overlay {
   position: fixed !important;
-  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
   background: rgba(3, 4, 10, 0.88) !important;
   backdrop-filter: blur(8px) !important;
   -webkit-backdrop-filter: blur(8px) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  z-index: 2500 !important;
-  padding: 16px;
-  box-sizing: border-box;
+  z-index: 1000000 !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+  overflow-y: auto !important;
 }
 
 .scenario-popup-card {
@@ -780,11 +786,49 @@
   border-radius: 12px !important;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.95) !important;
   color: #ffffff !important;
-  max-height: 90vh;
-  overflow-y: auto;
-  position: relative;
-  z-index: 2501;
+  max-height: calc(100vh - 40px) !important;
+  margin: auto !important;
+  overflow-y: auto !important;
+  position: relative !important;
+  z-index: 1000001 !important;
   opacity: 1 !important;
+  box-sizing: border-box !important;
 }
 
 
+
+
+/* Estilos para el botón directo de eliminar partida en la cuadrícula de Chats */
+.chat-card-container {
+  position: relative;
+  width: 100%;
+}
+
+.chat-card-delete-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(18, 19, 29, 0.88);
+  border: 1px solid rgba(235, 87, 87, 0.4);
+  color: #f87171;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.chat-card-delete-badge:hover {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+  transform: scale(1.1);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.5);
+}

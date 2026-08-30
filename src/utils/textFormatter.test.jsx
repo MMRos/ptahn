@@ -59,6 +59,57 @@ describe('Text Formatter Tests', () => {
     expect(onTagClickMock).toHaveBeenCalledWith('Vallebruma', appData.cards[0]);
   });
 
+  test('renders nested ==tags== inside action *...*', () => {
+    const onTagClickMock = jest.fn();
+    const appData = {
+      cards: [{ title: 'pueblo de Garrison', type: 'Lugar' }]
+    };
+    const text = '*Un viento cálido sopla mientras contemplas el ==pueblo de Garrison== ante ti.*';
+
+    const { container } = render(
+      <FormattedMessageText 
+        text={text} 
+        onTagClick={onTagClickMock} 
+        appData={appData} 
+      />
+    );
+
+    const actionEl = container.querySelector('.msg-action');
+    expect(actionEl).toBeInTheDocument();
+    const markEl = actionEl.querySelector('.msg-highlight');
+    expect(markEl).toBeInTheDocument();
+    expect(markEl.textContent).toContain('pueblo de Garrison');
+    expect(markEl.classList.contains('existing-card')).toBe(true);
+
+    fireEvent.click(markEl);
+    expect(onTagClickMock).toHaveBeenCalledWith('pueblo de Garrison', appData.cards[0]);
+  });
+
+  test('renders nested ==tags== inside spoken dialogue "..."', () => {
+    const onTagClickMock = jest.fn();
+    const appData = {
+      cards: [{ title: 'Garrison', type: 'Lugar' }]
+    };
+    const text = '"¡Bienvenido a ==Garrison==, forastero!"';
+
+    const { container } = render(
+      <FormattedMessageText 
+        text={text} 
+        onTagClick={onTagClickMock} 
+        appData={appData} 
+      />
+    );
+
+    const dialogueEl = container.querySelector('.msg-dialogue');
+    expect(dialogueEl).toBeInTheDocument();
+    const markEl = dialogueEl.querySelector('.msg-highlight');
+    expect(markEl).toBeInTheDocument();
+    expect(markEl.textContent).toContain('Garrison');
+
+    fireEvent.click(markEl);
+    expect(onTagClickMock).toHaveBeenCalledWith('Garrison', appData.cards[0]);
+  });
+
   test('matches entities flexibly despite leading articles (La Forja vs Forja)', () => {
     const onTagClickMock = jest.fn();
     const appData = {

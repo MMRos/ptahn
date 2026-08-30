@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faCheck, 
@@ -299,7 +300,7 @@ export default function BatchCropperModal({
   const renderedWidth = activeCropState?.baseFit?.width ? activeCropState.baseFit.width * (activeCropState.zoom || 1) : 'auto';
   const renderedHeight = activeCropState?.baseFit?.height ? activeCropState.baseFit.height * (activeCropState.zoom || 1) : 'auto';
 
-  return (
+  const modalContent = (
     <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 1600 }}>
       <div 
         className="char-modal" 
@@ -756,4 +757,9 @@ export default function BatchCropperModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }

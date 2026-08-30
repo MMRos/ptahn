@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTimes, faMobileAlt, faCopy, faCheck, faQrcode, faWifi } from '@fortawesome/free-solid-svg-icons';
 import { fetchNetworkInfo } from '../utils/serverApi';
@@ -37,11 +38,26 @@ export default function RemoteConnectModal({ isOpen, onClose }) {
     }
   };
 
-  return (
+  const modalContent = (
     <div 
       className="popup-overlay" 
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        width: '100vw',
+        height: '100vh',
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000000,
+        padding: '20px',
+        boxSizing: 'border-box'
       }}
     >
       <div 
@@ -50,6 +66,9 @@ export default function RemoteConnectModal({ isOpen, onClose }) {
         style={{ 
           maxWidth: '460px', 
           width: '92%', 
+          maxHeight: 'calc(100vh - 40px)',
+          overflowY: 'auto',
+          margin: 'auto',
           padding: '24px', 
           boxSizing: 'border-box',
           background: 'linear-gradient(145deg, #181926, #12131e)',
@@ -126,4 +145,9 @@ export default function RemoteConnectModal({ isOpen, onClose }) {
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }

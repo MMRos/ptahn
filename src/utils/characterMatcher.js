@@ -19,16 +19,24 @@ export function normalizeString(str) {
 }
 
 /**
- * Detecta el personaje que tiene mayor protagonismo en los mensajes recientes.
+ * Detecta el personaje PNJ que tiene mayor protagonismo en los mensajes recientes.
  * @param {Array} messages - Historial de mensajes del chat.
- * @param {Array} characters - Lista de personajes del compendio.
- * @param {Object} [userChar] - Personaje interpretado por el usuario.
+ * @param {Array} characters - Lista de personajes/PNJs del escenario.
+ * @param {Object} [userChar] - Personaje interpretado por el usuario (excluido de detección como PNJ).
  * @param {Object} [defaultChar] - Personaje por defecto si no se detecta ninguno.
  * @returns {Object|null}
  */
 export function detectActiveCharacter(messages = [], characters = [], userChar = null, defaultChar = null) {
+  // Filtrar para que solo se analicen personajes PNJs válidos (evitar que el personaje del jugador usurpe el panel lateral)
+  const validNpcs = (characters || []).filter(c => {
+    if (!c) return false;
+    if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
+    if (c.characterRole === 'user_persona' || c.isUserPersona) return false;
+    return true;
+  });
+
   if (!Array.isArray(messages) || messages.length === 0) {
-    return userChar || defaultChar || (characters.length > 0 ? characters[0] : null);
+    return userChar || defaultChar || validNpcs[0] || null;
   }
 
   // Inspeccionar los últimos mensajes desde el más reciente
@@ -45,13 +53,13 @@ export function detectActiveCharacter(messages = [], characters = [], userChar =
     if (markupMatches) {
       for (const m of markupMatches) {
         const rawName = m.replace(/==/g, '').trim();
-        const found = characters.find(c => normalizeString(c.title || c.name) === normalizeString(rawName));
+        const found = validNpcs.find(c => normalizeString(c.title || c.name) === normalizeString(rawName));
         if (found) return found;
       }
     }
 
     // 2. Buscar menciones directas por nombre de personaje
-    for (const char of characters) {
+    for (const char of validNpcs) {
       const name = char.title || char.name;
       if (name) {
         const normName = normalizeString(name);
@@ -77,8 +85,8 @@ export function detectActiveCharacter(messages = [], characters = [], userChar =
     }
   }
 
-  // 3. Fallback a personaje de usuario o predeterminado
-  return userChar || defaultChar || (characters.length > 0 ? characters[0] : null);
+  // 3. Fallback a personaje predeterminado, primer PNJ o personaje de usuario si no hay PNJs
+  return userChar || defaultChar || validNpcs[0] || null;
 }
 
 const TAG_SYNONYMS = {
@@ -88,50 +96,27 @@ const TAG_SYNONYMS = {
   'uniform': ['uniforme', 'uniform', 'traje'],
   'sport clothes': ['chandal', 'ropa deportiva', 'sudadera', 'sport clothes', 'ropa de deporte', 'tracksuit', 'chaqueta de deporte'],
   'blazer': ['blazer', 'chaqueta escolar', 'americana'],
-  'hoodie': ['sudadera', 'hoodie', 'chaqueta con capucha', 'tracksuit', 'chandal'],
-  'turtleneck': ['cuello alto', 'turtleneck', 'jersey', 'sweater', 'sueter'],
-  't-shirt': ['camiseta', 't-shirt', 'playera', 'remera', 'top'],
-  'bikini': ['bikini', 'banador', 'traje de bano', 'playa', 'mar', 'piscina', 'costa', 'nadar', 'swimsuit'],
-  'swimsuit': ['banador', 'traje de bano', 'bikini', 'swimsuit', 'playa'],
-  'underwear': ['ropa interior', 'bragas', 'sujetador', 'en ropa interior', 'en bragas', 'calzones', 'underwear', 'panties', 'bra', 'lenceria'],
-  'panties': ['bragas', 'panties', 'calzones', 'bombacha', 'tanga', 'ropa interior'],
-  'lingerie': ['lenceria', 'lingerie', 'encaje', 'ropa interior', 'picardias', 'baby doll'],
-  'topless': ['topless', 'pechos al aire', 'sin camiseta', 'pecho descubierto', 'senos', 'descamisada', 'sin sujetador'],
-  'nude': ['desnudo', 'desnuda', 'sin ropa', 'nude', 'naked', 'completamente desnuda', 'desvestida', 'en cueros'],
-  'naked': ['desnudo', 'desnuda', 'sin ropa', 'naked', 'nude'],
-  'nekomimi form': ['nekomimi', 'orejas de gato', 'forma de gata', 'chica gato', 'cola de gato', 'cat ears', 'neko', 'forma felina'],
-  'succubus form': ['forma de sucubo', 'alas de murcielago', 'sucubo', 'succubus', 'demonio', 'diablesa', 'alas negras', 'succubus form'],
-  'armor': ['armadura', 'combate', 'batalla', 'guerra', 'espada', 'lucha', 'pelea', 'armor', 'peto', 'coraza'],
-  'maid outfit': ['maid', 'sirvienta', 'criada', 'doncella', 'maid dress', 'delantal'],
+  'skirt': ['falda', 'minifalda', 'skirt'],
+  'bikini': ['bikini', 'traje de baño', 'bañador', 'playa', 'nadando', 'mar', 'bikini', 'swimsuit'],
+  'swimsuit': ['traje de baño', 'bañador', 'bikini', 'swimsuit'],
+  'underwear': ['ropa interior', 'lenceria', 'bragas', 'sujetador', 'panties', 'bra', 'underwear', 'calzones'],
+  'panties': ['bragas', 'panties', 'calzones', 'braguitas'],
+  'bra': ['sujetador', 'bra', 'sosten'],
+  'topless': ['topless', 'sin camiseta', 'pecho descubierto', 'sin blusa', 'pechos al aire'],
+  'nude': ['desnuda', 'desnudo', 'sin ropa', 'nude', 'desvestida', 'despojada'],
+  'armor': ['armadura', 'coraza', 'peto', 'yelmo', 'proteccion', 'guerra', 'combate', 'armor', 'escudo'],
+  'dress': ['vestido', 'toga', 'traje largo', 'dress', 'tunica'],
+  'casual': ['casual', 'ropa comoda', 'diario', 'informal', 'casual clothes'],
 
-  // Emociones, Estados e Intención Narrativa
-  'in heat': ['en celo', 'celo', 'caliente', 'desesperada de deseo', 'ardiendo de deseo', 'lujuria', 'lujuriosa', 'in heat', 'rut', 'frenesi'],
-  'pleading': ['suplicando', 'suplica', 'rogando', 'mirada suplicante', 'implorando', 'pleading', 'begging', 'pidiendo por favor', 'ojos suplicantes'],
-  'knowing look': ['mirada complice', 'mirada picara', 'sabiendo lo que pasa', 'mirada burlona', 'sabiendo', 'knowing look', 'mirada de complicidad'],
-  'showing attention': ['atenta', 'prestando atencion', 'inclinandose', 'escuchando atentamente', 'atencion', 'showing attention', 'attentive', 'mirando fijamente'],
-  'pleasure': ['placer', 'gemidos', 'gemiendo', 'jadeando', 'jadeo', 'excitada', 'excitado', 'caliente', 'gozo', 'sensacion', 'estremecimiento', 'pleasure', 'aroused', 'lust', 'tocandose', 'climax', 'orgasmo'],
-  'aroused': ['excitada', 'excitado', 'caliente', 'deseo', 'lujuria', 'aroused', 'placer', 'humeda', 'mojada'],
-  'seductive': ['seductora', 'seductor', 'provocativa', 'picara', 'seductive', 'mirada picara', 'coqueta', 'tentadora', 'erotica'],
-  'smug': ['sonrisa picara', 'burlona', 'engreida', 'smug', 'autosuficiente'],
-  'evil smile': ['sonrisa maliciosa', 'sonrisa malevola', 'risa malvada', 'evil smile', 'grinning', 'diabolica'],
-  'happy': ['feliz', 'alegre', 'sonriendo', 'contenta', 'contento', 'risa', 'riendo', 'happy', 'smile', 'cheerful', 'sonrisa'],
-  'smiling': ['sonriendo', 'sonrisa', 'smiling', 'smile', 'feliz'],
-  'blushing': ['sonrojada', 'sonrojado', 'timida', 'timido', 'rubor', 'avergonzada', 'verguenza', 'blushing', 'shy', 'mejillas rojas'],
-  'shy': ['timida', 'timido', 'vergonzosa', 'apocada', 'shy', 'sonrojada'],
-  'worried': ['preocupada', 'preocupado', 'nerviosa', 'nervioso', 'inquietud', 'worried', 'nervous', 'ansiosa'],
-  'crying': ['llorando', 'lagrimas', 'sollozando', 'llanto', 'crying', 'tears', 'triste', 'sad'],
-  'sad': ['triste', 'deprimida', 'pena', 'sad', 'desolada'],
-  'angry': ['enojado', 'enojada', 'furioso', 'furiosa', 'ira', 'rabia', 'angry', 'molesta', 'enfadada'],
-  'surprised': ['sorprendida', 'sorprendido', 'shock', 'asombrada', 'surprised', 'boquiabierta', 'sobresaltada'],
-
-  // Poses, Acciones e Interacción Espacial / NSFW
-  'sex from behind': ['sexo por detras', 'por detras', 'penetracion', 'empalandola', 'sex from behind', 'penetration', 'doggystyle', 'a cuatro patas', 'embistiendo', 'penetrando'],
-  'doggystyle': ['a cuatro patas', 'de espaldas', 'penetracion por detras', 'doggystyle', 'en cuatro', 'por detras'],
-  'penetration': ['penetracion', 'penetrandola', 'metiendola', 'dentro de ella', 'embestida', 'empalando', 'penetration'],
-  'creampie': ['corriendose dentro', 'eyaculacion', 'semen', 'cum', 'creampie', 'lechada', 'chorros de semen', 'llena de semen', 'eyacula'],
-  'torn pantyhose': ['medias rotas', 'medias rasgadas', 'pantyhose', 'medias negras rotas', 'torn pantyhose', 'medias', 'medias negras'],
-  'ahegao': ['ahegao', 'mordiendose el labio', 'ojos en blanco', 'expresion de placer', 'extasis', 'jadeando', 'babeando', 'rostro de placer'],
-  'oral sex': ['mamada', 'sexo oral', 'chupandosela', 'blowjob', 'oral sex', 'felacion', 'boca'],
+  // Estados / Formas Híbridas / Transformaciones
+  'nekomimi form': ['neko', 'gata', 'nekomimi', 'orejas de gato', 'cola de gato', 'felina', 'gatita', 'nekomimi form'],
+  'in heat': ['en celo', 'ardiendo', 'caliente', 'in heat', 'excitada', 'mojada', 'calor', 'sofocada', 'lubricada'],
+  'pleading': ['suplicante', 'suplicando', 'rogando', 'ojos llorosos', 'pleading', 'pidiendo', 'implorando', 'ojos humedos'],
+  'knowing look': ['mirada complice', 'sabiendo', 'sonrisa complice', 'conspiradora', 'knowing look', 'pilla', 'picarona'],
+  'blushing': ['sonrojada', 'ruborizada', 'sonrojo', 'mejillas rojas', 'blushing', 'avergonzada'],
+  'aroused': ['excitada', 'ardiente', 'sensible', 'jadeando', 'aroused', 'gimiendo'],
+  'pleasure': ['placer', 'extasis', 'disfrute', 'goce', 'gusto', 'pleasure', 'delicia'],
+  'seductive': ['seductora', 'provocativa', 'sensual', 'tentadora', 'seductive', 'coqueta'],
   'advancing to genitals': ['entrepierna', 'genitales', 'sexo', 'acercandose a su entrepierna', 'arrastrandose hacia su entrepierna', 'gateando entre sus piernas', 'advancing to genitals', 'hacia su sexo', 'avanzando'],
   'crawling between legs': ['entre las piernas', 'entre sus piernas', 'gateando entre sus piernas', 'a gatas', 'crawling between legs', 'a gatas entre las piernas'],
   'leaning forward': ['inclinandose', 'inclinada hacia adelante', 'asomandose', 'leaning forward', 'aproximandose'],

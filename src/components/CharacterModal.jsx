@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faUser, 
@@ -29,7 +30,7 @@ export default function CharacterModal({
 
   // Normalizar y clasificar los personajes
   const { userPersonas, playableCharacters, npcCharacters, allCombinedCharacters } = useMemo(() => {
-    // 1. Personas habituales del usuario (tarjetas de personaje creadas por él)
+    // 1. Personas habituales del usuario (tarjetas de personaje creadas por Ã©l)
     const personas = (userCards || []).filter(c => {
       const isChar = (c.type || '').toLowerCase() === 'personaje';
       if (!isChar) return false;
@@ -105,7 +106,7 @@ export default function CharacterModal({
 
   if (!isOpen) return null;
 
-  // Filtrar según pestaña y búsqueda
+  // Filtrar segÃºn pestaÃ±a y bÃºsqueda
   const filteredList = (activeTab === 'personas' 
     ? userPersonas 
     : activeTab === 'playable' 
@@ -129,7 +130,7 @@ export default function CharacterModal({
     }
   };
 
-  return (
+  const modalContent = (
     <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 12000 }}>
       <div className="char-modal" style={{ maxWidth: '620px', width: '92vw', background: '#14141f', padding: '24px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.12)' }}>
         <button className="char-close" onClick={onClose} aria-label="Cerrar">
@@ -144,7 +145,7 @@ export default function CharacterModal({
           Puedes elegir uno de tus personajes habituales, encarnar un personaje jugable del escenario, o ingresar uno nuevo.
         </p>
 
-        {/* Pestañas de Filtrado */}
+        {/* PestaÃ±as de Filtrado */}
         <div style={{ display: 'flex', gap: '6px', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
           <button
             type="button"
@@ -255,11 +256,11 @@ export default function CharacterModal({
           />
         </div>
 
-        {/* Lista de Personajes con Diseño Rico */}
+        {/* Lista de Personajes con DiseÃ±o Rico */}
         <div className="char-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '340px', overflowY: 'auto', paddingRight: '4px' }}>
           {filteredList.length === 0 ? (
             <div style={{ padding: '20px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px dashed rgba(255,255,255,0.12)', textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: '0.82rem' }}>
-              No se encontraron personajes en esta categoría. Puedes crear uno nuevo o ingresar su nombre abajo.
+              No se encontraron personajes en esta categorÃ­a. Puedes crear uno nuevo o ingresar su nombre abajo.
             </div>
           ) : (
             filteredList.map(char => (
@@ -343,7 +344,7 @@ export default function CharacterModal({
                   )}
                 </div>
 
-                {/* Botón Seleccionar */}
+                {/* BotÃ³n Seleccionar */}
                 <button
                   type="button"
                   style={{
@@ -365,7 +366,7 @@ export default function CharacterModal({
           )}
         </div>
 
-        {/* Opciones Inferiores: Crear nueva tarjeta o Ingresar sólo nombre */}
+        {/* Opciónes Inferiores: Crear nueva tarjeta o Ingresar sÃ³lo nombre */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '14px' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button 
@@ -433,4 +434,11 @@ export default function CharacterModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }
+
+

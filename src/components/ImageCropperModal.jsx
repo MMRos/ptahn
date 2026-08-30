@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faCrop, 
@@ -36,7 +37,7 @@ export default function ImageCropperModal({
   const imgRef = useRef(null);
   const viewportRef = useRef(null);
 
-  // Determinar dimensiones del viewport de recorte según la relación de aspecto
+  // Determinar dimensiones del viewport de recorte segÃºn la relaciÃ³n de aspecto
   const { viewportWidth, viewportHeight } = calculateViewportDimensions(aspectRatio, 480, 360);
 
   // Inicializar y centrar la imagen completa dentro del viewport cuando se carga
@@ -114,7 +115,7 @@ export default function ImageCropperModal({
     });
   };
 
-  // Zoom con rueda de ratón centrado
+  // Zoom con rueda de ratÃ³n centrado
   const handleWheel = (e) => {
     if (imgError) return;
     e.preventDefault();
@@ -125,7 +126,7 @@ export default function ImageCropperModal({
     });
   };
 
-  // Botón para llenar todo el marco (cover zoom)
+  // BotÃ³n para llenar todo el marco (cover zoom)
   const handleFillFrame = () => {
     if (!baseFit.width || !baseFit.height || imgError) return;
     const fillZoom = Math.max(viewportWidth / baseFit.width, viewportHeight / baseFit.height);
@@ -167,7 +168,7 @@ export default function ImageCropperModal({
   const renderedWidth = baseFit.width ? baseFit.width * zoom : 'auto';
   const renderedHeight = baseFit.height ? baseFit.height * zoom : 'auto';
 
-  return (
+  const modalContent = (
     <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 20000 }}>
       <div className="char-modal" style={{ maxWidth: '580px', width: '92%', background: '#14141f', padding: '22px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.12)' }}>
 
@@ -176,7 +177,7 @@ export default function ImageCropperModal({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <h4 style={{ color: '#ffd36b', margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <FontAwesomeIcon icon={faCrop} />
-            Recortar y Encuadrar Imagen {aspectRatio < 1 ? '(Vertical 3:4)' : '(Panorámica 16:9)'}
+            Recortar y Encuadrar Imagen {aspectRatio < 1 ? '(Vertical 3:4)' : '(PanorÃ¡mica 16:9)'}
           </h4>
           <button 
             onClick={onClose} 
@@ -187,7 +188,7 @@ export default function ImageCropperModal({
         </div>
 
         <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.6)', margin: '0 0 14px 0' }}>
-          Arrastra para mover la imagen o amplíala para encuadrar la zona que desees. La imagen inicia completa.
+          Arrastra para mover la imagen o amplÃ­ala para encuadrar la zona que desees. La imagen inicia completa.
         </p>
 
         {/* Viewport del Recorte */}
@@ -233,10 +234,10 @@ export default function ImageCropperModal({
                 No se pudo cargar la imagen
               </div>
               <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', marginBottom: '12px' }}>
-                El servidor local aún está procesando o la URL no es accesible.
+                El servidor local aÃºn estÃ¡ procesando o la URL no es accesible.
               </div>
 
-              {/* Botón de subida local */}
+              {/* BotÃ³n de subida local */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
                 <button
                   type="button"
@@ -346,7 +347,7 @@ export default function ImageCropperModal({
           )}
         </div>
 
-        {/* Controles de Zoom y Ajuste Rápido */}
+        {/* Controles de Zoom y Ajuste RÃ¡pido */}
         <div style={{ marginTop: '16px', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
             <button 
@@ -422,7 +423,7 @@ export default function ImageCropperModal({
           </div>
         </div>
 
-        {/* Botones de acción */}
+        {/* Botones de acciÃ³n */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
           <button 
             onClick={onClose} 
@@ -460,4 +461,11 @@ export default function ImageCropperModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }
+
+

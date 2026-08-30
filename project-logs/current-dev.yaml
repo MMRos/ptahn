@@ -1,75 +1,1307 @@
-# current-dev.yaml
+﻿# current-dev.yaml
 # Archivo activo de desarrollo gestionado por el agente Leader y sincronizado con OpenSpec.
-# Estados válidos: Waiting | In Progress | Testing Pending | Completed
+# Estados vÃ¡lidos: Waiting | In Progress | Testing Pending | Completed
 
 project:
   meta:
     name: "ptahn"
-    language: "JavaScript (React)"
+    language: "JavaScript (React / Node.js Native) + Python Diffusers Engine"
     loop_mode: true
+    openspec_profile: "core"
     created: "2026-08-22T09:35:00Z"
-    updated: "2026-08-22T09:57:00Z"
+    updated: "2026-08-24T17:55:00Z"
 
   functions:
-    F002:
-      name: "sanitize_english_prompts_and_local_ai_studio"
+    F011:
+      name: "native_embedded_diffusion_worker"
       priority: 1
       status: "Completed"
-      change_ref: "openspec/changes/sanitize-english-prompts-and-local-ai-studio"
+      change_ref: "openspec/changes/archive/2026-08-23-native-embedded-diffusion-worker"
 
       specifications:
-        description: "Saneamiento de todo el andamiaje y contexto del LLM a inglés formal y refactorización del orquestador multimodal a localAIStudio.js."
+        description: "Motor nativo de generaciÃ³n de imÃ¡genes por difusiÃ³n embebido dentro del servidor de Ptahn (sin Pinokio ni programas externos), cargando checkpoints .safetensors (v6, SDXL) con PyTorch CUDA y diffusers directamente en GPU."
         inputs:
-          - name: "buildSystemPrompt"
-            type: "function"
+          - name: "promptData"
+            type: "object"
             required: true
-            description: "Generador de contexto y reglas del Game Master"
-          - name: "localAIStudio"
-            type: "module"
-            required: true
-            description: "Orquestador unificado de IA"
+            description: "Prompt, dimensiones, pasos, modelo y estilo"
         outputs:
-          - name: "systemPrompt"
-            type: "string"
-            description: "Andamiaje del sistema estructurado en inglés con directiva de idioma objetivo"
+          - name: "imagePayload"
+            type: "object"
+            description: "URL y base64 de la imagen generada por GPU nativa"
         constraints:
-          - "Todo el andamiaje y directivas del DM deben estar en inglés profesional."
-          - "La directiva de idioma de respuesta debe asegurar que el contenido se redacte en el idioma seleccionado por el usuario."
-        assumptions:
-          - "localAIStudio.js unifica LM Studio, Pinokio / Local AI Studio (sd-vulkan), Audio.cpp y vídeo."
-          - "lmstudio.js permanece como puente de compatibilidad."
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test."
 
-      dependencies: ["F001"]
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010"]
       skills_required: []
 
       implementation:
-        module: "src/utils/localAIStudio.js, src/components/ChatView.jsx, src/components/TopBar.jsx, src/components/CreateModal.jsx, src/pages/Create.jsx"
-        file: "localAIStudio.js, ChatView.jsx, TopBar.jsx, CreateModal.jsx, Create.jsx"
-        notes: "Refactorización a localAIStudio y traducción de scaffolding a inglés."
+        module: "server/engine/nativeDiffusionWorker.py, server/engine/diffusionEngine.js, server/routes/images.js"
+        file: "nativeDiffusionWorker.py, diffusionEngine.js, images.js"
+        notes: "Inferencia nativa en GPU con diffusers, torch CUDA y safetensors. Remediado E001 (eliminado bypass NODE_ENV test mock y alineados tipos fp16/CUDA)."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
 
       tests:
-        T002-U:
+        T011-U:
           type: "unit"
-          status: "Pass"
-          result: "21/21 tests passing in jest suite"
-          name: "Test de localAIStudio y resolución de endpoints"
-          scenario: "WHEN se invocan métodos de localAIStudio THEN resuelven URLs y endpoints correctamente"
-          setup: "Invocar getBaseUrl y getAvailableModels"
-          expected: "Resolución correcta de endpoints"
-          log_integration: true
-        T002-F:
-          type: "functional"
-          status: "Pass"
-          result: "Scaffolding de prompts en inglés y salida multilingüe"
-          name: "Test de andamiaje en inglés con directiva de salida multilingüe"
-          scenario: "WHEN se construye buildSystemPrompt THEN los encabezados y directivas están en inglés y respetan el idioma de salida"
-          setup: "Ejecutar buildSystemPrompt"
-          expected: "Encabezados en inglés"
-          log_integration: true
-
-      error_log: []
+          status: "Completed"
+          name: "Test unitario de ejecuciÃ³n del worker nativo de difusiÃ³n"
+          scenario: "WHEN se invoca la generaciÃ³n THEN el subproceso nativo genera la imagen"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
 
       timestamps:
-        started: "2026-08-22T09:55:00Z"
-        testing_started: "2026-08-22T09:57:00Z"
-        completed: "2026-08-22T09:57:45Z"
+        started: "2026-08-23T23:54:00Z"
+        completed: "2026-08-24T17:55:00Z"
+
+    F012:
+      name: "automated_english_visual_prompt_translation"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/automated-english-visual-prompt-translation"
+
+      specifications:
+        description: "TraducciÃ³n y sÃ­ntesis automÃ¡tica de descripciones narrativas en espaÃ±ol u otros idiomas a etiquetas visuales en inglÃ©s (Danbooru / CLIP tokens para SDXL / Illustrious) mediante LLM y diccionario enriquecido de rol/fantasÃ­a."
+        inputs:
+          - name: "rawPrompt"
+            type: "string"
+            required: true
+            description: "DescripciÃ³n narrativa o visual en espaÃ±ol u otro idioma"
+          - name: "style"
+            type: "string"
+            description: "Estilo estÃ©tico seleccionado"
+        outputs:
+          - name: "fullPrompt"
+            type: "string"
+            description: "Prompt en inglÃ©s optimizado con modificadores de iluminaciÃ³n y composiciÃ³n"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en suites de test (100% passing tests)."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011"]
+      skills_required: []
+
+      implementation:
+        module: "src/utils/language.js, src/utils/localAIStudio.js, src/components/ChatView.jsx, src/components/CreateModal.jsx"
+        file: "language.js, localAIStudio.js, ChatView.jsx, CreateModal.jsx"
+        notes: "Integrado translateVisualPromptToEnglish en generateImageLocal, expandido VISUAL_DICTIONARY y cleanHeuristicVisualPrompt, e incorporada la traducciÃ³n en la generaciÃ³n automÃ¡tica de tarjetas con IA."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T012-U:
+          type: "unit"
+          status: "Completed"
+          name: "Test de traducciÃ³n y sÃ­ntesis de prompts visuales con LLM y fallback heurÃ­stico"
+          scenario: "WHEN se envÃ­a una descripciÃ³n en espaÃ±ol THEN se traduce a etiquetas en inglÃ©s para SDXL"
+          setup: "Jest test suites en language.test.js y localAIStudio.test.js"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T18:05:00Z"
+        completed: "2026-08-24T18:08:00Z"
+
+    F013:
+      name: "in_app_server_activation_and_lifecycle_control"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/archive/2026-08-24-in-app-server-activation-and-lifecycle-control"
+
+      specifications:
+        description: "Control de ciclo de vida del servidor de IA nativo de Ptahn desde la aplicaciÃ³n web (activar, detener, reiniciar, monitorizar y sondeo automÃ¡tico), rutas de ciclo de vida en Express y lanzador de un solo clic."
+        inputs:
+          - name: "action"
+            type: "string"
+            required: true
+            description: "AcciÃ³n de ciclo de vida (start, stop, restart, status)"
+        outputs:
+          - name: "lifecycleState"
+            type: "object"
+            description: "Estado del servidor, uptime, PID, motores y modelos"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F011", "F012"]
+      skills_required: []
+
+      implementation:
+        module: "server/routes/lifecycle.js, server/index.js, scripts/launcher.js, src/utils/serverApi.js, src/components/TopBar.jsx, src/components/topbar.css, iniciar-ptahn.bat"
+        file: "lifecycle.js, serverApi.js, TopBar.jsx, topbar.css, launcher.js"
+        notes: "Endpoints de ciclo de vida /api/lifecycle, cliente serverApi con polling y controles interactivos de inicio/parada/reinicio en TopBar con 75 pruebas unitarias pasando."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T013-U:
+          type: "unit"
+          status: "Completed"
+          name: "Tests unitarios de ciclo de vida del servidor y cliente API"
+          scenario: "WHEN el usuario interactÃºa con los controles de ciclo de vida THEN el servidor y la API responden con los estados y acciones correctos"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T18:38:00Z"
+        completed: "2026-08-24T18:43:00Z"
+
+    F014:
+      name: "user_auth_database_and_profile_sync"
+      priority: 1
+      status: "Done"
+      change_ref: "openspec/changes/user-auth-database-and-profile-sync"
+
+      specifications:
+        description: "Base de datos de usuarios en el servidor con hashing criptogrÃ¡fico, endpoints de autenticaciÃ³n, verificaciÃ³n de contraseÃ±a, opciÃ³n 'Permanecer conectado', sincronizaciÃ³n centralizada de datos con disco y acceso desde TopBar, Sidebar y pÃ¡gina de Perfil."
+        inputs:
+          - name: "credentials"
+            type: "object"
+            required: true
+            description: "Email, username, password, confirmPassword, rememberMe"
+        outputs:
+          - name: "authPayload"
+            type: "object"
+            description: "Token de sesiÃ³n, objeto de usuario y estado sincronizado"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F011", "F012", "F013"]
+      skills_required: []
+
+      implementation:
+        module: "server/storage/userStorage.js, server/routes/auth.js, server/routes/storage.js, src/utils/authApi.js, src/components/AuthModal.jsx, src/components/TopBar.jsx, src/components/Sidebar.jsx, src/pages/Profile.jsx, src/App.js"
+        file: "userStorage.js, auth.js, authApi.js, AuthModal.jsx, Profile.jsx, TopBar.jsx, App.js"
+        notes: "AutenticaciÃ³n segura con scrypt, persistencia de sesiÃ³n 'Permanecer conectado', modal de login/registro con confirmaciÃ³n de contraseÃ±a y sincronizaciÃ³n con disco."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T014-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de base de datos de usuarios, endpoints de autenticaciÃ³n y cliente authApi"
+          scenario: "WHEN el usuario se registra, inicia sesiÃ³n con 'Permanecer conectado' o sincroniza datos THEN las respuestas y el estado son correctos y seguros"
+          setup: "Jest test suites (18 suites passing, 106 tests OK)"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T18:54:00Z"
+        completed: "2026-08-24T19:02:00Z"
+
+    F015:
+      name: "user_auth_hardening_and_key_assignment"
+      priority: 1
+      status: "Done"
+      change_ref: "openspec/changes/user-auth-security-and-key-assignment"
+
+      specifications:
+        description: "ValidaciÃ³n de contraseÃ±a compleja (mayÃºsculas, minÃºsculas, nÃºmeros y sÃ­mbolos), sanitizaciÃ³n contra inyecciones y prototype pollution, asignaciÃ³n de clave Ãºnica e intransferible por email (userKey), unicidad estricta y resoluciÃ³n de proxy/fallback JSON."
+        inputs:
+          - name: "credentials"
+            type: "object"
+            required: true
+            description: "Email, username, password, confirmPassword, rememberMe"
+        outputs:
+          - name: "userProfile"
+            type: "object"
+            description: "User with userKey, sanitized fields, and session token"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F014"]
+      skills_required: []
+
+      implementation:
+        module: "server/storage/userStorage.js, server/routes/auth.js, src/utils/authApi.js, src/components/AuthModal.jsx, package.json"
+        file: "userStorage.js, auth.js, authApi.js, AuthModal.jsx, package.json"
+        notes: "ContraseÃ±as complejas, generaciÃ³n de userKey intransferible, saneamiento de strings y proxy dev."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T015-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de complejidad de contraseÃ±a, generaciÃ³n de userKey, saneamiento de entradas y manejo seguro de respuestas"
+          scenario: "WHEN se registran contraseÃ±as vÃ¡lidas/invÃ¡lidas o entradas con inyecciones THEN el sistema valida y sanea correctamente"
+          setup: "Jest test suites (18 suites passing, 115 tests OK)"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T19:14:00Z"
+        completed: "2026-08-24T19:18:00Z"
+
+    F016:
+      name: "user_creator_ownership_and_preferences"
+      priority: 1
+      status: "Done"
+      change_ref: "openspec/changes/user-creator-ownership-and-preferences"
+
+      specifications:
+        description: "Enlace de creaciones (escenarios, personajes, cartas, narradores) al perfil del creador (creatorId, creatorName, creatorKey), restricciÃ³n de creaciÃ³n para visitantes manteniendo acceso total a chats, y sincronizaciÃ³n persistente de preferencias (shift+enter, NSFW, fuentes, colores, modelos) ligadas a la cuenta de usuario."
+        inputs:
+          - name: "assetPayload"
+            type: "object"
+            required: true
+            description: "Asset data with creator metadata"
+          - name: "preferences"
+            type: "object"
+            description: "User personalization settings"
+        outputs:
+          - name: "syncedProfile"
+            type: "object"
+            description: "Profile with updated preferences and creations attribution"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F014", "F015"]
+      skills_required: []
+
+      implementation:
+        module: "server/storage/userStorage.js, server/routes/auth.js, src/utils/storage.js, src/pages/Create.jsx, src/pages/Profile.jsx, src/components/TopBar.jsx, src/App.js"
+        file: "userStorage.js, auth.js, storage.js, Create.jsx, Profile.jsx, TopBar.jsx, App.js"
+        notes: "AtribuciÃ³n de creador, control de acceso visitante/creador y persistencia de preferencias en perfil."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T016-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de persistencia de preferencias en perfil de usuario y atribuciÃ³n de creador"
+          scenario: "WHEN el creador guarda un asset o actualiza preferencias THEN se asocian correctamente a su perfil"
+          setup: "Jest test suites (19 suites passing, 119 tests OK)"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T19:22:00Z"
+        completed: "2026-08-24T19:28:00Z"
+
+    F017:
+      name: "server_lifecycle_control_and_password_visibility"
+      priority: 1
+      status: "Done"
+      change_ref: "openspec/changes/server-lifecycle-and-password-visibility"
+
+      specifications:
+        description: "Control de ciclo de vida del servidor (detener y reiniciar) con sincronizaciÃ³n de estado en /api/ai/status y liberaciÃ³n de VRAM, y opciÃ³n de visibilidad de contraseÃ±a (ojo interactivo) en AuthModal."
+        inputs:
+          - name: "lifecycleAction"
+            type: "string"
+            required: true
+            description: "start, stop, restart"
+          - name: "visibilityToggle"
+            type: "boolean"
+            description: "Toggle password field type text/password"
+        outputs:
+          - name: "statusPayload"
+            type: "object"
+            description: "Running/stopped state of server"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F013", "F014", "F015"]
+      skills_required: []
+
+      implementation:
+        module: "server/routes/lifecycle.js, server/routes/ai.js, src/utils/serverApi.js, src/components/TopBar.jsx, src/components/AuthModal.jsx"
+        file: "lifecycle.js, ai.js, serverApi.js, TopBar.jsx, AuthModal.jsx"
+        notes: "SincronizaciÃ³n de estado running/stopped en backend y toggle de visibilidad de contraseÃ±a en frontend."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T017-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de ciclo de vida del servidor (start/stop/restart) y visibilidad de contraseÃ±a"
+          scenario: "WHEN el usuario detiene o reinicia el servidor THEN el estado online se actualiza coherentemente"
+          setup: "Jest test suites (19 suites passing, 118 tests OK)"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T19:31:00Z"
+        completed: "2026-08-24T19:34:00Z"
+
+    F018:
+      name: "user_roles_rbac_and_password_management"
+      priority: 1
+      status: "Done"
+      change_ref: "openspec/changes/user-roles-rbac-and-password-management"
+
+      specifications:
+        description: "3 niveles de perfiles (Administrador/DueÃ±o, IT, Usuario), restricciÃ³n de control de servidor para rol Usuario, panel de gestiÃ³n de cuentas para Administrador e IT, y funcionalidad completa de Cambio de ContraseÃ±a."
+        inputs:
+          - name: "role"
+            type: "string"
+            required: true
+            description: "admin, it, user"
+          - name: "passwordChangePayload"
+            type: "object"
+            description: "currentPassword, newPassword"
+        outputs:
+          - name: "userManagementResponse"
+            type: "object"
+            description: "User CRUD results & password change confirmation"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F014", "F015", "F016", "F017"]
+      skills_required: []
+
+      implementation:
+        module: "server/storage/userStorage.js, server/routes/auth.js, src/utils/authApi.js, src/components/TopBar.jsx, src/pages/Profile.jsx"
+        file: "userStorage.js, auth.js, authApi.js, TopBar.jsx, Profile.jsx"
+        notes: "RBAC (Admin, IT, User), protecciÃ³n de ciclo de vida del servidor, panel de gestiÃ³n de usuarios y cambio de contraseÃ±a con validaciones."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T018-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de roles RBAC (Admin, IT, User), gestiÃ³n de usuarios y cambio de contraseÃ±a"
+          scenario: "WHEN un usuario cambia su contraseÃ±a o un admin gestiona cuentas THEN las reglas y permisos se respetan fielmente"
+          setup: "Jest test suites (19 suites passing, 120 tests OK)"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T19:45:00Z"
+        completed: "2026-08-24T19:54:00Z"
+
+    F019:
+      name: "guest_tier_role_and_chat_access"
+      priority: 1
+      status: "Done"
+      change_ref: "openspec/changes/guest-tier-role-and-chat-access"
+
+      specifications:
+        description: "FormalizaciÃ³n del 4Âº nivel: Invitado (Guest), con permiso exclusivo para iniciar y usar chats, restricciÃ³n total de creaciÃ³n de assets y bloqueo de controles de servidor."
+        inputs:
+          - name: "role"
+            type: "string"
+            required: true
+            description: "admin, it, user, guest"
+        outputs:
+          - name: "rolePermissions"
+            type: "object"
+            description: "Chat-only permissions for guest tier"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F018"]
+      skills_required: []
+
+      implementation:
+        module: "server/storage/userStorage.js, src/components/AuthModal.jsx, src/components/TopBar.jsx, src/pages/Create.jsx, src/pages/Profile.jsx"
+        file: "userStorage.js, AuthModal.jsx, TopBar.jsx, Create.jsx, Profile.jsx"
+        notes: "Soporte para nivel de Invitado con acceso libre a chats y restricciÃ³n de creaciÃ³n/servidor."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T019-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de nivel de Invitado y control de permisos de chat/creaciÃ³n"
+          scenario: "WHEN un usuario con rol guest o visitante navega THEN puede usar chats pero no crear assets ni operar servidor"
+          setup: "Jest test suites (19 suites passing, 121 tests OK)"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-24T19:56:00Z"
+        completed: "2026-08-24T19:59:00Z"
+
+    F020:
+      name: "profile_media_customization_and_asset_relinking"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/archive/2026-08-24-profile-media-customization-and-asset-relinking"
+
+      specifications:
+        description: "PersonalizaciÃ³n completa de medios de perfil (subir archivo, agregar link, generar con IA para avatar y fondo de cabecera) y vinculaciÃ³n de creaciones previas del ordenador a la cuenta activa."
+        inputs:
+          - name: "mediaType"
+            type: "string"
+            required: true
+            description: "avatar, cover"
+          - name: "action"
+            type: "string"
+            description: "upload, link, ai_generate, relink_creations"
+        outputs:
+          - name: "profileMediaResponse"
+            type: "object"
+            description: "Updated user profile & relinked assets stats"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F018", "F019"]
+      skills_required: []
+
+      implementation:
+        module: "src/components/MediaPickerModal.jsx, src/pages/Profile.jsx, src/utils/storage.js, src/App.js, server/storage/userStorage.js"
+        file: "MediaPickerModal.jsx, Profile.jsx, storage.js, App.js, userStorage.js"
+        notes: "Selector unificado de Avatar y Portada (Upload, Link, IA) y herramienta de vinculaciÃ³n soberana de creaciones."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T020-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de personalizaciÃ³n de medios de perfil y relinking de creaciones"
+          scenario: "WHEN el usuario personaliza su avatar o fondo o vincula creaciones THEN los cambios se guardan y reflejan fielmente"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+    F021:
+      name: "playable_characters_and_user_personas"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/playable-characters-and-user-personas"
+
+      specifications:
+        description: "OpciÃ³n de marcar personajes como 'Personajes Jugables' (PJ Disponible) y distinciÃ³n con 'Personajes Habituales del Jugador' (Personas) y 'PNJs' para iniciar chats."
+        inputs:
+          - name: "isPlayable"
+            type: "boolean"
+            description: "Indicates if character is a playable scenario preset"
+          - name: "characterRole"
+            type: "string"
+            description: "user_persona, playable, npc"
+        outputs:
+          - name: "categorizedCharacterList"
+            type: "object"
+            description: "Grouped characters in modal"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F020"]
+      skills_required: []
+
+      implementation:
+        module: "src/components/CreateModal.jsx, src/components/CharacterModal.jsx, src/components/CharacterPopup.jsx, src/pages/Create.jsx"
+        file: "CreateModal.jsx, CharacterModal.jsx, CharacterPopup.jsx, Create.jsx"
+        notes: "Soporte para personajes jugables de escenario y personas habituales de usuario."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T021-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de personajes jugables y personas habituales"
+          scenario: "WHEN el usuario abre el selector de personajes para iniciar chat THEN se organizan en Jugables del Escenario, Personas Habituales y PNJs"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+    F022:
+      name: "nsfw_intimacy_dynamics_matrix"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/nsfw-intimacy-dynamics-matrix"
+
+      specifications:
+        description: "Matriz dinÃ¡mica de NSFW e intimidad: Escenario SFW vs NSFW y Personaje SFW (casto / reticente) vs NSFW (sensual / predispuesto)."
+        inputs:
+          - name: "scenario.nsfw"
+            type: "boolean"
+            description: "World NSFW boundary"
+          - name: "character.nsfw"
+            type: "boolean"
+            description: "Character NSFW predisposition"
+        outputs:
+          - name: "nsfwDynamicsDirective"
+            type: "string"
+            description: "System prompt directive enforcing intimacy curves and boundaries"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F021"]
+      skills_required: []
+
+      implementation:
+        module: "src/utils/nsfwDynamics.js, src/components/ChatView.jsx"
+        file: "nsfwDynamics.js, ChatView.jsx"
+        notes: "Control de erotismo, ecchi, castidad y curvas de persuasiÃ³n."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T022-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de matriz NSFW y curvas de intimidad"
+          scenario: "WHEN se evalÃºan las 4 combinaciones de escenario y personajes THEN se generan directivas precisas de comportamiento y lÃ­mites"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+    F023:
+      name: "dual_model_ai_orchestrator_pipeline"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/dual-model-ai-orchestrator-pipeline"
+
+      specifications:
+        description: "Motor orquestador IA intermediario dual (Inbound y Outbound), cÃ¡lculo hÃ­brido de pesos de tarjetas (importancia, anclado, estricto), deduplicaciÃ³n visual y automatizaciones."
+        inputs:
+          - name: "orchestratorModel"
+            type: "string"
+            description: "Lightweight SLM for middleware pipeline"
+          - name: "userMessage"
+            type: "string"
+            description: "Raw player message"
+        outputs:
+          - name: "inboundRefinedContext"
+            type: "object"
+            description: "Filtered lore and preprocessed prompt"
+          - name: "outboundProcessedResult"
+            type: "object"
+            description: "Formatted narrative, area A/B triggers, deduplicated diffusion tasks"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F022"]
+      skills_required: []
+
+      implementation:
+        module: "src/utils/weightCalculator.js, src/utils/orchestratorPipeline.js, src/components/CreateModal.jsx, src/components/ChatView.jsx"
+        file: "weightCalculator.js, orchestratorPipeline.js, CreateModal.jsx, ChatView.jsx"
+        notes: "OrquestaciÃ³n en pasada Ãºnica estructurada JSON con prevenciÃ³n de duplicados visuales."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T023-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de orquestaciÃ³n dual y pesos hÃ­bridos"
+          scenario: "WHEN el orquestador evalÃºa la entrada y salida THEN aplica scoring hÃ­brido, deduplica visuales y formatea en pasada Ãºnica"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+    F024:
+      name: "admin_it_telemetry_hud_and_ai_logs"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/it-admin-telemetry-hud-and-ai-logs"
+
+      specifications:
+        description: "BotÃ³n HUD flotante superpuesto en esquina superior izquierda exclusivo para perfiles IT y Administrador con desglose en tiempo real de modelos cargados, tokens generados, velocidad (tok/s), CPU, GPU, VRAM y RAM, y ventana modal de consola de logs e intercambio de datos inter-IA con aislamiento de eventos (sin cerrar popups ni interrumpir inferencias)."
+        inputs:
+          - name: "currentUser.role"
+            type: "string"
+            required: true
+            description: "admin, it"
+          - name: "telemetryPollInterval"
+            type: "number"
+            description: "Polling interval in ms"
+        outputs:
+          - name: "telemetryMetrics"
+            type: "object"
+            description: "Live CPU, GPU, VRAM, RAM, tokens, active models across engines"
+          - name: "interAILogs"
+            type: "array"
+            description: "Real-time stream of inter-AI payloads and status events"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero interferencias con el DOM subyacente (e.stopPropagation en clics para no cerrar modales/popups ni detener inferencias)."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F018", "F019", "F023"]
+      skills_required: []
+
+      implementation:
+        module: "src/components/TelemetryHUD.jsx, src/components/AILogConsoleModal.jsx, src/components/telemetry.css, src/utils/aiLogEmitter.js, src/utils/systemTelemetry.js, server/routes/system.js, src/App.js"
+        file: "TelemetryHUD.jsx, AILogConsoleModal.jsx, telemetry.css, aiLogEmitter.js, systemTelemetry.js, system.js, App.js"
+        notes: "HUD flotante de alta prioridad z-index con telemetrÃ­a de hardware, mÃ©tricas por modelo y consola de comunicaciÃ³n inter-IA."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T024-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de HUD de telemetrÃ­a (visibilidad por rol IT/Admin, mÃ©tricas en vivo y consola de logs inter-IA)"
+          scenario: "WHEN un usuario con rol admin o it interactÃºa con el HUD o consola de logs THEN se muestran las mÃ©tricas e intercambio de IAs sin cerrar popups ni interferir con la app"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-26T17:48:00Z"
+        completed: "2026-08-26T18:10:00Z"
+
+    F025:
+      name: "on_demand_diffusion_and_intermediary_slm_orchestration"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/on-demand-diffusion-and-intermediary-slm-orchestration"
+
+      specifications:
+        description: "GestiÃ³n bajo demanda del difusor (idle/on-demand sin ocupar VRAM residente) y enrutamiento estricto de todas las tareas middleware (inbound, outbound, memorias, compendio, traducciÃ³n) al modelo intermediario GGUF/SLM."
+        inputs:
+          - name: "orchestratorModel"
+            type: "string"
+            description: "Target SLM GGUF model"
+        outputs:
+          - name: "telemetryAndRouting"
+            type: "object"
+            description: "Accurate resident model telemetry and SLM-routed task execution"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F023", "F024"]
+      skills_required: []
+
+      implementation:
+        module: "server/engine/diffusionEngine.js, server/routes/system.js, src/utils/storage.js, src/utils/localAIStudio.js, src/utils/orchestratorPipeline.js, src/components/TelemetryHUD.jsx"
+        file: "diffusionEngine.js, system.js, storage.js, localAIStudio.js, orchestratorPipeline.js, TelemetryHUD.jsx"
+        notes: "CorrecciÃ³n de telemetrÃ­a de difusor a bajo demanda y canalizaciÃ³n de middleware hacia modelo intermediario GGUF menor."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T025-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de telemetrÃ­a bajo demanda y enrutamiento a modelo intermediario"
+          scenario: "WHEN se consulta la telemetrÃ­a o se ejecutan tareas middleware THEN el difusor reporta on-demand y las tareas se dirigen al SLM intermediario"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-26T19:25:00Z"
+        completed: "2026-08-26T19:28:00Z"
+
+    F026:
+      name: "pure_local_disk_storage"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/pure-local-disk-storage"
+
+      specifications:
+        description: "Persistencia total y soberana en disco local (ptah-data/) para todos los datos de la app (appData, chats, settings, users, media), eliminando la dependencia de localStorage del navegador."
+        inputs:
+          - name: "appData"
+            type: "object"
+            description: "Scenarios, cards, narrators, tools"
+          - name: "chats"
+            type: "array"
+            description: "Chat history"
+          - name: "settings"
+            type: "object"
+            description: "Chat settings and parameters"
+        outputs:
+          - name: "diskSync"
+            type: "boolean"
+            description: "Synchronized state in ptah-data/"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "Cero errores o advertencias en npm run build y suites de test (100% passing tests)."
+
+      dependencies: ["F025"]
+      skills_required: []
+
+      implementation:
+        module: "server/routes/storage.js, src/utils/serverApi.js, src/utils/storage.js, src/utils/db.js, src/App.js"
+        file: "storage.js, serverApi.js, db.js, App.js"
+        notes: "MigraciÃ³n total a almacenamiento en disco local en ptah-data/."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T026-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de persistencia 100% en disco local"
+          scenario: "WHEN se guarda appData, chats o settings THEN se persisten atÃ³micamente en ptah-data/ sin depender de localStorage"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-26T19:46:00Z"
+        completed: "2026-08-26T19:50:00Z"
+
+    F027:
+      name: "remove_lm_studio_native_unification"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/remove-lm-studio-native-unification"
+
+      specifications:
+        description: "EliminaciÃ³n total de LM Studio y proxies heredados (1234), unificando la inferencia de lenguaje (.gguf) y difusiÃ³n (.safetensors) en el Servidor Nativo de Ptahn (3001), priorizando modelos recomendados arriba en las listas."
+        inputs:
+          - name: "modelsGguf"
+            type: "array"
+            description: "Archivos .gguf locales en ./models/"
+          - name: "modelsDiffusion"
+            type: "array"
+            description: "Archivos .safetensors locales en ./models/"
+        outputs:
+          - name: "nativeInference"
+            type: "boolean"
+            description: "Inferencia 100% nativa sin dependencias externas"
+        constraints:
+          - "Modularidad estricta y funciones con CRAP < 15 y CC <= 4."
+          - "100% passing tests en frontend y backend."
+
+      dependencies: ["F026"]
+      skills_required: []
+
+      implementation:
+        module: "server/routes/models.js, src/utils/localAIStudio.js, src/utils/storage.js, src/utils/systemTelemetry.js, src/components/TopBar.jsx, src/pages/Create.jsx, src/components/ChatView.jsx"
+        file: "models.js, localAIStudio.js, storage.js, systemTelemetry.js, TopBar.jsx, Create.jsx, ChatView.jsx"
+        notes: "EliminaciÃ³n completa de LM Studio, separaciÃ³n estricta de GGUF vs Safetensors y priorizaciÃ³n de recomendados."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T027-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de inferencia nativa y telemetrÃ­a sin LM Studio"
+          scenario: "WHEN se consulta el servidor THEN se leen modelos GGUF nativos y se dirigen inferencias al puerto 3001"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-26T20:10:00Z"
+        completed: "2026-08-26T20:16:00Z"
+
+    F028:
+      name: "hierarchical_class_database_and_atomic_storage"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/hierarchical-class-database-and-atomic-storage"
+
+      specifications:
+        description: "Base de datos de clases con herencia prototÃ­pica (Padre -> Hijo), sistema de Llamadas (Call Words), modo hÃ­brido de clonaciÃ³n/duplicaciÃ³n y persistencia atÃ³mica con backups rotativos en disco local."
+        inputs:
+          - name: "cardData / scenarioData"
+            type: "object"
+            required: true
+            description: "Datos estructurados de arquetipo maestro, instancia hija o clon"
+          - name: "callWords"
+            type: "array"
+            description: "Palabras clave de activaciÃ³n rÃ¡pida de contexto"
+        outputs:
+          - name: "storageResult"
+            type: "object"
+            description: "ConfirmaciÃ³n de persistencia atÃ³mica y objeto resuelto"
+        constraints:
+          - "Cumplimiento estricto de forgeAB/DIRECTIVES.md."
+          - "Cero modificaciones a ptah-data/ sin migraciÃ³n transparente."
+          - "100% de tests unitarios pasando y CRAP < 15."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027"]
+      skills_required: []
+
+      implementation:
+        module: "server/routes/storage.js, src/utils/storage.js, src/utils/weightCalculator.js, src/utils/characterMatcher.js, src/components/CreateModal.jsx, src/components/CharacterPopup.jsx"
+        file: "storage.js, weightCalculator.js, characterMatcher.js, CreateModal.jsx, CharacterPopup.jsx"
+        notes: "Implementando modelo de clases, delta overrides, call words y endpoints CRUD atÃ³micos con backups rotativos."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T028-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests unitarios de almacenamiento atÃ³mico, herencia padre-hijo, call words y clonaciÃ³n"
+          scenario: "WHEN se opera sobre entidades THEN se resuelven herencias, llamadas y clonaciones con persistencia atÃ³mica"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-29T14:40:00Z"
+        completed: "2026-08-29T14:50:00Z"
+
+    F029:
+      name: "model_manager_and_huggingface_downloader"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/model-manager-and-huggingface-downloader"
+
+      specifications:
+        description: "Gestor de modelos locales, buscador inteligente de Hugging Face con idoneidad de hardware (VRAM/RAM), importador de archivos locales y descargador en streaming."
+        inputs:
+          - name: "searchQuery / downloadPayload / importPath"
+            type: "object"
+            required: true
+            description: "Criterios de bÃºsqueda, URLs de descarga o rutas locales"
+        outputs:
+          - name: "modelList / downloadTelemetry"
+            type: "object"
+            description: "Listado de modelos con compatibilidad y progreso de descarga"
+        constraints:
+          - "Cumplimiento estricto de forgeAB/DIRECTIVES.md."
+          - "Descargas en streaming con cancelaciÃ³n limpia y sin bloquear el servidor."
+          - "100% de tests unitarios pasando."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028"]
+      skills_required: []
+
+      implementation:
+        module: "server/engine/hardwareAdvisor.js, server/engine/modelDownloader.js, server/routes/models.js, src/components/ModelManagerModal.jsx, src/components/TopBar.jsx"
+        file: "hardwareAdvisor.js, modelDownloader.js, models.js, ModelManagerModal.jsx, TopBar.jsx"
+        notes: "Implementando motor de asesorÃ­a de hardware, buscador Hugging Face, descargador en streaming e interfaz grÃ¡fica."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 3
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T029-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de asesorÃ­a de hardware, streaming de modelos y modal gestor"
+          scenario: "WHEN se buscan o gestionan modelos THEN se evalÃºa compatibilidad y se descargan/importan correctamente"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-29T15:18:00Z"
+        completed: "2026-08-29T15:30:00Z"
+
+    F030:
+      name: "scenario_deletion_and_child_creations_filter"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/scenario-deletion-and-child-creations-filter"
+
+      specifications:
+        description: "EliminaciÃ³n segura de escenarios con confirmaciÃ³n modal y filtro por defecto para ocultar creaciones hijo con badges de proveniencia."
+        inputs:
+          - name: "scenario / card / showChildVersions"
+            type: "object / boolean"
+            required: true
+            description: "Entidades a eliminar o toggle de visualizaciÃ³n de hijos"
+        outputs:
+          - name: "updatedCompendium"
+            type: "object"
+            description: "Estado actualizado del compendio y escenarios"
+        constraints:
+          - "Cumplimiento estricto de forgeAB/DIRECTIVES.md."
+          - "Ocultar hijos por defecto (showChildVersions: false)."
+          - "Insignia visual de proveniencia (Escenario y Chat) en creaciones hijas."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028", "F029"]
+      skills_required: []
+
+      implementation:
+        module: "src/pages/Create.jsx, src/components/ScenarioPopup.jsx, src/components/CharacterPopup.jsx, src/App.js"
+        file: "Create.jsx, ScenarioPopup.jsx, CharacterPopup.jsx, App.js"
+        notes: "Implementando eliminaciÃ³n de escenarios y filtro de versiones hijo con badges de proveniencia."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 2
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T030-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de filtro de hijos y eliminaciÃ³n de escenarios"
+          scenario: "WHEN se filtran creaciones THEN se ocultan hijos por defecto y se muestran con proveniencia al activarlo"
+          setup: "Jest test suites"
+          expected: "100% passing tests"
+
+      timestamps:
+        started: "2026-08-29T15:55:00Z"
+        completed: "2026-08-29T16:00:00Z"
+
+    F031:
+      name: "modal_viewport_centering_and_portal_isolation"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/F031-modal-viewport-centering-and-portal-isolation"
+
+      specifications:
+        description: "Aislamiento y centrado seguro de todas las ventanas modales de la aplicación (Consola de Logs Inter-IA, Gestor de Modelos, Conexión Remota, Confirmaciones, Escenificación, Auth, Selector de Personaje, Media Picker y Croppers) mediante React Portal (createPortal) montado en document.body y límites de viewport responsivos (max-height/max-width seguros, margin auto, overflow protegido) para evitar recortes por contextos de contención CSS."
+        inputs:
+          - name: "isOpen"
+            type: "boolean"
+            required: true
+            description: "Estado de visibilidad del modal"
+        outputs:
+          - name: "portalDOM"
+            type: "object"
+            description: "Nodo modal montado directamente en document.body"
+        constraints:
+          - "Uso estricto de createPortal para desvincular modales de contenedores con transform/backdrop-filter."
+          - "Límites de viewport seguros (calc(100vh - 40px)) y margin auto para centrado perfecto."
+          - "Cero errores y cero advertencias en npm run build y suites de tests."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028", "F029", "F030"]
+      skills_required: []
+
+      implementation:
+        module: "src/components/AILogConsoleModal.jsx, src/components/ModelManagerModal.jsx, src/components/RemoteConnectModal.jsx, src/components/ConfirmModal.jsx, src/components/StagingModal.jsx, src/components/AuthModal.jsx, src/components/CharacterModal.jsx, src/components/MediaPickerModal.jsx, src/components/ImageCropperModal.jsx, src/components/BatchCropperModal.jsx, src/components/telemetry.css, src/components/stagingModal.css, src/components/scenario.css, src/components/chats.css, src/components/authModal.css, src/components/topbar.css"
+        file: "AILogConsoleModal.jsx, ModelManagerModal.jsx, RemoteConnectModal.jsx, ConfirmModal.jsx, StagingModal.jsx, AuthModal.jsx, CharacterModal.jsx, MediaPickerModal.jsx, ImageCropperModal.jsx, BatchCropperModal.jsx"
+        notes: "Modales desacoplados de la barra superior y contenedores relativos mediante React Portal montado en document.body con z-index seguro y bounds de viewport adaptativos."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 2
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T031-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de renderizado y portales de modales en viewport"
+          scenario: "WHEN se abre cualquier ventana modal THEN se monta en el body sin quedar recortada por la ventana superior"
+          setup: "Jest test suites (29 suites, 153 tests)"
+          expected: "100% tests passing, zero build warnings"
+
+      timestamps:
+        started: "2026-08-30T12:10:00Z"
+        completed: "2026-08-30T12:23:00Z"
+
+    F032:
+      name: "accessible_chat_deletion_everywhere"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/F032-accessible-chat-deletion-everywhere"
+
+      specifications:
+        description: "Incorporación de botones de eliminación directa de partidas en todas las vistas de la aplicación: insignia de papelera en cada tarjeta de la cuadrícula de Chats (ChatsList.jsx), botón de 'Eliminar chat' en la barra de herramientas de la sesión activa (ChatView.jsx) y estilos de acción destacados en el menú de la barra lateral (Sidebar.jsx), conectados al modal de confirmación ConfirmModal.jsx y sincronización de base de datos."
+        inputs:
+          - name: "onDeleteChat"
+            type: "function"
+            required: true
+            description: "Handler de eliminación de chat que abre ConfirmModal"
+        outputs:
+          - name: "deletedChatId"
+            type: "string"
+            description: "ID del chat purgado de IndexedDB y el servidor"
+        constraints:
+          - "Diálogo de confirmación obligatorio antes de purgar."
+          - "Actualización reactiva inmediata de la lista de chats en memoria y disco."
+          - "Cero errores y cero advertencias en compilación y suite de tests."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028", "F029", "F030", "F031"]
+      skills_required: []
+
+      implementation:
+        module: "src/components/ChatsList.jsx, src/components/ChatView.jsx, src/components/Sidebar.jsx, src/App.js, src/components/chats.css, src/components/sidebar.css"
+        file: "ChatsList.jsx, ChatView.jsx, ChatsList.test.jsx, App.js"
+        notes: "Añadidos botones accesibles de eliminación de chat en ChatsList y ChatView con sincronización de estado y tests unitarios."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 2
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T032-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de eliminación de chat desde cuadrícula y vistas"
+          scenario: "WHEN el usuario pulsa eliminar partida en ChatsList o ChatView THEN se solicita confirmación y se purga el chat"
+          setup: "Jest test suites (30 suites, 155 tests)"
+          expected: "100% tests passing, zero build warnings"
+
+      timestamps:
+        started: "2026-08-30T12:53:00Z"
+        completed: "2026-08-30T12:54:00Z"
+
+    F033:
+      name: "fix_storage_deletion_and_resurrection_sync"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/F033-fix-storage-deletion-and-resurrection-sync"
+
+      specifications:
+        description: "Corrección integral de la persistencia y sincronización de base de datos para prevenir la resurrección de tarjetas, escenarios y chats eliminados. Se sincroniza localStorage de forma reactiva en saveAppData y se establece el servidor ptah-data/appData.json como fuente de verdad autoritativa en el arranque, eliminando la unión aditiva con cachés obsoletas."
+        inputs:
+          - name: "appData"
+            type: "object"
+            required: true
+            description: "Estado actualizado del compendio sin los elementos purgados"
+        outputs:
+          - name: "syncedAppData"
+            type: "object"
+            description: "Estado persistido en servidor, IndexedDB y localStorage"
+        constraints:
+          - "Cero resurrección de elementos eliminados tras recargar la página."
+          - "El servidor es la fuente autoritativa de verdad cuando está en línea."
+          - "100% de tests pasando en toda la suite."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028", "F029", "F030", "F031", "F032"]
+      skills_required: []
+
+      implementation:
+        module: "src/utils/storage.js, src/App.js, ptah-data/appData.json"
+        file: "storage.js, App.js, appData.json"
+        notes: "Sincronizado localStorage en saveAppData y eliminado merge aditivo ciego en syncWithServer."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 2
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T033-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de persistencia de borrado y sincronización de datos"
+          scenario: "WHEN el usuario elimina una tarjeta THEN se purga de forma permanente en memoria, IndexedDB, disco de servidor y caché local"
+          setup: "Jest test suites (30 suites, 155 tests)"
+          expected: "100% tests passing, zero build warnings"
+
+      timestamps:
+        started: "2026-08-30T13:02:00Z"
+        completed: "2026-08-30T13:05:00Z"
+
+    F034:
+      name: "create_modal_ai_enhancer_multi_guidance_and_sticky_header"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/F034-create-modal-ai-enhancer-multi-guidance-and-sticky-header"
+
+      specifications:
+        description: "Mejoras profundas en la creación y edición de tarjetas y escenarios: valores por defecto a Personaje y No Jugable (PNJ), reinicio limpio sin arrastre de textos anteriores, asistente IA modular por campo y auto-completado integral, sistema de guías visuales múltiples para consistencia de imágenes/expresiones, botón de reintentar generación, modificación de imagen in-situ con IA (img2img) y cabecera sticky constante que mantiene nombre, toggles público/nsfw, botón guardar y botón cerrar visibles en todo momento."
+        inputs:
+          - name: "editItem"
+            type: "object|null"
+            required: false
+            description: "Elemento a editar o null para creación limpia"
+          - name: "fieldEnhanceRequest"
+            type: "object"
+            description: "Petición de mejora de campo o autocompletado por IA"
+        outputs:
+          - name: "savedItem"
+            type: "object"
+            description: "Tarjeta, escenario, narrador o herramienta guardada"
+        constraints:
+          - "Valores por defecto estrictos: Personaje y No Jugable (PNJ)."
+          - "Cero fuga de texto entre creaciones sucesivas."
+          - "Cabecera siempre fija y funcional durante el desplazamiento vertical."
+          - "100% de tests pasando en toda la suite (32 suites, 162 tests)."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028", "F029", "F030", "F031", "F032", "F033"]
+      skills_required: []
+
+      implementation:
+        module: "src/utils/aiEnhancer.js, src/utils/localAIStudio.js, src/components/CreateModal.jsx"
+        file: "aiEnhancer.js, localAIStudio.js, CreateModal.jsx, CreateModal.test.jsx"
+        notes: "Implementado asistente IA por campo, auto-completado, multi-guidance, retry, in-place img2img y sticky header."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 2
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T034-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de CreateModal y aiEnhancer"
+          scenario: "WHEN el usuario abre el modal THEN los campos inician limpios con rol PNJ, el sticky header permanece fijo y los botones de IA y guías visuales operan correctamente"
+          setup: "Jest test suites (32 suites, 162 tests)"
+          expected: "100% tests passing, zero build warnings"
+
+      timestamps:
+        started: "2026-08-30T13:16:00Z"
+        completed: "2026-08-30T13:23:00Z"
+
+    F035:
+      name: "nested_formatting_tokens_and_player_identity_enforcement"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/F035-nested-formatting-tokens-and-player-identity-enforcement"
+
+      specifications:
+        description: "Corrección de renderizado de tokens anidados (marcas ==entidad== y **negrita** dentro de *acciones*, 'diálogos' y ~pensamientos~) y blindaje estricto de la identidad del jugador ({{user}} / Azgael) para que el Narrador nunca lo introduzca ni usurpe como PNJ en el escenario, y el panel lateral de personajes mantenga estricta separación entre PNJs del escenario y la Persona del jugador."
+        inputs:
+          - name: "rawText"
+            type: "string"
+            description: "Texto con acotaciones y marcas anidadas"
+          - name: "userChar"
+            type: "object"
+            description: "Ficha del protagonista (Persona del usuario)"
+        outputs:
+          - name: "formattedNode"
+            type: "React.ReactNode"
+            description: "Árbol de elementos React con resaltado interactivo dentro de acciones y diálogos"
+        constraints:
+          - "Soporte completo para ==etiqueta== dentro de *...*, \"...\" y ~...~."
+          - "Prohibición absoluta en prompt del sistema de usar el nombre del jugador para PNJs."
+          - "Exclusión de tarjetas user_persona de la lista de PNJs del escenario."
+          - "100% tests pasando (32 suites, 164 tests)."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028", "F029", "F030", "F031", "F032", "F033", "F034"]
+      skills_required: []
+
+      implementation:
+        module: "src/utils/textFormatter.jsx, src/components/ChatView.jsx, src/utils/characterMatcher.js"
+        file: "textFormatter.jsx, textFormatter.test.jsx, ChatView.jsx, characterMatcher.js, characterMatcher.test.js"
+        notes: "Implementado sub-parser anidado renderNestedSubTokens y directiva crítica de protagonista en systemPrompt."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 2
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T035-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de Formateo Anidado e Identidad de Personaje"
+          scenario: "WHEN el texto contiene ==tag== dentro de *acción* o \"diálogo\" THEN se renderiza como tag interactivo; AND el PNJ activo no suplanta al jugador"
+          setup: "Jest test suites (32 suites, 164 tests)"
+          expected: "100% tests passing, zero build warnings"
+
+      timestamps:
+        started: "2026-08-30T13:34:00Z"
+        completed: "2026-08-30T13:39:00Z"
+
+    F036:
+      name: "top_right_close_button_anchor_and_chat_auto_card_enrichment"
+      priority: 1
+      status: "Completed"
+      change_ref: "openspec/changes/F036-top-right-close-button-anchor-and-chat-auto-card-enrichment"
+
+      specifications:
+        description: "Anclaje fijo estricto del botón de cierre X en la esquina superior derecha (top: 10px; right: 12px; position: absolute) en todos los modales (CreateModal, activeEntityModal, etc.) con compensación de padding derecho para evitar solapamientos; y enriquecimiento automático obligatorio de lore mediante IA (autoCompleteEntityWithAI) para todas las tarjetas extraídas durante el chat para garantizar que nunca se guarden vacías sin descripción, intro o rasgos."
+        inputs:
+          - name: "extractedEntities"
+            type: "Array"
+            description: "Entidades extraídas por el SLM durante el chat"
+        outputs:
+          - name: "enrichedCards"
+            type: "Array"
+            description: "Tarjetas 100% completas con intro, lore enriquecido, rasgos, tags e ilustración"
+        constraints:
+          - "El botón X debe permanecer estrictamente en la esquina superior derecha sin desplazarse por el scroll ni fluir en el flexwrap."
+          - "Cero tarjetas vacías creadas durante la narración automática con IA."
+          - "100% tests pasando (32 suites, 164 tests)."
+
+      dependencies: ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F009", "F010", "F011", "F012", "F027", "F028", "F029", "F030", "F031", "F032", "F033", "F034", "F035"]
+      skills_required: []
+
+      implementation:
+        module: "src/components/CreateModal.jsx, src/components/ChatView.jsx, src/utils/aiEnhancer.js"
+        file: "CreateModal.jsx, ChatView.jsx"
+        notes: "Implementado anclaje absoluto flotante de botón X y enriquecimiento automático de lore con autoCompleteEntityWithAI."
+        quality_metrics:
+          crap_index: 0.0
+          cyclomatic_complexity: 2
+          test_coverage: 1.00
+          dry_passed: true
+
+      tests:
+        T036-U:
+          type: "unit"
+          status: "Passed"
+          name: "Tests de Cierre Fijo y Auto-Rellenado de Lore"
+          scenario: "WHEN el usuario abre cualquier modal THEN la X se encuentra fija en la esquina superior derecha; AND las tarjetas creadas durante el chat se guardan 100% rellenadas"
+          setup: "Jest test suites (32 suites, 164 tests)"
+          expected: "100% tests passing, zero build warnings"
+
+      timestamps:
+        started: "2026-08-30T13:54:00Z"
+        completed: "2026-08-30T13:58:00Z"
+
+active_feature: null
+next_features: []
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

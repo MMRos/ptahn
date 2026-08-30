@@ -83,7 +83,7 @@
   transform: rotate(180deg);
 }
 
-/* Panel Desplegable de Telemetría */
+/* Panel Desplegable de TelemetrÃ­a */
 .telemetry-hud-dropdown {
   position: absolute;
   top: calc(100% + 8px);
@@ -134,7 +134,7 @@
   text-transform: uppercase;
 }
 
-/* Sección de Modelos */
+/* SecciÃ³n de Modelos */
 .telemetry-section {
   margin-bottom: 14px;
 }
@@ -248,7 +248,7 @@
   background: linear-gradient(90deg, #f59e0b, #ef4444);
 }
 
-/* Botón Abrir Consola de Logs */
+/* BotÃ³n Abrir Consola de Logs */
 .telemetry-logs-btn {
   width: 100%;
   display: flex;
@@ -278,30 +278,40 @@
    ========================================================================== */
 
 .ai-logs-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(6px);
-  z-index: 1000000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  z-index: 10000000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 24px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
 }
 
 .ai-logs-modal-window {
-  width: 900px;
-  max-width: 95vw;
-  height: 620px;
-  max-height: 90vh;
-  background: #0f172a;
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.2);
-  display: flex;
-  flex-direction: column;
-  color: #f8fafc;
-  overflow: hidden;
+  width: 940px !important;
+  max-width: calc(100vw - 48px) !important;
+  height: 640px !important;
+  max-height: calc(100vh - 48px) !important;
+  margin: auto !important;
+  background: #0f172a !important;
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 30px rgba(56, 189, 248, 0.25) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  color: #f8fafc !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
 }
 
 .ai-logs-header {
@@ -364,7 +374,7 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
-/* Barra de Filtros y Búsqueda */
+/* Barra de Filtros y BÃºsqueda */
 .ai-logs-toolbar {
   display: flex;
   justify-content: space-between;
@@ -412,7 +422,7 @@
   border-color: #38bdf8;
 }
 
-/* Área de Registro de Logs */
+/* Ãrea de Registro de Logs */
 .ai-logs-body {
   flex: 1;
   overflow-y: auto;
@@ -504,3 +514,4 @@
   font-size: 0.78rem;
   color: #94a3b8;
 }
+

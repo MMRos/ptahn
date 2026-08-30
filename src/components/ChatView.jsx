@@ -29,6 +29,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generateLocationWallpaper, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
 import { resolveTargetLanguage, getLanguageDirective } from '../utils/language';
+import { autoCompleteEntityWithAI } from '../utils/aiEnhancer';
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { speakBrowserUtterance, cancelBrowserSpeech } from '../utils/speechTTS';
 import { FormattedMessageText, findMatchingEntity, normalizeEntityName } from '../utils/textFormatter';
@@ -91,7 +92,7 @@ export function getScenarioCards(scenario, chat, appData, userChar) {
   });
 }
 
-export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onUpdateChatSettings = () => {}, onOpenCreateModal }) {
+export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, onDeleteChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onUpdateChatSettings = () => {}, onOpenCreateModal }) {
   const [messages, setMessages] = useState(chat?.messages || []);
   const [inputMsg, setInputMsg] = useState('');
   const [editingIndex, setEditingIndex] = useState(null);
@@ -828,7 +829,7 @@ ${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external G
      * Asterisks (*...*) are reserved ONLY for short, specific inline actions or gestures (e.g. *sonríe con picardía*, *desenvaina su espada*).
    - MANDATORY ENTITY HIGHLIGHTS (==...==):
      * You MUST wrap ALL key proper names, locations, towns, characters, factions, and notable items in double equal signs (==...==).
-     * Examples: ==Garrison==, ==Tierra de Bestias==, ==La Forja==, ==Azgael==, ==Mari Setogaya==, ==Taberna del Búho==, ==Armadillo y Martillo==, ==Fosas Miasmáticas==, ==Leporinos==.
+     * Examples: ==Garrison==, ==Tierra de Bestias==, ==La Forja==, ==Garrick==, ==Mari Setogaya==, ==Taberna del Búho==, ==Armadillo y Martillo==, ==Fosas Miasmáticas==, ==Leporinos==.
      * This triggers interactive compendium linking in the reader's interface. Failure to wrap important entities and places in ==...== breaks the user's interface.
 
 8. MANDATORY 4-PHASE REASONING & SELF-CORRECTION PROTOCOL (<think>):
@@ -923,36 +924,68 @@ ${languageDirective}
         if (Array.isArray(extractedEntities) && extractedEntities.length > 0) {
           console.log(`[Auto-Card Task]: ${extractedEntities.length} entidades detectadas por IA:`, extractedEntities);
           const newCardObjects = [];
+          const recentStoryContext = finalMsgs.slice(-6).map(m => `${m.from === 'user' ? 'Jugador' : 'Narrador'}: ${m.text}`).join('\n\n');
 
           for (const entity of extractedEntities) {
+            let workingEntity = { ...entity };
+
+            // Rellenado inteligente obligatorio con IA si los campos vienen vacíos o escuetos (< 40 caracteres)
+            if (!workingEntity.text || workingEntity.text.trim().length < 40 || !workingEntity.intro || workingEntity.intro.trim().length < 15 || !workingEntity.traits || workingEntity.traits.length === 0) {
+              try {
+                const autoCompleted = await autoCompleteEntityWithAI({
+                  name: workingEntity.title,
+                  type: workingEntity.type || 'Personaje',
+                  existingData: workingEntity,
+                  context: recentStoryContext,
+                  language: chatSettings?.preferredLanguage || 'es'
+                });
+                if (autoCompleted) {
+                  workingEntity.intro = workingEntity.intro || autoCompleted.intro || '';
+                  workingEntity.text = (workingEntity.text && workingEntity.text.length >= 40) ? workingEntity.text : (autoCompleted.text || '');
+                  if (!workingEntity.traits || workingEntity.traits.length === 0) {
+                    workingEntity.traits = autoCompleted.traits || [];
+                  }
+                  if (!workingEntity.tags || workingEntity.tags.length === 0) {
+                    workingEntity.tags = autoCompleted.tags || [];
+                  }
+                  if (!workingEntity.imagePrompt && autoCompleted.imagePrompt) {
+                    workingEntity.imagePrompt = autoCompleted.imagePrompt;
+                  }
+                }
+              } catch (enrichErr) {
+                console.warn(`[Auto-Card Lore Enrichment]: No se pudo autocompletar ${workingEntity.title}:`, enrichErr);
+              }
+            }
+
             // Generar ilustración/imagen local para la nueva entidad
             let coverUrl = '';
             try {
-              if (entity.type === 'Lugar') {
-                coverUrl = await generateLocationWallpaper(entity.title, entity.intro, entity.text, chatSettings?.preferredImageModel);
-              } else if (entity.type === 'Personaje') {
-                coverUrl = await generateCharacterPortrait(entity.title, entity.traits || [], entity.intro || entity.text, chatSettings?.preferredImageModel);
+              if (workingEntity.type === 'Lugar') {
+                coverUrl = await generateLocationWallpaper(workingEntity.title, workingEntity.intro, workingEntity.text, chatSettings?.preferredImageModel);
+              } else if (workingEntity.type === 'Personaje') {
+                coverUrl = await generateCharacterPortrait(workingEntity.title, workingEntity.traits || [], workingEntity.intro || workingEntity.text, chatSettings?.preferredImageModel);
               } else {
-                const promptForImg = entity.imagePrompt || `${entity.title}, ${entity.type}, ${entity.intro || entity.text}`;
+                const promptForImg = workingEntity.imagePrompt || `${workingEntity.title}, ${workingEntity.type}, ${workingEntity.intro || workingEntity.text}`;
                 coverUrl = await generateImageLocal(promptForImg, 'Fantasía Oscura / Entornos', chatSettings?.imageServerUrl);
               }
             } catch (imgErr) {
-              console.warn(`[Auto-Card Image]: Error al generar imagen para ${entity.title}:`, imgErr);
+              console.warn(`[Auto-Card Image]: Error al generar imagen para ${workingEntity.title}:`, imgErr);
             }
 
             const cardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-            const isChar = entity.type === 'Personaje';
+            const isChar = workingEntity.type === 'Personaje';
 
             const cardObj = {
               id: cardId,
-              type: entity.type || 'Personaje',
-              title: entity.title,
-              intro: entity.intro || (entity.text ? entity.text.substring(0, 100) + '...' : ''),
-              text: entity.text || '',
+              type: workingEntity.type || 'Personaje',
+              characterRole: isChar ? 'npc' : undefined,
+              title: workingEntity.title,
+              intro: workingEntity.intro || (workingEntity.text ? workingEntity.text.substring(0, 100) + '...' : ''),
+              text: workingEntity.text || '',
               cover: coverUrl || '',
               characterImages: (isChar && coverUrl) ? [{ id: 'img-1', url: coverUrl, label: 'Principal', isDefault: true }] : [],
-              tags: Array.isArray(entity.tags) ? entity.tags : [],
-              traits: Array.isArray(entity.traits) ? entity.traits : [],
+              tags: Array.isArray(workingEntity.tags) ? workingEntity.tags : [],
+              traits: Array.isArray(workingEntity.traits) ? workingEntity.traits : [],
               connectedCards: [],
               nsfw: false,
               public: false,
@@ -969,7 +1002,7 @@ ${languageDirective}
             if (folderHandle) {
               try { await saveAppDataToFolder(nextData, folderHandle); } catch (e) {}
             }
-            console.log(`[Auto-Card Task]: ${newCardObjects.length} tarjetas añadidas con imagen al compendio.`);
+            console.log(`[Auto-Card Task]: ${newCardObjects.length} tarjetas añadidas y 100% rellenadas al compendio.`);
           }
         }
       } catch (cardErr) {

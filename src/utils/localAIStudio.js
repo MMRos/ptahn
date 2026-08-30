@@ -459,33 +459,60 @@ export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fa
 /**
  * Generates an image using Local AI Studio / Pinokio / SD WebUI with automatic English prompt enrichment.
  */
-export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Entornos', imageServerUrl = '', targetModel = '', customWidth = 768, customHeight = 512) {
+/**
+ * Generates an image using Local AI Studio / Pinokio / SD WebUI / Ptahn native diffusion with multi-guidance reference support.
+ */
+export async function generateImageLocal(
+  prompt,
+  styleOrOptions = 'Fantasía Oscura / Entornos',
+  imageServerUrl = '',
+  targetModel = '',
+  customWidth = 768,
+  customHeight = 512
+) {
+  // Support both legacy positional arguments and modern options object
+  const isOptionsObj = typeof styleOrOptions === 'object' && styleOrOptions !== null;
+  const style = isOptionsObj ? (styleOrOptions.style || 'Fantasía Oscura / Entornos') : styleOrOptions;
+  const options = isOptionsObj ? styleOrOptions : {};
+  const srvUrl = options.imageServerUrl || imageServerUrl;
+  const model = options.targetModel || options.model || targetModel;
+  const width = options.width || customWidth;
+  const height = options.height || customHeight;
+  const referenceImages = options.referenceImages || [];
+  const initImage = options.initImage || (referenceImages.length > 0 ? referenceImages[0] : null);
+  const denoisingStrength = typeof options.denoisingStrength === 'number' ? options.denoisingStrength : 0.55;
+  const seed = typeof options.seed === 'number' ? options.seed : -1;
+
   const settings = loadChatSettings();
-  const selectedModel = targetModel || settings.preferredImageModel || 'DreamShaperXL_Lightning.safetensors';
+  const selectedModel = model || settings.preferredImageModel || 'DreamShaperXL_Lightning.safetensors';
   const isLightning = selectedModel.toLowerCase().includes('lightning') || selectedModel.toLowerCase().includes('4step');
-  const steps = isLightning ? 8 : 20;
+  const steps = options.steps || (isLightning ? 8 : 20);
 
   // Translate and convert visual prompt to English SDXL / Pony tokens
   const fullPrompt = await translateVisualPromptToEnglish(prompt, style, settings.lmStudioUrl, settings.preferredModel, selectedModel);
-  const negativePrompt = getNegativePromptForModel(selectedModel);
+  const negativePrompt = options.negativePrompt || getNegativePromptForModel(selectedModel);
 
   emitAILog({
     from: 'DIFFUSION_PIPELINE',
     to: 'NATIVE_DIFFUSION_WORKER',
     type: 'DIFFUSION_TASK',
-    summary: `Generando imagen ${customWidth}x${customHeight} (${steps} pasos, modelo: ${selectedModel})`,
-    payload: { prompt: fullPrompt, negativePrompt, model: selectedModel, width: customWidth, height: customHeight, steps }
+    summary: `Generando imagen ${width}x${height} (${steps} pasos, modelo: ${selectedModel}${initImage ? ', con guía img2img' : ''}${referenceImages.length > 1 ? `, ${referenceImages.length} referencias` : ''})`,
+    payload: { prompt: fullPrompt, negativePrompt, model: selectedModel, width, height, steps, seed, hasReference: !!initImage }
   });
 
   // 1. Prioritize Ptahn Native Server Diffusion Endpoint (/api/images/generate)
   try {
     const nativeRes = await generateNativeImage(fullPrompt, {
-      width: customWidth,
-      height: customHeight,
-      steps: steps,
+      width,
+      height,
+      steps,
       model: selectedModel,
-      style: style,
-      negativePrompt: negativePrompt
+      style,
+      negativePrompt,
+      referenceImages,
+      initImage,
+      denoisingStrength,
+      seed
     });
     if (nativeRes && nativeRes.success && (nativeRes.base64 || nativeRes.url)) {
       if (nativeRes.base64) return nativeRes.base64;
@@ -498,8 +525,8 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
 
   // 2. Probe local bridge ports (SD WebUI, Pinokio, ComfyUI, user custom URL)
   let serverUrls = [];
-  if (imageServerUrl) {
-    serverUrls.push(imageServerUrl.replace(/\/$/, ''));
+  if (srvUrl) {
+    serverUrls.push(srvUrl.replace(/\/$/, ''));
   }
   if (settings.imageServerUrl) {
     const custom = settings.imageServerUrl.replace(/\/$/, '');
@@ -528,14 +555,42 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
         }
       } catch (e) {}
 
+      // If initImage is present, use img2img
+      if (initImage) {
+        const img2imgRes = await fetch(`${baseUrl}/sdapi/v1/img2img`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            init_images: [initImage],
+            prompt: fullPrompt,
+            negative_prompt: negativePrompt,
+            steps: steps,
+            width: width,
+            height: height,
+            denoising_strength: denoisingStrength,
+            seed: seed
+          })
+        });
+
+        if (img2imgRes.ok) {
+          const data = await img2imgRes.json();
+          if (data.images && data.images[0]) {
+            const img = data.images[0];
+            return img.startsWith('data:') ? img : `data:image/png;base64,${img}`;
+          }
+        }
+      }
+
       const sdRes = await fetch(`${baseUrl}/sdapi/v1/txt2img`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: fullPrompt,
+          negative_prompt: negativePrompt,
           steps: steps,
-          width: customWidth,
-          height: customHeight
+          width: width,
+          height: height,
+          seed: seed
         })
       });
 
@@ -553,7 +608,7 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
         body: JSON.stringify({
           prompt: fullPrompt,
           n: 1,
-          size: `${customWidth}x${customHeight}`,
+          size: `${width}x${height}`,
           response_format: 'b64_json'
         })
       });
@@ -568,6 +623,31 @@ export async function generateImageLocal(prompt, style = 'Fantasía Oscura / Ent
   }
 
   throw new Error('No se pudo conectar con el motor de difusión local de Ptahn ni con ningún servidor de imágenes (puertos 3001, 7860, 42016). Coloca un archivo de modelo (.safetensors / .gguf) en la carpeta ./models/ de Ptahn para generar imágenes nativas.');
+}
+
+/**
+ * Edits or modifies an existing image with AI using img2img instructions.
+ */
+export async function editImageWithAI({
+  imageSrc,
+  instructions,
+  entityContext = {},
+  options = {}
+}) {
+  if (!imageSrc) throw new Error('Se requiere una imagen base para editar.');
+  if (!instructions || !instructions.trim()) throw new Error('Se requieren instrucciones de edición.');
+
+  const style = options.style || 'Anime / Ilustración Digital';
+  const entityDesc = entityContext.title ? `Character: ${entityContext.title}. ${entityContext.intro || ''}` : '';
+  const editPrompt = `Modification: ${instructions.trim()}. ${entityDesc} High quality, consistent style, detailed.`;
+
+  return await generateImageLocal(editPrompt, {
+    ...options,
+    style,
+    initImage: imageSrc,
+    denoisingStrength: options.denoisingStrength || 0.52,
+    referenceImages: [imageSrc]
+  });
 }
 
 /**

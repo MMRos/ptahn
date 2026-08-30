@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { getAILogs, clearAILogs, subscribeToAILogs } from '../utils/aiLogEmitter';
 import './telemetry.css';
 
@@ -80,13 +81,13 @@ export default function AILogConsoleModal({ isOpen, onClose }) {
     setLogs([]);
   };
 
-  return (
+  const modalContent = (
     <div className="ai-logs-modal-backdrop" onClick={handleBackdropClick} data-testid="ai-logs-modal">
       <div className="ai-logs-modal-window" onClick={handleWindowClick}>
         {/* Header */}
         <div className="ai-logs-header">
           <div className="ai-logs-title">
-            <span>🛠️ Consola de Logs & Comunicación entre IAs</span>
+            <span>📊 Consola de Logs & Comunicación entre IAs</span>
           </div>
           <div className="ai-logs-header-actions">
             <button
@@ -147,7 +148,7 @@ export default function AILogConsoleModal({ isOpen, onClose }) {
                 <div className="ai-log-top">
                   <span className="ai-log-time">{new Date(log.timestamp).toLocaleTimeString()}</span>
                   <span className="ai-log-tag">{log.type}</span>
-                  <span className="ai-log-route">[{log.from} ➔ {log.to}]</span>
+                  <span className="ai-log-route">[{log.from} → {log.to}]</span>
                 </div>
                 <div className="ai-log-summary">{log.summary}</div>
                 {log.payload && (
@@ -171,11 +172,16 @@ export default function AILogConsoleModal({ isOpen, onClose }) {
               {copiedStatus ? '✓ Copiado' : '📋 Copiar Traza'}
             </button>
             <button className="ai-logs-action-btn" onClick={handleExportJSON}>
-              💾 Exportar JSON
+              📥 Exportar JSON
             </button>
           </div>
         </div>
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }

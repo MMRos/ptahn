@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faHistory, 
@@ -43,20 +44,24 @@ export default function ConfirmModal({
 
   const currentType = iconMap[type] || iconMap.warning;
 
-  return (
+  const modalContent = (
     <div 
       className="confirm-modal-overlay" 
       onClick={onCancel}
       style={{
         position: 'fixed',
         inset: 0,
+        width: '100vw',
+        height: '100vh',
         backgroundColor: 'rgba(5, 5, 10, 0.75)',
         backdropFilter: 'blur(6px)',
-        zIndex: 2500,
+        WebkitBackdropFilter: 'blur(6px)',
+        zIndex: 1000000,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         padding: '16px',
+        boxSizing: 'border-box',
         animation: 'fadeInOverlay 0.15s ease-out'
       }}
     >
@@ -70,9 +75,13 @@ export default function ConfirmModal({
           borderRadius: '14px',
           maxWidth: '440px',
           width: '100%',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          margin: 'auto',
           padding: '24px',
           position: 'relative',
           color: '#eaeaea',
+          boxSizing: 'border-box',
           animation: 'scaleInModal 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
         }}
       >
@@ -170,4 +179,9 @@ export default function ConfirmModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }

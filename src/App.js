@@ -18,7 +18,7 @@ import { loadAppData, saveAppData, requestDirectoryHandle, loadDirectoryHandle, 
 import { loadDualModels } from './utils/localAIStudio';
 
 import { fetchCurrentUser, logoutUser, updateUserProfile as apiUpdateUserProfile, getStoredAuth } from './utils/authApi';
-import { fetchAppDataFromServer, saveAppDataToServer, getServerBaseUrl, fetchChatsFromServer, saveChatsToServer } from './utils/serverApi';
+import { fetchAppDataFromServer, saveAppDataToServer, getServerBaseUrl, fetchChatsFromServer } from './utils/serverApi';
 
 import Profile from './pages/Profile';
 import MusicView from './pages/MusicView';
@@ -125,144 +125,94 @@ function App() {
   }, [view, selectedChat, recentChats]);
 
 
-  // Restore full rich appData from IndexedDB on startup
+  // Single Unified Storage & Server Boot Lifecycle (Authoritative Server Disk Source of Truth)
   useEffect(() => {
-    loadAppDataFromIndexedDB().then(idbData => {
-      if (idbData && (idbData.scenarios?.length || idbData.cards?.length)) {
-        const cleanList = (list = []) => list.filter(item => item && item.id && item.id !== 's1');
-        const cleanScenarios = cleanList(idbData.scenarios);
-        const cleanCards = cleanList(idbData.cards);
-        const cleanNarrators = cleanList(idbData.narrators);
-        const cleanTools = cleanList(idbData.tools);
-        setAppData(prev => {
-          if (!prev) return { scenarios: cleanScenarios, cards: cleanCards, narrators: cleanNarrators, tools: cleanTools };
-          return {
-            scenarios: (cleanScenarios.length >= (prev?.scenarios?.length || 0)) ? cleanScenarios : prev.scenarios,
-            cards: (cleanCards.length >= (prev?.cards?.length || 0)) ? cleanCards : prev.cards,
-            narrators: (cleanNarrators.length >= (prev?.narrators?.length || 0)) ? cleanNarrators : prev.narrators,
-            tools: (cleanTools.length >= (prev?.tools?.length || 0)) ? cleanTools : prev.tools
+    let isMounted = true;
+    const initializeAppData = async () => {
+      try {
+        const cleanList = (list = []) => (Array.isArray(list) ? list : []).filter(item => item && item.id && item.id !== 's1');
+
+        // 1. Primary: Fetch authoritative data from local server disk (ptah-data/)
+        const sRes = await fetchAppDataFromServer();
+        if (isMounted && sRes && sRes.success && sRes.data) {
+          const sData = sRes.data;
+          const authoritativeData = {
+            scenarios: cleanList(sData.scenarios),
+            cards: cleanList(sData.cards),
+            narrators: cleanList(sData.narrators),
+            tools: cleanList(sData.tools)
           };
-        });
-      }
-    }).catch(() => { });
-  }, []);
-
-  // Restore user session on mount and auto-attribute legacy creations
-  useEffect(() => {
-    fetchCurrentUser().then(res => {
-      if (res && res.user) {
-        setCurrentUser(res.user);
-        setAppData(prevData => {
-          const { relinkAllCreationsToUser } = require('./utils/storage');
-          const { data: relinked, modifiedCount } = relinkAllCreationsToUser(prevData, res.user);
-          if (modifiedCount > 0) {
-            saveAppData(relinked);
-            saveAppDataToServer(relinked).catch(() => { });
+          setAppData(authoritativeData);
+          saveAppData(authoritativeData);
+        } else {
+          // 2. Offline Fallback: Load from IndexedDB or LocalStorage
+          const idbData = await loadAppDataFromIndexedDB().catch(() => null);
+          if (isMounted && idbData && (idbData.scenarios?.length || idbData.cards?.length)) {
+            const fallbackData = {
+              scenarios: cleanList(idbData.scenarios),
+              cards: cleanList(idbData.cards),
+              narrators: cleanList(idbData.narrators),
+              tools: cleanList(idbData.tools)
+            };
+            setAppData(fallbackData);
+          } else {
+            const localData = loadAppData();
+            if (isMounted && localData) {
+              setAppData({
+                scenarios: cleanList(localData.scenarios),
+                cards: cleanList(localData.cards),
+                narrators: cleanList(localData.narrators),
+                tools: cleanList(localData.tools)
+              });
+            }
           }
-          return relinked;
-        });
-      }
-    }).catch(() => { });
-  }, []);
+        }
 
-  // Restore linked folder handle from IndexedDB on startup
-  useEffect(() => {
-    loadDirectoryHandle().then(async (handle) => {
-      if (handle) {
-        setFolderHandle(handle);
+        // 3. Sync User Session and relink if needed
         try {
-          const folderData = await loadAppDataFromFolder(handle);
-          if (folderData) {
-            setAppData(prev => {
-              const mergeLists = (a = [], b = []) => {
-                const map = new Map();
-                for (const item of [...a, ...b]) {
-                  if (item && item.id) {
-                    map.set(item.id, { ...(map.get(item.id) || {}), ...item });
-                  }
-                }
-                return Array.from(map.values());
-              };
-              const combined = {
-                scenarios: mergeLists(prev.scenarios, folderData.scenarios),
-                cards: mergeLists(prev.cards, folderData.cards),
-                narrators: mergeLists(prev.narrators, folderData.narrators),
-                tools: mergeLists(prev.tools, folderData.tools)
-              };
-              saveAppData(combined);
-              saveAppDataToServer(combined).catch(() => { });
-              return combined;
+          const authRes = await fetchCurrentUser();
+          if (isMounted && authRes && authRes.user) {
+            setCurrentUser(authRes.user);
+            setAppData(prevData => {
+              const { relinkAllCreationsToUser } = require('./utils/storage');
+              const { data: relinked, modifiedCount } = relinkAllCreationsToUser(prevData, authRes.user);
+              if (modifiedCount > 0) {
+                saveAppData(relinked);
+                saveAppDataToServer(relinked).catch(() => {});
+              }
+              return relinked;
             });
+          }
+        } catch (e) {}
+
+        // 4. Sync linked directory handle if enabled
+        try {
+          const handle = await loadDirectoryHandle();
+          if (isMounted && handle) {
+            setFolderHandle(handle);
             setStorageStatus('Carpeta local de datos conectada.');
           }
-        } catch (e) {
-          console.warn('Auto-read from folder handle failed', e);
-        }
-      }
-    }).catch(() => { });
-  }, []);
+        } catch (e) {}
 
-  // Synchronize appData and chats with server storage (ptah-data/) on boot
-  useEffect(() => {
-    const syncWithServer = async () => {
-      try {
-        const sRes = await fetchAppDataFromServer();
-        const localData = loadAppData();
-        const mergeLists = (a = [], b = []) => {
-          const map = new Map();
-          for (const item of [...a, ...b]) {
-            if (item && item.id) {
-              map.set(item.id, { ...(map.get(item.id) || {}), ...item });
-            }
-          }
-          return Array.from(map.values());
-        };
-
-        const sData = (sRes && sRes.success && sRes.data) ? sRes.data : { scenarios: [], cards: [], narrators: [], tools: [] };
-        const cleanList = (list = []) => list.filter(item => item && item.id && item.id !== 's1');
-        const merged = {
-          scenarios: cleanList(mergeLists(sData.scenarios, localData.scenarios)),
-          cards: cleanList(mergeLists(sData.cards, localData.cards)),
-          narrators: cleanList(mergeLists(sData.narrators, localData.narrators)),
-          tools: cleanList(mergeLists(sData.tools, localData.tools))
-        };
-
-        setAppData(merged);
-        saveAppData(merged);
-        saveAppDataToServer(merged).catch(() => { });
-
-        // Sync chats with server without overwriting newer local chats
+        // 5. Sync Chats from server disk
         const baseUrl = getServerBaseUrl();
         const chatsRes = await fetchChatsFromServer(baseUrl);
-        const serverChats = (chatsRes && chatsRes.success && Array.isArray(chatsRes.chats)) ? chatsRes.chats : [];
-        const localChats = await getAllChats();
-
-        const chatMap = new Map();
-        for (const c of [...serverChats, ...localChats]) {
-          if (c && c.id) {
-            const existing = chatMap.get(c.id);
-            if (!existing) {
-              chatMap.set(c.id, c);
-            } else {
-              // Keep the one with newer activity
-              if (getChatActivityTimestamp(c) >= getChatActivityTimestamp(existing)) {
-                chatMap.set(c.id, c);
-              }
-            }
+        if (chatsRes && chatsRes.success && Array.isArray(chatsRes.chats)) {
+          const { clearAllChats, addChat: dbAddChat } = await import('./utils/db');
+          await clearAllChats().catch(() => {});
+          for (const c of chatsRes.chats) {
+            await dbAddChat(c).catch(() => {});
           }
         }
+        if (isMounted) refreshChats();
 
-        const mergedChats = Array.from(chatMap.values());
-        for (const c of mergedChats) {
-          await addChat(c).catch(() => { });
-        }
-        await saveChatsToServer(mergedChats, baseUrl).catch(() => { });
-        refreshChats();
       } catch (e) {
-        console.warn('Sync with server disk storage failed', e);
+        console.warn('[Storage Boot Lifecycle failed]:', e);
       }
     };
-    syncWithServer();
+
+    initializeAppData();
+    return () => { isMounted = false; };
   }, []);
 
 

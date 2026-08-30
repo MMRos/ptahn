@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faUpload, 
@@ -37,8 +38,8 @@ export default function MediaPickerModal({
   // AI Generator state
   const [aiPrompt, setAiPrompt] = useState(
     type === 'avatar' 
-      ? 'Retrato de un hechicero cósmico supremo con ojos brillantes y túnica mística, arte digital detallado'
-      : 'Fortaleza medieval flotante en un cielo estelar púrpura con cascadas de luz, arte conceptual épico'
+      ? 'Retrato de un hechicero cÃ³smico supremo con ojos brillantes y tÃºnica mÃ­stica, arte digital detallado'
+      : 'Fortaleza medieval flotante en un cielo estelar pÃºrpura con cascadas de luz, arte conceptual Ã©pico'
   );
   const [aiStyle, setAiStyle] = useState('Fantasía Oscura');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -62,7 +63,7 @@ export default function MediaPickerModal({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Por favor selecciona un archivo de imagen válido (PNG, JPG, WEBP).');
+      alert('Por favor selecciona un archivo de imagen vÃ¡lido (PNG, JPG, WEBP).');
       return;
     }
 
@@ -72,7 +73,7 @@ export default function MediaPickerModal({
       setCropImageSrc(dataUrl);
       setPreviewUrl(dataUrl);
       setCustomUrl(dataUrl);
-      // Abrir automáticamente el recortador para asegurar coherencia visual exacta
+      // Abrir automÃ¡ticamente el recortador para asegurar coherencia visual exacta
       setShowCropper(true);
     };
     reader.readAsDataURL(file);
@@ -101,7 +102,7 @@ export default function MediaPickerModal({
 
   const handleGenerateAI = async () => {
     if (!aiPrompt.trim()) {
-      setAiError('Por favor ingresa una descripción para generar la imagen.');
+      setAiError('Por favor ingresa una descripciÃ³n para generar la imagen.');
       return;
     }
     setIsGenerating(true);
@@ -112,7 +113,7 @@ export default function MediaPickerModal({
         setPreviewUrl(generated);
         setCustomUrl(generated);
       } else {
-        setAiError('El motor de difusión no devolvió una imagen. Verifica que el servidor nativo esté activo.');
+        setAiError('El motor de difusiÃ³n no devolviÃ³ una imagen. Verifica que el servidor nativo estÃ© activo.');
       }
     } catch (err) {
       setAiError(err.message || 'Error al generar la imagen con IA');
@@ -140,7 +141,7 @@ export default function MediaPickerModal({
     onClose();
   };
 
-  return (
+  const modalContent = (
     <>
       <div className="auth-modal-overlay" onClick={onClose} style={{ zIndex: 10000 }}>
         <div 
@@ -158,7 +159,7 @@ export default function MediaPickerModal({
             </button>
           </div>
 
-          {/* Pestañas de método */}
+          {/* PestaÃ±as de mÃ©todo */}
           <div style={{ display: 'flex', gap: '8px', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '10px', margin: '14px 0 16px 0' }}>
             <button
               type="button"
@@ -225,7 +226,7 @@ export default function MediaPickerModal({
             </button>
           </div>
 
-          {/* Preview en vivo superior con botón de recorte */}
+          {/* Preview en vivo superior con botÃ³n de recorte */}
           <div style={{
             background: 'rgba(0, 0, 0, 0.4)',
             border: '1px solid rgba(255, 255, 255, 0.1)',
@@ -238,7 +239,7 @@ export default function MediaPickerModal({
             gap: '10px'
           }}>
             <small style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Vista Previa en Vivo ({isAvatar ? 'Avatar Circular' : 'Cabecera Panorámica'})
+              Vista Previa en Vivo ({isAvatar ? 'Avatar Circular' : 'Cabecera PanorÃ¡mica'})
             </small>
 
             {isAvatar ? (
@@ -299,7 +300,7 @@ export default function MediaPickerModal({
                   gap: '6px'
                 }}
               >
-                <FontAwesomeIcon icon={faCrop} /> ✂️ Ajustar / Recortar Encuadre Exacto
+                <FontAwesomeIcon icon={faCrop} /> âœ‚ï¸ Ajustar / Recortar Encuadre Exacto
               </button>
             )}
           </div>
@@ -335,7 +336,7 @@ export default function MediaPickerModal({
             </div>
           )}
 
-          {/* TAB 2: ENLACE / GALERÍA */}
+          {/* TAB 2: ENLACE / GALERÃA */}
           {activeTab === 'library' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div className="auth-input-group" style={{ margin: 0 }}>
@@ -387,10 +388,10 @@ export default function MediaPickerModal({
                       fontSize: '0.75rem'
                     }}
                   >
-                    <option value="avatars">👤 Avatares Curados</option>
-                    <option value="fantasia">🏰 Fantasía & Reinos</option>
-                    <option value="cyberpunk">🌆 Cyberpunk & Sci-Fi</option>
-                    <option value="moderno">🏙️ Moderno & Urbano</option>
+                    <option value="avatars">ðŸ‘¤ Avatares Curados</option>
+                    <option value="fantasia">ðŸ° Fantasía & Reinos</option>
+                    <option value="cyberpunk">ðŸŒ† Cyberpunk & Sci-Fi</option>
+                    <option value="moderno">ðŸ™ï¸ Moderno & Urbano</option>
                   </select>
                 </div>
 
@@ -451,7 +452,7 @@ export default function MediaPickerModal({
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>
-                    <FontAwesomeIcon icon={faSlidersH} /> Estilo Artístico
+                    <FontAwesomeIcon icon={faSlidersH} /> Estilo ArtÃ­stico
                   </label>
                   <select 
                     value={aiStyle} 
@@ -467,11 +468,11 @@ export default function MediaPickerModal({
                     }}
                   >
                     <option value="Fantasía Oscura">Fantasía Oscura / Medieval</option>
-                    <option value="Cyberpunk">Cyberpunk / Neón Futurista</option>
+                    <option value="Cyberpunk">Cyberpunk / NeÃ³n Futurista</option>
                     <option value="Anime Elegante">Retrato Anime Estilizado</option>
                     <option value="Hiperrealista">Hiperrealista / Cinematic 8K</option>
-                    <option value="Pintura Óleo">Pintura al Óleo Clásica</option>
-                    <option value="Concept Art">Arte Conceptual Épico</option>
+                    <option value="Pintura Ã“leo">Pintura al Ã“leo ClÃ¡sica</option>
+                    <option value="Concept Art">Arte Conceptual Ã‰pico</option>
                   </select>
                 </div>
 
@@ -501,7 +502,7 @@ export default function MediaPickerModal({
 
               {aiError && (
                 <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: '6px', padding: '6px 10px', color: '#fca5a5', fontSize: '0.76rem' }}>
-                  ⚠️ {aiError}
+                  âš ï¸ {aiError}
                 </div>
               )}
             </div>
@@ -559,4 +560,11 @@ export default function MediaPickerModal({
       )}
     </>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }
+
+

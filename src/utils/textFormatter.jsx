@@ -1,87 +1,79 @@
 import React, { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
-  faCommentDots, 
   faRunning, 
   faBrain, 
-  faHighlighter, 
-  faBookOpen 
+  faCommentDots, 
+  faBookOpen,
+  faHighlighter
 } from '@fortawesome/free-solid-svg-icons';
 
 /**
- * Normalizes an entity or scenario name for comparison by removing accents, extra whitespace,
- * and common leading articles in Spanish and English (e.g. "La Forja" -> "forja").
+ * Normaliza nombres de entidades para búsquedas insensibles a mayúsculas,
+ * acentos y artículos iniciales comunes (el, la, los, las, the, a, an, un, una).
  * 
- * @param {string} name 
+ * @param {string} str 
  * @returns {string}
  */
-export function normalizeEntityName(name = '') {
-  if (!name || typeof name !== 'string') return '';
-  return name
-    .trim()
+export function normalizeEntityName(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // strip accents
-    .replace(/^(el|la|los|las|un|una|the|a|an)\s+/i, '') // strip leading articles
-    .replace(/[^\w\s]/gi, '') // strip punctuation
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/^\s*(el|la|los|las|the|a|an|un|una|unos|unas)\s+/i, '')
+    .replace(/[^a-z0-9]/g, '')
     .trim();
 }
 
 /**
- * Finds a matching entity in appData.cards or appData.scenarios with smart normalized,
- * alias/tag, and word-boundary matching.
+ * Busca si un término marcado coincide con una entidad del compendio o escenario.
  * 
- * @param {string} rawName - The name or tag text to find.
- * @param {object|Array} appData - The appData object or an array of entities.
- * @returns {object|null} The matched card or scenario object.
+ * @param {string} query - Término extraído de ==término==
+ * @param {Object|Array} appDataOrCards - Datos del compendio (objeto con .cards / .scenarios o array de tarjetas)
+ * @returns {Object|null} Entidad encontrada o null
  */
-export function findMatchingEntity(rawName, appData) {
-  if (!rawName) return null;
-  const cleanQuery = String(rawName).trim().toLowerCase();
-  const normQuery = normalizeEntityName(rawName);
-  if (!cleanQuery) return null;
+export function findMatchingEntity(query, appDataOrCards) {
+  if (!query || typeof query !== 'string' || !appDataOrCards) return null;
 
-  let allItems = [];
-  if (Array.isArray(appData)) {
-    allItems = appData;
-  } else if (appData && typeof appData === 'object') {
-    allItems = [...(appData.cards || []), ...(appData.scenarios || [])];
+  let pool = [];
+  if (Array.isArray(appDataOrCards)) {
+    pool = appDataOrCards;
+  } else if (typeof appDataOrCards === 'object') {
+    const cards = Array.isArray(appDataOrCards.cards) ? appDataOrCards.cards : [];
+    const scenarios = Array.isArray(appDataOrCards.scenarios) ? appDataOrCards.scenarios : [];
+    pool = [...cards, ...scenarios];
   }
-  if (allItems.length === 0) return null;
 
-  // 1. Exact raw title, name or id match
-  const exact = allItems.find(item => {
-    if (!item) return false;
-    const title = (item.title || item.name || '').trim().toLowerCase();
-    return title === cleanQuery || item.id === rawName;
+  if (pool.length === 0) return null;
+
+  const normQuery = normalizeEntityName(query);
+  if (!normQuery) return null;
+
+  // 1. Coincidencia exacta normalizada
+  const exact = pool.find(item => {
+    const title = item.title || item.name || '';
+    return normalizeEntityName(title) === normQuery;
   });
   if (exact) return exact;
 
-  // 2. Normalized article-stripped match ("La Forja" === "Forja")
-  if (normQuery) {
-    const normalizedMatch = allItems.find(item => {
-      if (!item) return false;
-      const normTitle = normalizeEntityName(item.title || item.name || '');
-      return normTitle === normQuery;
-    });
-    if (normalizedMatch) return normalizedMatch;
+  // 2. Coincidencia con alias / callWords
+  const aliasMatch = pool.find(item => {
+    if (!item.callWords) return false;
+    const words = Array.isArray(item.callWords) 
+      ? item.callWords 
+      : String(item.callWords).split(',').map(s => s.trim());
+    return words.some(w => normalizeEntityName(w) === normQuery);
+  });
+  if (aliasMatch) return aliasMatch;
 
-    // 3. Tag or Alias exact match
-    const tagMatch = allItems.find(item => {
-      if (!item) return false;
-      if (Array.isArray(item.tags)) {
-        return item.tags.some(t => normalizeEntityName(t) === normQuery);
-      }
-      return false;
-    });
-    if (tagMatch) return tagMatch;
-
-    // 4. Word boundary / prefix match (e.g. "Garrick" in "Garrick el Herrero" or "Forja" in "La Forja Ancestral")
-    const wordMatch = allItems.find(item => {
-      if (!item) return false;
-      const normTitle = normalizeEntityName(item.title || item.name || '');
+  // 3. Coincidencia por palabra principal o prefijo de longitud significativa
+  if (normQuery.length >= 4) {
+    const wordMatch = pool.find(item => {
+      const title = item.title || item.name || '';
+      const normTitle = normalizeEntityName(title);
       if (!normTitle) return false;
-      const titleWords = normTitle.split(/\s+/);
+      const titleWords = (item.title || item.name || '').toLowerCase().split(/\s+/).map(w => normalizeEntityName(w));
       if (titleWords.includes(normQuery)) return true;
       if (normQuery.length >= 4 && normTitle.startsWith(normQuery)) return true;
       if (normTitle.length >= 4 && normQuery.startsWith(normTitle)) return true;
@@ -94,10 +86,10 @@ export function findMatchingEntity(rawName, appData) {
 }
 
 /**
- * Sanitizes and cleans conflicting typographical tokens:
- * - Fixes `*"dialogue"*` or `"*dialogue*"` -> `"dialogue"`
- * - Fixes `*~thought~*` or `~*thought*~` -> `~thought~`
- * - Strips leading/trailing asterisks inside dialogue quotation marks
+ * Sanitiza y limpia tokens tipográficos conflictivos:
+ * - Corrige `*"diálogo"*` o `"*diálogo*"` -> `"diálogo"`
+ * - Corrige `*~pensamiento~*` o `~*pensamiento*~` -> `~pensamiento~`
+ * - Elimina asteriscos sobrantes en comillas de diálogo
  * 
  * @param {string} text 
  * @returns {string}
@@ -105,30 +97,80 @@ export function findMatchingEntity(rawName, appData) {
 export function sanitizeTypography(text) {
   if (!text || typeof text !== 'string') return '';
   return text
-    // 1. Fix quote wrapped in asterisks: *"Hello"* -> "Hello"
+    // 1. Corregir comillas envueltas en asteriscos: *"Hola"* -> "Hola"
     .replace(/\*+"([^"\n]+)"\*+/g, '"$1"')
-    // 2. Fix asterisks wrapped inside quotes: "*Hello*" -> "Hello"
+    // 2. Corregir asteriscos dentro de comillas: "*Hola*" -> "Hola"
     .replace(/"\*+([^*"\n]+)\*+"/g, '"$1"')
-    // 3. Fix thoughts wrapped in asterisks: *~Thought~* -> ~Thought~
+    // 3. Corregir pensamientos envueltos en asteriscos: *~Pensamiento~* -> ~Pensamiento~
     .replace(/\*+~([^~\n]+)~\*+/g, '~$1~')
-    // 4. Fix asterisks inside thought tildes: ~*Thought*~ -> ~Thought~
+    // 4. Corregir asteriscos dentro de tildes: ~*Pensamiento*~ -> ~Pensamiento~
     .replace(/~\*+([^*~\n]+)\*+~/g, '~$1~')
-    // 5. Fix quotes wrapped in tildes: ~"Dialogue"~ -> "Dialogue"
+    // 5. Corregir comillas envueltas en tildes: ~"Diálogo"~ -> "Diálogo"
     .replace(/~+"([^"\n]+)"+~/g, '"$1"')
-    // 6. Fix tildes wrapped in quotes: "~Dialogue~" -> "~Dialogue~"
+    // 6. Corregir tildes dentro de comillas: "~Diálogo~" -> "~Diálogo~"
     .replace(/"~+([^~"\n]+)~+"/g, '~$1~')
-    // 7. Clean any residual `"*word` or `word*"`
+    // 7. Limpiar cualquier `"*palabra` o `palabra*"` residual
     .replace(/"\*+([^*"\n]+)/g, '"$1')
     .replace(/([^*"\n]+)\*+"/g, '$1"');
 }
 
 /**
- * Parses inline typographical tokens:
- * - Highlights: ==term== (interactive tag/compendium card link)
- * - Actions: *action* (third-person action/narration)
- * - Bold: **text**
- * - Inner Thoughts: ~thought~ (unspoken private mind monologue)
- * - Spoken Dialogue: "dialogue" (vocal spoken speech aloud)
+ * Renderiza sub-tokens anidados (marcas de compendio ==término== y **negrita**)
+ * dentro de bloques de acción, diálogo, pensamiento o texto general.
+ * 
+ * @param {string} content 
+ * @param {Function} [onTagClick] 
+ * @param {Object} [appData] 
+ * @param {string} parentKey 
+ * @returns {React.ReactNode}
+ */
+export function renderNestedSubTokens(content, onTagClick, appData, parentKey = 'nested') {
+  if (!content) return null;
+  const regex = /(==[^=\n]+==|\*\*[^*\n]+\*\*)/g;
+  const parts = content.split(regex);
+
+  return parts.map((sub, k) => {
+    if (!sub) return null;
+
+    // Etiqueta Interactiva / Compendio: ==término==
+    if (sub.startsWith('==') && sub.endsWith('==') && sub.length >= 4) {
+      const tagContent = sub.slice(2, -2).trim();
+      const existing = findMatchingEntity(tagContent, appData);
+      return (
+        <mark 
+          key={`${parentKey}-tag-${k}`} 
+          className={`msg-highlight ${existing ? 'existing-card' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onTagClick) onTagClick(tagContent, existing);
+          }}
+          title={existing 
+            ? `🏷️ Entidad existente: ${existing.title || existing.name} (${existing.type || 'Escenario'}). Clic para inspeccionar.` 
+            : `✨ Término clave: "${tagContent}". Clic para inspeccionar o crear tarjeta en el compendio.`
+          }
+        >
+          <FontAwesomeIcon icon={existing ? faBookOpen : faHighlighter} className="msg-type-icon highlight-icon" />
+          {tagContent}
+        </mark>
+      );
+    }
+
+    // Negrita anidada: **texto**
+    if (sub.startsWith('**') && sub.endsWith('**') && sub.length >= 4) {
+      return <strong key={`${parentKey}-bold-${k}`} className="msg-bold">{sub.slice(2, -2)}</strong>;
+    }
+
+    return sub;
+  });
+}
+
+/**
+ * Parsea y formatea tokens tipográficos principales y anidados:
+ * - Resaltados: ==término== (etiqueta interactiva / vínculo al compendio)
+ * - Acciones: *acción* (narrativa en tercera persona / acotación) con soporte anidado de ==término==
+ * - Negrita: **texto**
+ * - Pensamientos: ~pensamiento~ (monólogo interno silencioso)
+ * - Diálogos: "diálogo" (discurso hablado en voz alta) con soporte anidado de ==término==
  * 
  * @param {string} rawText 
  * @param {Function} [onTagClick] 
@@ -138,58 +180,67 @@ export function sanitizeTypography(text) {
 export function renderInlineFormattedText(rawText, onTagClick, appData) {
   if (!rawText) return null;
   const sanitized = sanitizeTypography(rawText);
-  // Match bold (**...**), actions (*...*), dialogue ("..."), thoughts (~...~), tags (==...==)
+  // Captura negrita (**...**), acciones (*...*), diálogos ("..."), pensamientos (~...~), tags (==...==)
   const regex = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|"[^"\n]+(?:"|$)|~[^~\n]+(?:~|$)|==[^=\n]+(?:==|$))/g;
   const parts = sanitized.split(regex);
 
   return parts.map((part, j) => {
     if (!part) return null;
 
-    // Bold: **text**
+    // Negrita: **texto**
     if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-      return <strong key={j} className="msg-bold">{part.slice(2, -2)}</strong>;
+      const boldText = part.slice(2, -2);
+      return (
+        <strong key={j} className="msg-bold">
+          {renderNestedSubTokens(boldText, onTagClick, appData, `b-${j}`)}
+        </strong>
+      );
     }
 
-    // Action: *narrative action*
+    // Acción: *acción narrativa* (con soporte de ==término== y **negrita** anidados)
     if (part.startsWith('*') && part.endsWith('*') && part.length >= 2) {
       const actionText = part.slice(1, -1).trim();
       return (
         <em key={j} className="msg-action">
           <FontAwesomeIcon icon={faRunning} className="msg-type-icon action-icon" />
-          {actionText}
+          {renderNestedSubTokens(actionText, onTagClick, appData, `act-${j}`)}
         </em>
       );
     }
 
-    // Dialogue: "speech"
+    // Diálogo: "discurso hablado" (con soporte de ==término== y **negrita** anidados)
     if (part.startsWith('"') && part.length >= 2) {
       let rawInner = part.endsWith('"') ? part.slice(1, -1) : part.slice(1);
-      // Strip any internal asterisks or tildes that might have slipped into dialogue
       rawInner = rawInner.replace(/^[*~]+|[*~]+$/g, '').trim();
       return (
         <span key={j} className="msg-dialogue">
           <FontAwesomeIcon icon={faCommentDots} className="msg-type-icon dialogue-icon" />
-          {`"${rawInner}"`}
+          {'"'}
+          {renderNestedSubTokens(rawInner, onTagClick, appData, `dia-${j}`)}
+          {part.endsWith('"') ? '"' : ''}
         </span>
       );
     }
 
-    // Thought: ~thought~
+    // Pensamiento: ~pensamiento~
     if (part.startsWith('~') && part.length >= 2) {
       const thoughtText = (part.endsWith('~') ? part.slice(1, -1) : part.slice(1)).trim();
-      // If thought text is an entire descriptive paragraph (>200 chars), display as plain prose
       if (thoughtText.length > 200) {
-        return <span key={j} className="msg-prose">{thoughtText}</span>;
+        return (
+          <span key={j} className="msg-prose">
+            {renderNestedSubTokens(thoughtText, onTagClick, appData, `prose-${j}`)}
+          </span>
+        );
       }
       return (
         <span key={j} className="msg-thought">
           <FontAwesomeIcon icon={faBrain} className="msg-type-icon thought-icon" />
-          {thoughtText}
+          {renderNestedSubTokens(thoughtText, onTagClick, appData, `th-${j}`)}
         </span>
       );
     }
 
-    // Interactive Tag: ==term==
+    // Etiqueta suelta: ==término==
     if (part.startsWith('==') && part.length >= 2) {
       const tagContent = part.replace(/^==/, '').replace(/==$/, '').trim();
       const existing = findMatchingEntity(tagContent, appData);
@@ -202,7 +253,7 @@ export function renderInlineFormattedText(rawText, onTagClick, appData) {
             if (onTagClick) onTagClick(tagContent, existing);
           }}
           title={existing 
-            ? `📖 Entidad existente: ${existing.title || existing.name} (${existing.type || 'Escenario'}). Clic para inspeccionar.` 
+            ? `🏷️ Entidad existente: ${existing.title || existing.name} (${existing.type || 'Escenario'}). Clic para inspeccionar.` 
             : `✨ Término clave: "${tagContent}". Clic para inspeccionar o crear tarjeta en el compendio.`
           }
         >
@@ -212,7 +263,8 @@ export function renderInlineFormattedText(rawText, onTagClick, appData) {
       );
     }
 
-    return part;
+    // Prosa estándar / texto suelto
+    return renderNestedSubTokens(part, onTagClick, appData, `txt-${j}`);
   });
 }
 
@@ -273,13 +325,13 @@ export function FormattedMessageText({ text, onTagClick, appData }) {
               {isCurrentlyThinking ? 'Razonando en vivo...' : 'Pensamiento del Narrador'}
             </span>
             <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-              {shouldDisplayThinking ? '▼ Ocultar' : '▶ Ver pensamiento'}
+              {shouldDisplayThinking ? '▲ Ocultar' : '▼ Ver pensamiento'}
             </span>
           </div>
           {shouldDisplayThinking && (
             <div style={{ padding: '8px 12px', fontStyle: 'italic', color: 'rgba(255,255,255,0.7)', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
               {thinkingContent}
-              {isCurrentlyThinking && <span style={{ opacity: 0.6, color: '#c084fc' }}> ▍</span>}
+              {isCurrentlyThinking && <span style={{ opacity: 0.6, color: '#c084fc' }}> ✍️...</span>}
             </div>
           )}
         </div>

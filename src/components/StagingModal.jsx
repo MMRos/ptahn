@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMagic, faTimes, faCheckSquare, faSquare } from '@fortawesome/free-solid-svg-icons';
 import './stagingModal.css';
@@ -52,9 +53,9 @@ export default function StagingModal({
     onClose();
   };
 
-  return (
-    <div className="staging-modal-overlay">
-      <div className="staging-modal">
+  const modalContent = (
+    <div className="staging-modal-overlay" onClick={onClose}>
+      <div className="staging-modal" onClick={(e) => e.stopPropagation()}>
         <div className="staging-header">
           <h3>
             <FontAwesomeIcon icon={faMagic} className="staging-icon" /> Escenificación (Generar Imagen de la Escena)
@@ -155,4 +156,9 @@ export default function StagingModal({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }

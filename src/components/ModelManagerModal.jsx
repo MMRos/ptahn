@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import './topbar.css';
 
 /**
@@ -181,7 +182,7 @@ export default function ModelManagerModal({ isOpen, onClose, onModelLoaded }) {
 
   const activeDownloadingTasks = downloads.filter(d => d.status === 'downloading');
 
-  return (
+  const modalContent = (
     <div 
       className="modal-overlay" 
       onClick={(e) => {
@@ -645,4 +646,9 @@ export default function ModelManagerModal({ isOpen, onClose, onModelLoaded }) {
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 }
