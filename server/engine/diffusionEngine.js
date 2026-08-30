@@ -20,12 +20,13 @@ class DiffusionEngine {
   }
 
   /**
-   * Discovers available Python runtime with torch/diffusers
+   * Discovers the standalone dedicated Python runtime in ptahn/.venv/
    */
   findPythonExecutable() {
-    if (this.pythonPath && fs.existsSync(this.pythonPath)) {
+    if (this.pythonPath && (this.pythonPath === 'python' || fs.existsSync(this.pythonPath))) {
       return this.pythonPath;
     }
+    const { execSync } = require('child_process');
     const localVenvWindows = path.join(__dirname, '..', '..', '.venv', 'Scripts', 'python.exe');
     const localVenvUnix = path.join(__dirname, '..', '..', '.venv', 'bin', 'python');
     const candidates = [
@@ -34,6 +35,26 @@ class DiffusionEngine {
       'python',
       'py'
     ];
+
+    for (const cand of candidates) {
+      try {
+        if (path.isAbsolute(cand) && !fs.existsSync(cand)) continue;
+        
+        // Verification that internal project runtime has PyTorch and Diffusers
+        execSync(`"${cand}" -c "import _ctypes; import torch; import diffusers"`, { 
+          stdio: 'ignore', 
+          timeout: 5000,
+          windowsHide: true
+        });
+        
+        console.log('[DiffusionEngine]: Standalone Ptahn PyTorch/CUDA runtime verified:', cand);
+        this.pythonPath = cand;
+        return cand;
+      } catch (e) {
+        // Continue probing
+      }
+    }
+
     for (const cand of candidates) {
       try {
         if (path.isAbsolute(cand) && fs.existsSync(cand)) {
@@ -42,6 +63,7 @@ class DiffusionEngine {
         }
       } catch (e) {}
     }
+
     this.pythonPath = 'python';
     return 'python';
   }

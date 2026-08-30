@@ -31,16 +31,11 @@ import { recordTokensTelemetry, calculateTokensSpeed } from './systemTelemetry';
  */
 export function getBaseUrl(baseUrl) {
   if (baseUrl && typeof baseUrl === 'string' && baseUrl.trim()) {
-    if (!baseUrl.includes(':1234/') && !baseUrl.endsWith(':1234')) {
-      return baseUrl.trim().replace(/\/$/, '');
-    }
+    return baseUrl.trim().replace(/\/$/, '');
   }
   
   const settings = loadChatSettings();
-  const url = settings.llmServerUrl || settings.lmStudioUrl || 'http://localhost:3001';
-  if (url.includes(':1234/') || url.endsWith(':1234')) {
-    return 'http://localhost:3001';
-  }
+  const url = settings.lmStudioUrl || settings.llmServerUrl || 'http://127.0.0.1:1234';
   return url.replace(/\/$/, '');
 }
 

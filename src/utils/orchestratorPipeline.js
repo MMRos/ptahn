@@ -194,7 +194,8 @@ ${JSON.stringify(cardsSummaryList)}
 Respond ONLY with valid JSON.`;
 
   try {
-    const response = await sendChatMessage({
+    // Timeout de 4s para evitar congelamientos si el servidor de LLM está ocupado
+    const inboundPromise = sendChatMessage({
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `LATEST USER MESSAGE:\n"${userMessage}"` }
@@ -202,9 +203,15 @@ Respond ONLY with valid JSON.`;
       modelId: modelToUse,
       baseUrl: baseUrl || chatSettings.lmStudioUrl,
       temperature: 0.1,
-      maxTokens: 500,
+      maxTokens: 300,
       callerType: 'INTERMEDIARY_SLM'
     });
+
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Orchestrator inbound timeout (fast-path triggered)')), 4500)
+    );
+
+    const response = await Promise.race([inboundPromise, timeoutPromise]);
 
     const parsed = parseOrchestratorInboundJSON(response, userMessage);
     
@@ -283,7 +290,7 @@ Your job is to parse the storyteller's raw narrative and return a SINGLE valid J
 Respond ONLY with valid JSON.`;
 
   try {
-    const response = await sendChatMessage({
+    const outboundPromise = sendChatMessage({
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `RAW STORYTELLER NARRATIVE:\n${rawNarrative}` }
@@ -291,9 +298,15 @@ Respond ONLY with valid JSON.`;
       modelId: modelToUse,
       baseUrl: baseUrl || chatSettings.lmStudioUrl,
       temperature: 0.1,
-      maxTokens: 800,
+      maxTokens: 500,
       callerType: 'INTERMEDIARY_SLM'
     });
+
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Orchestrator outbound timeout (fast-path triggered)')), 4500)
+    );
+
+    const response = await Promise.race([outboundPromise, timeoutPromise]);
 
     const parsed = parseOrchestratorOutboundJSON(response, rawNarrative);
     const deduplicatedTasks = deduplicateVisualAssets(parsed.diffusionTasks, compendiumCards);
