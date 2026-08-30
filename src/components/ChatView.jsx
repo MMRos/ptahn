@@ -1,42 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faUndo, 
   faCodeBranch, 
   faEdit, 
   faHistory, 
-  faImage, 
-  faPaperPlane, 
   faCheck, 
   faTimes, 
-  faPlay, 
   faVolumeUp, 
-  faCommentDots, 
-  faRunning, 
-  faBrain, 
-  faHighlighter,
+  faBrain,
   faTrashAlt,
-  faMagic,
   faLanguage,
   faSpinner,
-  faKeyboard,
-  faEye,
-  faEyeSlash,
-  faUserCircle,
-  faExternalLinkAlt,
-  faSave
-} from '@fortawesome/free-solid-svg-icons';
+  } from '@fortawesome/free-solid-svg-icons';
 import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generateLocationWallpaper, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
-import { resolveTargetLanguage, getLanguageDirective } from '../utils/language';
+import { resolveTargetLanguage } from '../utils/language';
 import { autoCompleteEntityWithAI } from '../utils/aiEnhancer';
+import { buildStorytellerSystemPrompt } from '../utils/promptBuilder';
+import ActiveEntityModal from './chat/ActiveEntityModal';
+import ChatInputDock from './chat/ChatInputDock';
+
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { speakBrowserUtterance, cancelBrowserSpeech } from '../utils/speechTTS';
 import { FormattedMessageText, findMatchingEntity, normalizeEntityName } from '../utils/textFormatter';
 import { detectActiveCharacter, matchCharacterExpression, resolveLocationWallpaper } from '../utils/characterMatcher';
-import { getNsfwDynamicsDirective } from '../utils/nsfwDynamics';
+
 import { executeInboundOrchestration, executeOutboundOrchestration } from '../utils/orchestratorPipeline';
-import { filterAndSortRelevantCards } from '../utils/weightCalculator';
 import { addChat } from '../utils/db';
 
 
@@ -193,10 +183,6 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, onD
 
   const [isSelectingForCard, setIsSelectingForCard] = useState(false);
   const [selectedMessagesForCard, setSelectedMessagesForCard] = useState([]);
-  const [newCardName, setNewCardName] = useState('');
-  const [newCardType, setNewCardType] = useState('Personaje');
-  const [newCardText, setNewCardText] = useState('');
-
   // Manejar clic en etiquetas doradas/verdes ==texto==
   const handleTagClick = (tagContent, existingEntity) => {
     const resolvedEntity = existingEntity || findMatchingEntity(tagContent, appData);
@@ -378,59 +364,8 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     setActiveEntityModal(null);
   };
 
-  const insertFormatting = (type) => {
-    const textarea = inputRef.current;
-    if (!textarea) return;
-    const start = textarea.selectionStart ?? 0;
-    const end = textarea.selectionEnd ?? 0;
-    const currentText = inputMsg;
-    const selectedText = currentText.substring(start, end);
-
-    let prefix = '';
-    let suffix = '';
-    let placeholder = '';
-
-    switch (type) {
-      case 'dialogue':
-        prefix = '"';
-        suffix = '"';
-        placeholder = 'diálogo';
-        break;
-      case 'action':
-        prefix = '*';
-        suffix = '*';
-        placeholder = 'acción';
-        break;
-      case 'thought':
-        prefix = '~';
-        suffix = '~';
-        placeholder = 'pensamiento';
-        break;
-      case 'highlight':
-        prefix = '==';
-        suffix = '==';
-        placeholder = 'texto resaltado';
-        break;
-      default:
-        break;
-    }
-
-    const insertedContent = selectedText ? `${prefix}${selectedText}${suffix}` : `${prefix}${placeholder}${suffix}`;
-    const newText = currentText.substring(0, start) + insertedContent + currentText.substring(end);
-    setInputMsg(newText);
-
-    setTimeout(() => {
-      textarea.focus();
-      if (selectedText) {
-        textarea.setSelectionRange(start, start + insertedContent.length);
-      } else {
-        textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
-      }
-    }, 10);
-  };
-
   useEffect(() => {
-    if (isSelectingForCard) {
+    if (isSelectingForCard && selectedMessagesForCard.length > 0) {
       const refText = selectedMessagesForCard
         .map(idx => {
           const m = messages[idx];
@@ -438,11 +373,17 @@ Respond directly with the descriptive lore text without introductory fluff or pr
           return `${author}: ${m.text}`;
         })
         .join('\n\n');
-      setNewCardText(refText);
-    } else {
-      setNewCardText('');
+      if (onOpenCreateModal) {
+        onOpenCreateModal('Personaje', {
+          title: 'Nuevo Elemento',
+          text: refText,
+          intro: refText.substring(0, 120) + '...'
+        });
+        setIsSelectingForCard(false);
+        setSelectedMessagesForCard([]);
+      }
     }
-  }, [selectedMessagesForCard, isSelectingForCard, messages]);
+  }, [selectedMessagesForCard, isSelectingForCard, messages, onOpenCreateModal]);
 
   const persistChatMessages = async (targetChatId, targetChatMeta, nextMsgs) => {
     if (!targetChatId) return;
@@ -567,303 +508,30 @@ Respond directly with the descriptive lore text without introductory fluff or pr
 
   // Construcción unificada y estructurada del systemPrompt (arnés de contexto).
   // Consolida los detalles del escenario, personajes/PNJs preestablecidos, narrador, herramientas del taller, jugador, inventario y memorias.
+  // Construcción unificada y estructurada del systemPrompt delegada al módulo promptBuilder.
   const buildSystemPrompt = (preFilteredEntities = null) => {
-    // 1. Resolve linked scenario and narrator
-    const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId || s.title?.toLowerCase() === (chat.scenario || '').toLowerCase()) ||
-                     (appData?.cards || []).find(c => c.id === chat.scenarioId || c.title?.toLowerCase() === (chat.scenario || '').toLowerCase()) ||
+    const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId || s.title?.toLowerCase() === (chat.scenario || "").toLowerCase()) ||
+                     (appData?.cards || []).find(c => c.id === chat.scenarioId || c.title?.toLowerCase() === (chat.scenario || "").toLowerCase()) ||
                      findMatchingEntity(chat.scenario, appData);
     const narrator = (appData?.narrators || []).find(n => n.id === scenario?.narrator);
-
-    // 2. Resolve player character sheet
-    const userChar = (appData?.cards || []).find(c => c.id === chat.characterId || c.title?.toLowerCase() === (chat.character || '').toLowerCase()) ||
+    const userChar = (appData?.cards || []).find(c => c.id === chat.characterId || c.title?.toLowerCase() === (chat.character || "").toLowerCase()) ||
                      findMatchingEntity(chat.character, appData?.cards);
+    const assignedTools = (appData?.narratorTools || []).filter(t => (narrator?.tools || []).includes(t.id));
+    const userInventories = (appData?.cards || []).filter(c => c.type === 'Inventario' && c.ownerId === userChar?.id);
+    const relevantEntities = preFilteredEntities || scenarioCards;
 
-    // 3. Format Narrator/DM Profile
-    let narratorDetails = '';
-    if (narrator) {
-      narratorDetails = `
-[ACTIVE GAME MASTER / NARRATOR PROFILE]:
-- Name: ${narrator.name}
-${narrator.bio ? `- Narrative Directives: ${narrator.bio}` : ''}
-${narrator.style ? `- Prose Style: ${narrator.style}` : ''}
-${narrator.tone ? `- Tone: ${narrator.tone}` : ''}
-${narrator.rules ? `- Narrator Rules: ${narrator.rules}` : ''}
-${narrator.randomization ? `- Mechanics/Randomness: ${narrator.randomization}` : ''}
-`.trim();
-    }
-
-    // 4. Format modular tools from workshop
-    let narratorToolsDetails = '';
-    if (narrator && narrator.tools && narrator.tools.length > 0) {
-      const assignedTools = (appData?.tools || []).filter(t => narrator.tools.includes(t.id));
-      if (assignedTools.length > 0) {
-        const toolsText = assignedTools.map(tool => {
-          let mechanics = '';
-          if (tool.toolType === 'attributes') {
-            const attrs = tool.config?.attributes || [];
-            mechanics = `System Attribute Bars:\n` + attrs.map(a => `  * ${a.name} [${a.current ?? a.max}/${a.max}] (Color: ${a.color || 'auto'}) - ${a.desc || 'Metric/Resource'}`).join('\n');
-          } else if (tool.toolType === 'progression') {
-            const levels = tool.config?.levels || [];
-            mechanics = `Progression Scale (${tool.config?.scaleName || 'Level'}):\n` + levels.map(l => `  * Level ${l.level} (${l.title}): ${l.perks || 'Requirements/Perks'}`).join('\n');
-          } else if (tool.toolType === 'dice') {
-            const dice = tool.config?.diceType || '1d20';
-            const dc = tool.config?.defaultDC || '12';
-            mechanics = `Resolution System: Dice ${dice} (Base DC: ${dc}). Crits: Success on ${tool.config?.critSuccess || 20}, Fail on ${tool.config?.critFail || 1}. Modifiers: ${tool.config?.statModifier || 'Relevant Attribute'}.`;
-          } else if (tool.toolType === 'events') {
-            const evts = tool.config?.events || [];
-            mechanics = `Event & Encounter Table (${tool.config?.diceType || '1d20'}):\n` + evts.map(e => `  * Range [${e.min}-${e.max}]: ${e.event} (${e.severity || 'Normal'})`).join('\n');
-          } else {
-            mechanics = `Custom Mechanics & Rules:\n${tool.config?.customRules || tool.description || 'No specific rules.'}`;
-          }
-          return `--- [TOOL: ${tool.name} (${(tool.toolType || 'custom').toUpperCase()})] ---\nDescription: ${tool.description || 'Game Mechanic Tool'}\n${mechanics}`;
-        }).join('\n\n');
-
-        narratorToolsDetails = `
-[MODULAR GAME MECHANICS & TOOL WORKSHOP]:
-The Game Master has access to the following modular tools and mechanics. Reference them when resolving checks, damage, DC tests, or triggering events:
-${toolsText}
-`.trim();
-      }
-    }
-
-    // 5. Format Player Character dossier
-    let userCharDetails = '';
-    if (userChar) {
-      userCharDetails = `
-[PLAYER CHARACTER DOSSIER ({{user}})]:
-- Name: ${userChar.title || userChar.name}
-${userChar.intro ? `- Brief Summary: ${userChar.intro}` : ''}
-${userChar.text ? `- Background/Details: ${userChar.text}` : ''}
-${userChar.traits && userChar.traits.length > 0 ? `- Traits: ${userChar.traits.join(', ')}` : ''}
-`.trim();
-    }
-
-    // 6. Format Player Inventory
-    let userInventoryDetails = '';
-    if (userChar) {
-      const userInventories = (appData?.cards || []).filter(c => c.type === 'Inventario' && (c.linkedCharacterId === userChar.id || c.linkedCharacterId === userChar.title));
-      if (userInventories.length > 0) {
-        const invText = userInventories.map(inv => {
-          const itemsList = (inv.items || []).map(it => `  * [${it.equipped ? 'EQUIPPED' : 'IN BAG'}] ${it.name} (x${it.qty || 1}, ${it.rarity || 'Common'}) - ${it.desc || ''}`).join('\n');
-          return `Inventory/Bag "${inv.title}" (Capacity: ${inv.capacity || 'Standard'}):\n${itemsList || '  (Empty)'}`;
-        }).join('\n\n');
-
-        userInventoryDetails = `
-[PLAYER INVENTORY & EQUIPMENT ({{user}})]:
-${invText}
-`.trim();
-      }
-    }
-
-    // 7. Format Playable Scenario details
-    let scenarioDetails = `Scenario: ${chat.scenario}.`;
-    if (scenario) {
-      scenarioDetails = `
-[ACTIVE PLAYABLE SCENARIO]:
-- Scenario Title: ${scenario.title}
-${scenario.intro ? `- Introduction: ${scenario.intro}` : ''}
-${scenario.baseContext ? `- Base Lore / World Context: ${scenario.baseContext}` : ''}
-${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${scenario.aiInstructions}` : ''}
-`.trim();
-    }
-
-    // 7.1 Format Pre-established Scenario Entities by Exact Category (Strict Typological Separation)
-    let scenarioEntitiesDetails = '';
-    const scenarioCards = getScenarioCards(scenario, chat, appData, userChar);
-
-    const relevantEntities = (preFilteredEntities && Array.isArray(preFilteredEntities) && preFilteredEntities.length > 0)
-      ? preFilteredEntities.filter(p => scenarioCards.some(sc => sc.id === p.id || sc.title === p.title))
-      : filterAndSortRelevantCards(scenarioCards, {
-          recentText: messages.slice(-3).map(m => m.text || '').join(' '),
-          maxLimit: 8
-        });
-
-    if (relevantEntities.length > 0) {
-      const formatCardEntry = (ent, label) => {
-        const traitsStr = ent.traits && ent.traits.length > 0 ? `  * Personality & Traits: ${ent.traits.join(', ')}\n` : '';
-        const tagsStr = ent.tags && ent.tags.length > 0 ? `  * Tags: ${ent.tags.join(', ')}\n` : '';
-        const introStr = ent.intro ? `  * Summary: ${ent.intro}\n` : '';
-        const bioStr = (ent.description || ent.text) ? `  * Lore & Description: ${ent.description || ent.text}\n` : '';
-        return `--- [${label}: ${ent.title || ent.name || 'Entidad'}${ent.subtype ? ` (${ent.subtype})` : ''}] ---\n${introStr}${bioStr}${traitsStr}${tagsStr}`.trim();
-      };
-
-      const locationCards = relevantEntities.filter(e => (e.type || '').toLowerCase() === 'lugar');
-      const raceCards = relevantEntities.filter(e => (e.type || '').toLowerCase() === 'raza');
-      const characterCards = relevantEntities.filter(e => {
-        const t = (e.type || '').toLowerCase();
-        return t === 'personaje' || t === 'npc' || (!t && !e.subtype);
-      });
-      const factionCards = relevantEntities.filter(e => {
-        const t = (e.type || '').toLowerCase();
-        return t === 'facción' || t === 'faccion';
-      });
-      const itemCards = relevantEntities.filter(e => {
-        const t = (e.type || '').toLowerCase();
-        return t === 'objeto' || t === 'inventario' || t === 'item';
-      });
-      const otherCards = relevantEntities.filter(e => 
-        !locationCards.includes(e) && !raceCards.includes(e) && !characterCards.includes(e) && !factionCards.includes(e) && !itemCards.includes(e)
-      );
-
-      const sections = [];
-
-      if (locationCards.length > 0) {
-        sections.push(`[SCENARIO LOCATIONS, TOWNS & GEOGRAPHY (PLACES / LUGAR)]:
-CRITICAL NOTE: The following entries are PHYSICAL PLACES, TOWNS, BUILDINGS, OR GEOGRAPHY. They are INANIMATE ENVIRONMENTS, NOT living persons or NPCs. NEVER personify, give dialogue, thoughts, animal body parts, or ears to a location.
-${locationCards.map(c => formatCardEntry(c, 'LOCATION')).join('\n\n')}`);
-      }
-
-      if (raceCards.length > 0) {
-        sections.push(`[SCENARIO RACES & SPECIES PHYSIOLOGY (RAZAS)]:
-The following describe biological traits, species anatomy, and physiology of inhabitants in this world:
-${raceCards.map(c => formatCardEntry(c, 'RACE / SPECIES')).join('\n\n')}`);
-      }
-
-      if (characterCards.length > 0) {
-        sections.push(`[SCENARIO LIVING CHARACTERS & NPCS (PERSONAJES)]:
-The following are living individual beings/NPCs that exist in this scenario. YOU (Game Master) roleplay and speak for them when they are present:
-${characterCards.map(c => formatCardEntry(c, 'NPC / CHARACTER')).join('\n\n')}`);
-      }
-
-      if (factionCards.length > 0) {
-        sections.push(`[SCENARIO FACTIONS & ORGANIZATIONS (FACCIONES)]:
-${factionCards.map(c => formatCardEntry(c, 'FACTION')).join('\n\n')}`);
-      }
-
-      if (itemCards.length > 0) {
-        sections.push(`[SCENARIO SPECIAL ITEMS & OBJECTS (OBJETOS)]:
-${itemCards.map(c => formatCardEntry(c, 'ITEM / OBJECT')).join('\n\n')}`);
-      }
-
-      if (otherCards.length > 0) {
-        sections.push(`[SCENARIO COMPENDIUM LORE ENTITIES]:
-${otherCards.map(c => formatCardEntry(c, 'ENTITY')).join('\n\n')}`);
-      }
-
-      scenarioEntitiesDetails = sections.join('\n\n');
-    }
-
-    // 8. Format Memories & Milestones (strictly scoped to this chat and scenario)
-    const inChatMemories = (chat.memoryCards || []).map(m => `* ${m}`);
-    const cardMemories = scenarioCards.filter(c => c.type === 'Memoria' && (
-      c.linkedScenario === chat.scenarioId || 
-      (Array.isArray(c.linkedCharacters) && userChar && (c.linkedCharacters.includes(userChar.id) || c.linkedCharacters.includes(userChar.title)))
-    )).map(m => `* [Impact: ${m.impact || 'Medium'}] (${m.timeline || 'Milestone'}) ${m.title}: ${m.summary || m.text}`);
-
-    const allMemories = [...inChatMemories, ...cardMemories];
-    const memoryContext = allMemories.length > 0 ? allMemories.join('\n') : 'No previous memories recorded.';
-
-    const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
-    const languageDirective = getLanguageDirective(targetLang);
-
-    // 9. Format NSFW, Eroticism & Intimacy Dynamics Matrix
-    const nsfwDynamicsDirective = getNsfwDynamicsDirective({
+    return buildStorytellerSystemPrompt({
       scenario,
+      narrator,
+      assignedTools,
       userChar,
-      npcs: relevantEntities
+      userInventories,
+      relevantEntities,
+      chat,
+      messages,
+      chatSettings
     });
-
-    return `
-${languageDirective}
-
-[FUNDAMENTAL IDENTITY & NARRATIVE PERSPECTIVE]:
-- YOUR ROLE IS: External Game Master / Storyteller (Game Master / DM). You are the living world, the environment, the weather, and all Non-Player Characters (NPCs).
-- THE USER IS: {{user}} (${userChar ? userChar.title || userChar.name : 'the player character'}). Only the user controls {{user}}.
-- NARRATION PERSPECTIVE: STRICT THIRD-PERSON. Describe the world, surroundings, and NPCs from an immersive external perspective.
-- STRICT PROHIBITION AGAINST FIRST-PERSON PLAYER NARRATION:
-  * NEVER narrate in the first person ("I observe...", "I approach...", "I feel..."). That usurps the player.
-  * NEVER invent dialogue, thoughts, feelings, or actions for {{user}}.
-  * NEVER generate prefixes like "You:", "{{user}}:", "Player:".
-  * Your response must contain ONLY how the world reacts and what NPCs say or do in response to what the player did.
-
-${scenarioDetails}
-
-${scenarioEntitiesDetails ? `${scenarioEntitiesDetails}\n\n` : ''}${narratorDetails}
-
-${narratorToolsDetails ? `${narratorToolsDetails}\n\n` : ''}${userCharDetails}
-
-${userInventoryDetails ? `${userInventoryDetails}\n\n` : ''}${nsfwDynamicsDirective}
-
-[PERSISTENT AI ORDERS]:
-${chat.constantPrompt ? chat.constantPrompt : 'Perform immersively as external Game Master in strict third-person.'}
-
-[CORE SYSTEM DIRECTIVES & INVIOLABLE HARNESS RULES]:
-
-1. STRICT PROHIBITION AGAINST OVER-DESCRIBING PLAYER APPEARANCE OR INVENTORY:
-   - The player ALREADY knows their character's appearance, equipment, and clothing.
-   - NEVER waste output describing {{user}}'s muscles, physique, attire, or invent random anatomical traits. {{user}} is strictly human according to their sheet.
-   - FORBIDDEN to use invasive second-person style ("You are...", "Your body feels...", "Your eyes see...").
-
-2. STRICT PROHIBITION AGAINST ACTING OR DECIDING FOR THE PLAYER (NO AUTOPLAY / NO GODMODING):
-   - NEVER speak, act, decide, or describe thoughts/feelings for {{user}} (${userChar ? userChar.title || userChar.name : 'the player character'}).
-   - Limit yourself strictly to world consequences and NPC reactions in third-person.
-   - Conclude immediate consequences and stop to yield the turn to the player.
-
-3. TOTAL FOCUS ON EXTERNAL ENVIRONMENT & LIVING NPCS:
-   - Focus 100% of descriptive vocabulary and effort on what surrounds {{user}}: buildings, weather, scents, tension, and especially the actions, posture, dialogue, and glances of NPCs.
-
-4. ZERO ECHO / NO REPETITIVE PARAPHRASING:
-   - Do NOT begin your response by summarizing, repeating, or echoing what the player just wrote.
-   - Step directly into the action with immediate world consequences and live reactions.
-
-5. NPCS HAVE LIMITED SUBJECTIVE KNOWLEDGE (NO OMNISCIENCE):
-   - NPCs and creatures possess limited, subjective knowledge: they only know what they have personally seen, heard, or learned.
-   - No NPC can read {{user}}'s mind, know their secret plans, or guess items in their inventory unless explicitly shown or mentioned.
-
-6. LIVING, ORGANIC, AND COHERENT WORLD:
-   - The world does not revolve subserviently around the player; reckless actions carry realistic risks, logical consequences, and believable opposition.
-   - Maintain strict consistency with scenario lore, inventory, and accumulated memories.
-
-7. STRICT TYPOGRAPHICAL FORMATTING, DELIMITERS & ENTITY HIGHLIGHTS:
-   - SPOKEN NPC DIALOGUE (ALOUD): MUST be wrapped EXCLUSIVELY in double quotes without internal asterisks: "Hello, traveler."
-     * Any vocal speech, conversation, shouts, or verbal responses MUST be inside double quotes: "¡Dueño!", "¡Espera!".
-     * FORBIDDEN to put asterisks inside quotes (NEVER write "*Hello*" or "*¡Dueño!*").
-     * FORBIDDEN to wrap dialogue quotes with asterisks (NEVER write *"Hello"*).
-     * FORBIDDEN to put spoken dialogue in tildes (~...~).
-   - SILENT INTERNAL THOUGHTS (UNSPOKEN): MUST be wrapped EXCLUSIVELY in tildes: ~What a strange presence this newcomer has...~
-     * Tildes (~...~) are ONLY for SHORT (1-2 sentences) silent, private inner thoughts inside an NPC's mind.
-     * STRICTLY FORBIDDEN to wrap scene descriptions, narrative paragraphs, actions, or dialogues in tildes (~...~).
-     * FORBIDDEN to combine with asterisks (NEVER write *~thought~*).
-   - GENERAL NARRATIVE PROSE & ACTIONS:
-     * Write standard, clean literary paragraphs for descriptions, sensory details, and world reactions WITHOUT wrapping whole sentences or descriptions in asterisks (*...*) or tildes (~...~).
-     * Asterisks (*...*) are reserved ONLY for short, specific inline actions or gestures (e.g. *sonríe con picardía*, *desenvaina su espada*).
-   - MANDATORY ENTITY HIGHLIGHTS (==...==):
-     * You MUST wrap ALL key proper names, locations, towns, characters, factions, and notable items in double equal signs (==...==).
-     * Examples: ==Garrison==, ==Tierra de Bestias==, ==La Forja==, ==Garrick==, ==Mari Setogaya==, ==Taberna del Búho==, ==Armadillo y Martillo==, ==Fosas Miasmáticas==, ==Leporinos==.
-     * This triggers interactive compendium linking in the reader's interface. Failure to wrap important entities and places in ==...== breaks the user's interface.
-
-8. MANDATORY 4-PHASE REASONING & SELF-CORRECTION PROTOCOL (<think>):
-   Before delivering your final story response, you MUST execute a silent 4-phase scratchpad inside a <think> ... </think> block:
-
-   [FASE 1: PLANIFICACIÓN]
-   - NPC Intent & Emotion: What is the NPC's psychological drive and what reaction do they seek from {{user}}?
-   - Atmosphere & Sensory Anchoring: Scent, temperature, textures, lighting, breath, and heartbeat.
-   - Lore & Entity Categorization: Verify active locations, species, and characters. Ensure locations (e.g. ==Garrison==) are treated as geographical places, NOT as speaking NPCs.
-   - Rhythm & Direction: How to advance the scene without rushing or stalling.
-
-   [FASE 2: REDACCIÓN (BORRADOR INTERNO)]
-   - Draft a preliminary mental version of how the environment and NPCs react to the player's action.
-
-   [FASE 3: AUTO-CRÍTICA (CONTROL DE CALIDAD)]
-   - Autonomy Audit: Did my draft usurp, speak, think, or act for {{user}}? -> If yes, immediately purge it.
-   - Location vs Character Audit: Did I accidentally give voice or body parts to a place or town? -> Purge immediately; places are environments.
-   - Mandatory Entity Wrapping Audit (==...==): Did I wrap all key proper names, places, species, and NPCs in double equals (e.g. ==Garrison==, ==Leporinos==, ==Taberna del Búho==)? -> Wrap all proper nouns in ==...==.
-   - Typographical Check: Ensure spoken dialogue uses double quotes ("..."), physical gestures use asterisks (*...*), and unspoken inner thoughts use tildes (~...~).
-   - Anti-Cliché & Prose Freshness: Elevate to rich, visceral prose.
-   - Final Adjustments & Greenlight: Apply corrections.
-
-   [FASE 4: MENSAJE FINAL]
-   - Close </think> and output ONLY the final, polished, and immersive narrative prose for the reader.
-
-[RECORDED STORY MEMORIES & MILESTONES]:
-${memoryContext}
-
-${languageDirective}
-`.trim();
   };
-
-  // Función asíncrona en segundo plano para realizar el resumen de contexto y generar memorias.
-  // Protegida ante fallos por try-catch y persistida en almacenamiento local e IndexedDB.
   const runBackgroundSummarization = (finalMsgs, targetChatSnapshot = chat) => {
     setTimeout(async () => {
       try {
@@ -1695,307 +1363,37 @@ ${languageDirective}
       </div>
 
       {/* ÁREA INFERIOR SIEMPRE FIJA ABAJO */}
-      <div className="chat-bottom-dock">
-        {/* Panel de Creación Manual de Tarjeta (Aparece si está en modo selección) */}
-        {isSelectingForCard && selectedMessagesForCard.length > 0 && (
-          <div style={{
-            background: '#14141f',
-            borderBottom: '1px solid rgba(255,255,255,0.12)',
-            padding: '16px',
-            boxSizing: 'border-box',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px'
-          }}>
-            <h4 style={{ margin: 0, color: '#ffd36b', fontSize: '0.9rem', fontWeight: '700' }}>Crear Tarjeta desde Mensajes</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Nombre de tarjeta</label>
-                <input 
-                  value={newCardName} 
-                  onChange={(e) => setNewCardName(e.target.value)} 
-                  placeholder="Ej. Espada de Fuego, René..."
-                  style={{ width: '100%', padding: '6px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Tipo</label>
-                <select 
-                  value={newCardType} 
-                  onChange={(e) => setNewCardType(e.target.value)}
-                  style={{ width: '100%', padding: '6px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                >
-                  <option value="Personaje">Personaje</option>
-                  <option value="Lugar">Lugar</option>
-                  <option value="Facción">Facción</option>
-                  <option value="Raza">Raza</option>
-                  <option value="Criatura">Criatura</option>
-                  <option value="Objeto">Objeto</option>
-                  <option value="Otros">Otros</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Lore / Detalles (Generado de Selección)</label>
-              <textarea 
-                value={newCardText} 
-                onChange={(e) => setNewCardText(e.target.value)} 
-                rows={3}
-                style={{ width: '100%', padding: '6px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box', resize: 'vertical' }}
-              />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button 
-                type="button" 
-                onClick={() => {
-                  setIsSelectingForCard(false);
-                  setSelectedMessagesForCard([]);
-                  setNewCardName('');
-                  setNewCardText('');
-                }}
-                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
-              >
-                Cancelar
-              </button>
-              <button 
-                type="button" 
-                onClick={() => {
-                  const n = newCardName.trim();
-                  if (!n) {
-                    alert('El nombre es obligatorio.');
-                    return;
-                  }
-                  const newCardObj = {
-                    id: `card-${Date.now()}`,
-                    type: newCardType,
-                    title: n,
-                    intro: newCardText.substring(0, 100) + '...',
-                    text: newCardText,
-                    cover: '',
-                    nsfw: false,
-                    public: false,
-                    tags: [],
-                    connectedCards: [],
-                    traits: [],
-                    createdAt: new Date().toISOString()
-                  };
-                  if (appData && onUpdateAppData) {
-                    const nextData = {
-                      ...appData,
-                      cards: [newCardObj, ...(appData.cards || [])]
-                    };
-                    onUpdateAppData(nextData);
-                  }
-                  if (newCardType === 'Personaje') {
-                    setPopupCharacter(newCardObj);
-                  } else {
-                    alert(`Tarjeta "${n}" creada de forma manual.`);
-                  }
-                  setIsSelectingForCard(false);
-                  setSelectedMessagesForCard([]);
-                  setNewCardName('');
-                  setNewCardText('');
-                }}
-                style={{ background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)', border: 'none', color: '#000', fontWeight: '700', padding: '5px 14px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
-              >
-                Guardar Tarjeta
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Barra de Acciones y Formateadores Rápidos justo encima del Textarea */}
-        <div className="chat-tools-bar">
-          <div className="tools-left" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <button type="button" className="tool-btn format-dialogue" title="Insertar Diálogo ('...')" onClick={() => insertFormatting('dialogue')}>
-              <FontAwesomeIcon icon={faCommentDots} style={{ color: '#ffd36b' }} /> <span>Diálogo</span>
-            </button>
-            <button type="button" className="tool-btn format-action" title="Insertar Acción (*...*)" onClick={() => insertFormatting('action')}>
-              <FontAwesomeIcon icon={faRunning} style={{ color: '#6ee7b7' }} /> <span>Acción</span>
-            </button>
-            <button type="button" className="tool-btn format-thought" title="Insertar Pensamiento (~...~)" onClick={() => insertFormatting('thought')}>
-              <FontAwesomeIcon icon={faBrain} style={{ color: '#c084fc' }} /> <span>Pensamiento</span>
-            </button>
-            <button type="button" className="tool-btn format-highlight" title="Insertar Resaltado (==...==)" onClick={() => insertFormatting('highlight')}>
-              <FontAwesomeIcon icon={faHighlighter} style={{ color: '#fbbf24' }} /> <span>Resaltar</span>
-            </button>
-            
-            {/* Toggle de Generación Automática */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px', borderLeft: '1px solid rgba(255,255,255,0.12)', paddingLeft: '12px' }}>
-              <input 
-                type="checkbox" 
-                id="autoGenCardsCheck" 
-                checked={autoGenCards} 
-                onChange={(e) => {
-                  handleToggleAutoGenCards(e.target.checked);
-                  if (e.target.checked) {
-                    setIsSelectingForCard(false);
-                    setSelectedMessagesForCard([]);
-                  }
-                }} 
-                style={{ cursor: 'pointer', accentColor: '#ffd36b' }}
-              />
-              <label htmlFor="autoGenCardsCheck" style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', userSelect: 'none' }} title="Permite a la IA Dungeon Mind sugerir y crear tarjetas de lore de forma automática">
-                Generar tarjetas con IA
-              </label>
-            </div>
-            
-            {/* Si está inactivo el automático, mostramos el botón Crear Tarjeta */}
-            {!autoGenCards && (
-              <button 
-                type="button" 
-                onClick={() => {
-                  setIsSelectingForCard(prev => !prev);
-                  setSelectedMessagesForCard([]);
-                }}
-                style={{ 
-                  marginLeft: '12px', 
-                  background: isSelectingForCard ? 'rgba(235, 87, 87, 0.15)' : 'rgba(255, 211, 107, 0.12)', 
-                  border: isSelectingForCard ? '1px solid rgba(235, 87, 87, 0.3)' : '1px solid rgba(255, 211, 107, 0.3)', 
-                  color: isSelectingForCard ? '#eb5757' : '#ffd36b', 
-                  borderRadius: '4px', 
-                  padding: '3px 10px', 
-                  fontSize: '0.75rem', 
-                  fontWeight: 'bold', 
-                  cursor: 'pointer' 
-                }}
-              >
-                {isSelectingForCard ? 'Cancelar creación' : 'Crear tarjeta'}
-              </button>
-            )}
-
-            {/* Conmutador Rápido Shift+Enter para enviar */}
-            <button 
-              type="button" 
-              onClick={() => {
-                const nextVal = chatSettings?.sendOnShiftEnter === false ? true : false;
-                onUpdateChatSettings({ ...chatSettings, sendOnShiftEnter: nextVal });
-              }}
-              style={{ 
-                marginLeft: '10px', 
-                background: chatSettings?.sendOnShiftEnter !== false ? 'rgba(255, 211, 107, 0.12)' : 'rgba(255, 255, 255, 0.05)', 
-                border: chatSettings?.sendOnShiftEnter !== false ? '1px solid rgba(255, 211, 107, 0.35)' : '1px solid rgba(255, 255, 255, 0.15)', 
-                color: chatSettings?.sendOnShiftEnter !== false ? '#ffd36b' : 'rgba(255, 255, 255, 0.45)', 
-                borderRadius: '4px', 
-                padding: '3px 8px', 
-                fontSize: '0.74rem', 
-                fontWeight: 'bold', 
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px'
-              }}
-              title={chatSettings?.sendOnShiftEnter !== false ? "Shift+Enter para enviar: ACTIVADO (clic para desactivar)" : "Shift+Enter para enviar: DESACTIVADO (clic para activar)"}
-            >
-              <FontAwesomeIcon icon={faKeyboard} />
-              <span>Shift+↵ {chatSettings?.sendOnShiftEnter !== false ? 'ON' : 'OFF'}</span>
-            </button>
-
-            {/* Botón de Transparencia Total / Ver Fondo */}
-            {wallpaperUrl && (
-              <button
-                type="button"
-                onClick={() => setIsPeekTransparent(prev => !prev)}
-                style={{
-                  marginLeft: '8px',
-                  background: isPeekTransparent ? 'rgba(255, 211, 107, 0.25)' : 'rgba(255, 255, 255, 0.05)',
-                  border: isPeekTransparent ? '1px solid #ffd36b' : '1px solid rgba(255, 255, 255, 0.15)',
-                  color: isPeekTransparent ? '#ffd36b' : 'rgba(255, 255, 255, 0.7)',
-                  borderRadius: '4px',
-                  padding: '3px 8px',
-                  fontSize: '0.74rem',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px'
-                }}
-                title={isPeekTransparent ? "Restaurar vista del chat" : "Ocultar chat para contemplar el fondo de pantalla"}
-              >
-                <FontAwesomeIcon icon={isPeekTransparent ? faEyeSlash : faEye} />
-                <span>{isPeekTransparent ? 'Chat Oculto' : 'Ver Fondo'}</span>
-              </button>
-            )}
-
-            {/* Botón para reabrir el panel de personaje si se cerró */}
-            {chatSettings.showCharacterSidebar !== false && isCharacterSidebarClosed && activeCharacter && (
-              <button
-                type="button"
-                onClick={() => setIsCharacterSidebarClosed(false)}
-                style={{
-                  marginLeft: '8px',
-                  background: 'rgba(255, 211, 107, 0.12)',
-                  border: '1px solid rgba(255, 211, 107, 0.35)',
-                  color: '#ffd36b',
-                  borderRadius: '4px',
-                  padding: '3px 8px',
-                  fontSize: '0.74rem',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px'
-                }}
-                title="Mostrar panel de personaje (Zona B)"
-              >
-                <FontAwesomeIcon icon={faUserCircle} />
-                <span>Retrato</span>
-              </button>
-            )}
-          </div>
-
-          <div className="tools-right">
-            <button type="button" className="tool-btn action" title="Pedir a la IA que continúe" onClick={handleContinue} disabled={isSending}>
-              <FontAwesomeIcon icon={faPlay} /> <span>Continuar</span>
-            </button>
-            <button type="button" className="tool-btn action" title="Rehacer última respuesta de la IA" onClick={() => handleRedo()} disabled={isSending}>
-              <FontAwesomeIcon icon={faUndo} /> <span>Rehacer</span>
-            </button>
-            <button type="button" className="tool-btn action" title="Escenificar (Generar Imagen)" onClick={() => setIsStagingOpen(true)}>
-              <FontAwesomeIcon icon={faImage} /> <span>Escenificar</span>
-            </button>
-            <button type="button" className="tool-btn action" title="Ramificar/Bifurcar chat" onClick={() => onBranchChat && onBranchChat(chat, messages)}>
-              <FontAwesomeIcon icon={faCodeBranch} /> <span>Ramificar</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Input de Mensajes */}
-        <div className="chat-input-area">
-          <textarea
-            ref={inputRef}
-            className="chat-textarea"
-            placeholder='Escribe tu acción o diálogo... Usa "para hablar" o *para acciones*'
-            value={inputMsg}
-            onChange={(e) => setInputMsg(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const sendWithShift = chatSettings?.sendOnShiftEnter !== false;
-                if (sendWithShift) {
-                  if (e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                } else {
-                  if (!e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }
-              }
-            }}
-            rows={2}
-          />
-          <button 
-            className="chat-send-btn" 
-            title={chatSettings?.sendOnShiftEnter !== false ? "Enviar (Shift + Enter)" : "Enviar (Enter)"} 
-            onClick={() => handleSend()} 
-            disabled={isSending}
-          >
-            <FontAwesomeIcon icon={faPaperPlane} />
-          </button>
-        </div>
-      </div>
+      <ChatInputDock
+        input={inputMsg}
+        setInput={setInputMsg}
+        isSending={isSending}
+        onSendMessage={(e) => {
+          if (e && e.preventDefault) e.preventDefault();
+          handleSend();
+        }}
+        onContinue={handleContinue}
+        onRedo={() => handleRedo(null)}
+        onOpenStaging={() => setIsStagingOpen(true)}
+        onBranchChat={() => onBranchChat && onBranchChat(chat, messages)}
+        onTogglePeek={() => setIsPeekTransparent(prev => !prev)}
+        isPeekTransparent={isPeekTransparent}
+        autoGenCards={autoGenCards}
+        onToggleAutoGenCards={handleToggleAutoGenCards}
+        isSelectingForCard={isSelectingForCard}
+        onToggleSelectingForCard={() => {
+          setIsSelectingForCard(!isSelectingForCard);
+          setSelectedMessagesForCard([]);
+        }}
+        chatSettings={chatSettings}
+        onUpdateChatSettings={onUpdateChatSettings}
+        isRecordingAudio={false}
+        onToggleAudioRecording={() => {}}
+        textareaRef={inputRef}
+        isSidebarVisible={isSidebarVisible}
+        isCharacterSidebarClosed={isCharacterSidebarClosed}
+        activeCharacter={activeCharacter}
+        onOpenSidebar={() => setIsCharacterSidebarClosed(false)}
+      />
       </div>
 
       {/* Zona B: Panel Lateral de Personajes (Retrato & Expresiones Contextuales) */}
@@ -2043,236 +1441,18 @@ ${languageDirective}
       />
 
       {/* MODAL DE ENTIDAD O TÉRMINO CLAVE CLICKEADO (COMPENDIO / LORE) - POPUP CENTRADO CON PORTAL */}
-      {activeEntityModal && createPortal(
-        <div 
-          className="char-backdrop" 
-          role="dialog" 
-          aria-modal="true" 
-          style={{ zIndex: 2900 }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setActiveEntityModal(null);
-          }}
-        >
-          <div className="char-modal" style={{ maxWidth: '580px', width: '92%', maxHeight: '88vh', overflowY: 'auto', animation: 'fadeIn 0.2s ease-out', padding: '24px', boxSizing: 'border-box' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ 
-                  background: activeEntityModal.existing ? 'rgba(110, 231, 183, 0.15)' : 'rgba(255, 211, 107, 0.15)', 
-                  color: activeEntityModal.existing ? '#6ee7b7' : '#ffd36b',
-                  border: `1px solid ${activeEntityModal.existing ? 'rgba(110, 231, 183, 0.3)' : 'rgba(255, 211, 107, 0.3)'}`,
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  fontSize: '0.75rem',
-                  fontWeight: '700'
-                }}>
-                  {activeEntityModal.existing ? '📖 Ficha en Compendio' : '✨ Término de Historia'}
-                </span>
-                <h3 style={{ margin: 0, color: '#fff', fontSize: '1.15rem' }}>{activeEntityModal.draftTitle}</h3>
-              </div>
-              <button 
-                onClick={() => setActiveEntityModal(null)}
-                style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: '1.1rem' }}
-              >
-                <FontAwesomeIcon icon={faTimes} />
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* Previsualización de Portada / Retrato si existe */}
-              {(activeEntityModal.draftCover || activeEntityModal.existing?.cover) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255, 255, 255, 0.03)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <img 
-                    src={activeEntityModal.draftCover || activeEntityModal.existing?.cover} 
-                    alt={activeEntityModal.draftTitle} 
-                    style={{ width: '56px', height: '56px', objectFit: 'cover', borderRadius: '6px', border: '1px solid rgba(255, 211, 107, 0.35)' }} 
-                  />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span style={{ fontSize: '0.78rem', color: '#6ee7b7', fontWeight: 'bold' }}>✓ Ilustración / Portada Asignada</span>
-                    <span style={{ fontSize: '0.72rem', color: 'rgba(255, 255, 255, 0.6)' }}>Se guardará en la ficha del compendio.</span>
-                  </div>
-                </div>
-              )}
-
-              {activeEntityModal.existing ? (
-                <div>
-                  <div style={{ fontSize: '0.8rem', color: '#ffd36b', marginBottom: '6px', fontWeight: '600' }}>
-                    Tipo: {activeEntityModal.existing.type || 'Escenario / Entidad'}
-                  </div>
-                  {activeEntityModal.existing.intro && (
-                    <p style={{ fontStyle: 'italic', color: 'rgba(255,255,255,0.85)', fontSize: '0.88rem', margin: '0 0 10px 0' }}>
-                      "{activeEntityModal.existing.intro}"
-                    </p>
-                  )}
-                  {activeEntityModal.existing.text && (
-                    <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px 12px', borderRadius: '6px', fontSize: '0.84rem', color: 'rgba(255,255,255,0.8)', maxHeight: '180px', overflowY: 'auto', lineHeight: '1.5' }}>
-                      {activeEntityModal.existing.text}
-                    </div>
-                  )}
-                  {activeEntityModal.existing.traits && activeEntityModal.existing.traits.length > 0 && (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
-                      {activeEntityModal.existing.traits.map((t, idx) => (
-                        <span key={idx} style={{ background: 'rgba(255,211,107,0.1)', color: '#ffd36b', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <p style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.7)', margin: '0 0 10px 0' }}>
-                    El narrador ha resaltado este elemento clave. Puedes registrarlo como tarjeta para que forme parte del compendio de tu mundo y la IA mantenga su coherencia.
-                  </p>
-                  
-                  <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                    <div style={{ flex: '1 1 180px' }}>
-                      <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Tipo de Tarjeta</label>
-                      <select 
-                        value={activeEntityModal.draftType}
-                        onChange={(e) => setActiveEntityModal(prev => ({ ...prev, draftType: e.target.value }))}
-                        style={{ width: '100%', padding: '6px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }}
-                      >
-                        <option value="Personaje">👤 Personaje / PNJ</option>
-                        <option value="Objeto">🎒 Objeto / Equipo</option>
-                        <option value="Inventario">📦 Mochila / Inventario</option>
-                        <option value="Lugar">🏰 Lugar / Escenario</option>
-                        <option value="Memoria">📜 Tarjeta de Memoria / Lore</option>
-                        <option value="Facción">🛡️ Facción / Gremio</option>
-                        <option value="Criatura">🐉 Bestia / Criatura</option>
-                      </select>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={handleGenerateTagLore}
-                        disabled={isGeneratingLore}
-                        style={{
-                          background: 'rgba(192, 132, 252, 0.15)',
-                          border: '1px solid rgba(192, 132, 252, 0.35)',
-                          color: '#c084fc',
-                          padding: '7px 11px',
-                          borderRadius: '6px',
-                          fontSize: '0.76rem',
-                          cursor: isGeneratingLore ? 'wait' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          fontWeight: '600'
-                        }}
-                        title="Generar lore con IA para este término"
-                      >
-                        <FontAwesomeIcon icon={isGeneratingLore ? faSpinner : faMagic} spin={isGeneratingLore} />
-                        <span>{isGeneratingLore ? 'Lore...' : 'Generar Lore'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleGenerateTagCover}
-                        disabled={isGeneratingTagCover}
-                        style={{
-                          background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
-                          border: 'none',
-                          color: '#0d0e16',
-                          padding: '7px 11px',
-                          borderRadius: '6px',
-                          fontSize: '0.76rem',
-                          cursor: isGeneratingTagCover ? 'wait' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          fontWeight: '700'
-                        }}
-                        title="Generar portada o retrato con IA"
-                      >
-                        <FontAwesomeIcon icon={isGeneratingTagCover ? faSpinner : faImage} spin={isGeneratingTagCover} />
-                        <span>{isGeneratingTagCover ? 'Ilustrando...' : 'Generar Portada'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '4px' }}>Descripción / Lore</label>
-                    <textarea 
-                      rows={4}
-                      value={activeEntityModal.draftText}
-                      onChange={(e) => setActiveEntityModal(prev => ({ ...prev, draftText: e.target.value, draftIntro: e.target.value.substring(0, 80) }))}
-                      placeholder="Escribe detalles sobre este personaje, lugar u objeto..."
-                      style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', resize: 'vertical', boxSizing: 'border-box' }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px' }}>
-                <div>
-                  {onOpenCreateModal && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const itemToEdit = activeEntityModal.existing || {
-                          title: activeEntityModal.draftTitle,
-                          type: activeEntityModal.draftType,
-                          intro: activeEntityModal.draftIntro,
-                          text: activeEntityModal.draftText,
-                          cover: activeEntityModal.draftCover || ''
-                        };
-                        onOpenCreateModal(activeEntityModal.draftType, itemToEdit);
-                        setActiveEntityModal(null);
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: '1px solid rgba(255,255,255,0.2)',
-                        color: 'rgba(255,255,255,0.85)',
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        fontSize: '0.78rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <FontAwesomeIcon icon={faExternalLinkAlt} /> Taller Avanzado
-                    </button>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveEntityModal(null)}
-                    style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', padding: '6px 12px', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer' }}
-                  >
-                    Cerrar
-                  </button>
-                  {!activeEntityModal.existing && (
-                    <button
-                      type="button"
-                      onClick={handleSaveTagCard}
-                      style={{
-                        background: '#ffd36b',
-                        border: 'none',
-                        color: '#0d0e16',
-                        fontWeight: '700',
-                        padding: '6px 14px',
-                        borderRadius: '6px',
-                        fontSize: '0.78rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <FontAwesomeIcon icon={faSave} /> Guardar en Compendio
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
+      {activeEntityModal && (
+        <ActiveEntityModal
+          activeEntityModal={activeEntityModal}
+          onClose={() => setActiveEntityModal(null)}
+          isGeneratingLore={isGeneratingLore}
+          isGeneratingTagCover={isGeneratingTagCover}
+          onGenerateLore={handleGenerateTagLore}
+          onGenerateCover={handleGenerateTagCover}
+          onSaveEntity={handleSaveTagCard}
+          onOpenCreateModal={onOpenCreateModal}
+          onChangeField={(field, value) => setActiveEntityModal(prev => ({ ...prev, [field]: value }))}
+        />
       )}
 
       {confirmDialog && (

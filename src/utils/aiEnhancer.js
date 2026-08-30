@@ -45,7 +45,7 @@ Responde DIRECTAMENTE con el contenido solicitado, sin preámbulos, saludos, ni 
       break;
 
     case 'intro':
-      userPrompt = `Basándote en este contexto:\n${contextStr}\n\nEscribe una introducción o saludo inicial inmersivo en 1 o 2 párrafos para este ${entityType}. Si es un personaje, describe su primer contacto o actitud inicial. Si es un lugar o escenario, describe la primera impresión al llegar.`;
+      userPrompt = `Basándote en este contexto:\n${contextStr}\n\nEscribe una introducción breve y concisa de máximo 250 caracteres para este ${entityType}. Si es un personaje, describe su actitud o esencia. Si es un lugar o escenario, describe la primera impresión al llegar. Responde con un único párrafo conciso de máximo 250 caracteres.`;
       break;
 
     case 'lore':
@@ -164,7 +164,7 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido (sin código markdown d
 Para Tarjetas (Personaje, Lugar, Facción, etc.):
 {
   "title": "Nombre pulido de la entidad",
-  "intro": "Párrafo breve de introducción o saludo inicial (máx 2 párrafos)",
+  "intro": "Párrafo breve y conciso de introducción para el compendio (máximo 250 caracteres)",
   "text": "Descripción detallada, apariencia física, lore, vestimenta y personalidad",
   "traits": ["Rasgo 1", "Rasgo 2", "Rasgo 3", "Rasgo 4"],
   "tags": ["Tag1", "Tag2", "Tag3"],
@@ -224,6 +224,9 @@ Responde ÚNICAMENTE con el objeto JSON.`;
     if (jsonMatch) raw = jsonMatch[0];
 
     const parsed = JSON.parse(raw);
+    if (parsed.intro && typeof parsed.intro === 'string') {
+      parsed.intro = parsed.intro.trim().substring(0, 250);
+    }
     return parsed;
   } catch (error) {
     console.warn('[AI Enhancer]: Failed to auto-complete entity:', error);

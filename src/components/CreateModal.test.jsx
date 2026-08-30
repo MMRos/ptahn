@@ -76,7 +76,7 @@ describe('CreateModal Component', () => {
     const titleInput = screen.getByPlaceholderText(/nombre o título/i);
     expect(titleInput.value).toBe('');
 
-    const introInput = screen.getByPlaceholderText(/primer contacto o introducción/i);
+    const introInput = screen.getByPlaceholderText(/introducción/i);
     expect(introInput.value).toBe('');
 
     const textInput = screen.getByPlaceholderText(/detalles visuales, vestimenta/i);

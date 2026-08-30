@@ -58,15 +58,29 @@ export function getCardProvenance(card) {
 }
 
 /**
- * Filters and sorts Compendium cards.
- * By default (showChildVersions: false), child instances are filtered out.
+ * Filters and sorts Compendium cards and scenarios.
+ * Supports both signatures: filterCreationsCards(cards, options) and filterCreationsCards({ cards, ...options })
  */
-export function filterCreationsCards(cards = [], {
-  searchQuery = '',
-  cardTypeFilter = 'all',
-  showChildVersions = false,
-  sortBy = 'recent'
-} = {}) {
+export function filterCreationsCards(cardsOrOptions = [], maybeOptions = {}) {
+  let cards = [];
+  let options = {};
+
+  if (Array.isArray(cardsOrOptions)) {
+    cards = cardsOrOptions;
+    options = maybeOptions || {};
+  } else if (cardsOrOptions && typeof cardsOrOptions === 'object') {
+    cards = cardsOrOptions.cards || [];
+    options = cardsOrOptions;
+  }
+
+  const {
+    searchQuery = '',
+    cardTypeFilter = 'all',
+    scenarioCategoryFilter = 'all',
+    showChildVersions = false,
+    sortBy = 'recent'
+  } = options;
+
   let list = Array.isArray(cards) ? [...cards] : [];
 
   // 1. Child versions filter (hidden by default)
@@ -81,35 +95,55 @@ export function filterCreationsCards(cards = [], {
       (c.title || c.name || '').toLowerCase().includes(q) ||
       (c.type || '').toLowerCase().includes(q) ||
       (c.subtype || '').toLowerCase().includes(q) ||
-      (c.description || c.intro || c.text || '').toLowerCase().includes(q) ||
+      (c.description || c.intro || c.text || c.bio || '').toLowerCase().includes(q) ||
       (c.scenarioName && c.scenarioName.toLowerCase().includes(q)) ||
-      (c.tags && c.tags.some(t => t.toLowerCase().includes(q)))
+      (c.tags && Array.isArray(c.tags) && c.tags.some(t => String(t).toLowerCase().includes(q)))
     );
   }
 
   // 3. Card type filter
   if (cardTypeFilter && cardTypeFilter !== 'all') {
-    list = list.filter(c => (c.type || '').toLowerCase() === cardTypeFilter.toLowerCase());
+    const filterLower = cardTypeFilter.toLowerCase();
+    list = list.filter(c => {
+      const typeLower = (c.type || '').toLowerCase();
+      if (filterLower === 'historia' || filterLower === 'escenario') {
+        return typeLower === 'historia' || typeLower === 'escenario' || c.isScenario;
+      }
+      return typeLower === filterLower;
+    });
   }
 
-  // 4. Sorting
+  // 4. Scenario category filter
+  if (scenarioCategoryFilter && scenarioCategoryFilter !== 'all') {
+    const catLower = scenarioCategoryFilter.toLowerCase();
+    list = list.filter(c => {
+      if (c.category && c.category.toLowerCase() === catLower) return true;
+      if (c.tags && Array.isArray(c.tags) && c.tags.some(t => String(t).toLowerCase() === catLower)) return true;
+      return false;
+    });
+  }
+
+  // 5. Sorting
   list.sort((a, b) => {
     if (sortBy === 'name_asc') return (a.title || a.name || '').localeCompare(b.title || b.name || '');
     if (sortBy === 'name_desc') return (b.title || b.name || '').localeCompare(a.title || a.name || '');
     if (sortBy === 'type') {
       const typePriority = { 
-        personaje: 1, 
-        lugar: 2, 
-        objeto: 3, 
-        criatura: 4, 
-        raza: 5, 
-        faccion: 6, 
-        'facción': 6, 
-        memoria: 7, 
-        inventario: 8, 
-        regla: 9, 
-        historia: 10, 
-        otros: 11 
+        historia: 1, 
+        escenario: 1, 
+        personaje: 2, 
+        lugar: 3, 
+        objeto: 4, 
+        criatura: 5, 
+        raza: 6, 
+        faccion: 7, 
+        'facción': 7, 
+        memoria: 8, 
+        inventario: 9, 
+        narrador: 10,
+        herramienta: 11,
+        regla: 12, 
+        otros: 13 
       };
       const pA = typePriority[(a.type || '').toLowerCase()] || 99;
       const pB = typePriority[(b.type || '').toLowerCase()] || 99;

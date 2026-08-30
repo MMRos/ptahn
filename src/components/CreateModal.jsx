@@ -1,20 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
+  faCrop,
   faTimes, 
   faSave, 
   faImage, 
   faImages, 
   faMagic, 
-  faEdit, 
-  faRedo 
+  faEdit,
+  faRedo,
+  faFolderOpen,
+  faPlus
 } from '@fortawesome/free-solid-svg-icons';
 import NarratorForm from './NarratorForm';
 import ToolWorkshopForm from './ToolWorkshopForm';
 import { generateImageLocal, editImageWithAI } from '../utils/localAIStudio';
 import { enhanceFieldWithAI, autoCompleteEntityWithAI } from '../utils/aiEnhancer';
 import '../pages/create.css';
+import ModalCloseButton from './common/ModalCloseButton';
+import ImageCropperModal from './ImageCropperModal';
 
 const CARD_TYPES = ['Personaje', 'Historia', 'Inventario', 'Memoria', 'Raza', 'Facción', 'Regla', 'Criatura', 'Objeto', 'Lugar', 'Otros'];
 const CATEGORIES = [
@@ -137,6 +142,9 @@ export default function CreateModal({
       
   // Galería de imágenes y expresiones del personaje
   const [characterImages, setCharacterImages] = useState([]);
+  const [customImageUrl, setCustomImageUrl] = useState('');
+  const fileInputRef = useRef(null);
+  const [cropModalImage, setCropModalImage] = useState(null);
     
   // Highlight indices para navegación por teclado
         
@@ -249,6 +257,7 @@ export default function CreateModal({
           } else {
             setCharacterImages([]);
             setSelectedGuideIds([]);
+            setCustomImageUrl('');
           }
                             }
       } else {
@@ -279,6 +288,7 @@ export default function CreateModal({
         // Limpieza de imágenes
         setCharacterImages([]);
         setSelectedGuideIds([]);
+        setCustomImageUrl('');
         setLastGenParams(null);
         setCoverAiPrompt('');
         setCharAiPrompt('');
@@ -547,6 +557,79 @@ export default function CreateModal({
     setIsDirty(true);
   };
 
+  // Selección y carga unificada de una o múltiples imágenes locales desde el disco duro
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    let loadedCount = 0;
+    const newImgs = [];
+
+    files.forEach((file, index) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result;
+        if (dataUrl) {
+          newImgs.push({
+            id: `img-${Date.now()}-${index}`,
+            url: dataUrl,
+            label: file.name ? file.name.replace(/\.[^/.]+$/, '') : (characterImages.length === 0 && newImgs.length === 0 ? 'Normal / Principal' : `Expresión ${characterImages.length + newImgs.length + 1}`),
+            isDefault: false
+          });
+        }
+        loadedCount++;
+        if (loadedCount === files.length) {
+          if (newImgs.length > 0) {
+            setCustomImageUrl(files.length === 1 ? files[0].name : `${files.length} imágenes cargadas`);
+            setCharacterImages(prev => {
+              if (prev.length === 0) {
+                newImgs[0].isDefault = true;
+                setSelectedGuideIds([newImgs[0].id]);
+                setCover(newImgs[0].url);
+              }
+              return [...prev, ...newImgs];
+            });
+            setIsDirty(true);
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const handleUpdateImageCropped = (id, croppedUrl) => {
+    setCharacterImages(prev => prev.map(img => {
+      if (img.id === id) {
+        if (img.isDefault) {
+          setCover(croppedUrl);
+        }
+        return { ...img, url: croppedUrl };
+      }
+      return img;
+    }));
+    setIsDirty(true);
+  };
+
+  // Añadir imagen directamente por URL introducida
+  const handleAddCustomUrl = () => {
+    if (!customImageUrl.trim()) return;
+    const url = customImageUrl.trim();
+    const newImg = {
+      id: `img-${Date.now()}`,
+      url: url,
+      label: characterImages.length === 0 ? 'Normal / Principal' : `Expresión ${characterImages.length + 1}`,
+      isDefault: characterImages.length === 0
+    };
+    setCharacterImages(prev => [...prev, newImg]);
+    if (characterImages.length === 0) {
+      setSelectedGuideIds([newImg.id]);
+      setCover(url);
+    }
+    setCustomImageUrl('');
+    setIsDirty(true);
+  };
+
   const handleToggleGuideSelection = (id) => {
     setSelectedGuideIds(prev => 
       prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id]
@@ -723,6 +806,16 @@ export default function CreateModal({
         boxShadow: '0 12px 40px rgba(0,0,0,0.85)'
       }}>
 
+        {/* Botón X SIEMPRE anclado en la esquina superior derecha */}
+        <ModalCloseButton 
+          onClick={handleCloseAttempt} 
+          title="Cerrar modal (Esc)"
+          ariaLabel="Cerrar modal de creación"
+          top="12px"
+          right="14px"
+          zIndex={200}
+        />
+
         {/* 1. BARRA SUPERIOR CONSTANTE (STICKY HEADER) */}
         <div className="create-modal-sticky-header" style={{
           position: 'sticky',
@@ -731,7 +824,7 @@ export default function CreateModal({
           background: 'rgba(18, 16, 26, 0.98)',
           backdropFilter: 'blur(12px)',
           borderBottom: '1px solid rgba(255, 211, 107, 0.18)',
-          padding: '12px 18px',
+          padding: '12px 56px 12px 18px',
           display: 'flex',
           flexDirection: 'column',
           gap: '8px',
@@ -1141,7 +1234,84 @@ export default function CreateModal({
                   </div>
                 )}
 
-                {/* Generador de imágenes */}
+                {/* 1. Input Unificado de URL / Archivo de Disco */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={customImageUrl}
+                    onChange={(e) => setCustomImageUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomUrl();
+                      }
+                    }}
+                    placeholder="URL de imagen o dirección de archivo cargado..."
+                    style={{
+                      flex: 1,
+                      minWidth: '220px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: '6px',
+                      padding: '7px 10px',
+                      color: '#fff',
+                      fontSize: '0.82rem'
+                    }}
+                  />
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelect}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      background: 'rgba(255,255,255,0.08)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      color: '#ffd36b',
+                      fontWeight: '600',
+                      padding: '7px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.82rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap'
+                    }}
+                    title="Buscar archivo de imagen en el disco duro"
+                  >
+                    <FontAwesomeIcon icon={faFolderOpen} /> Buscar en disco
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddCustomUrl}
+                    disabled={!customImageUrl.trim()}
+                    style={{
+                      background: customImageUrl.trim() ? 'rgba(255, 211, 107, 0.2)' : 'rgba(255,255,255,0.04)',
+                      border: customImageUrl.trim() ? '1px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
+                      color: customImageUrl.trim() ? '#ffd36b' : 'rgba(255,255,255,0.4)',
+                      fontWeight: '700',
+                      padding: '7px 12px',
+                      borderRadius: '6px',
+                      cursor: customImageUrl.trim() ? 'pointer' : 'default',
+                      fontSize: '0.82rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      whiteSpace: 'nowrap'
+                    }}
+                    title="Añadir imagen por URL"
+                  >
+                    <FontAwesomeIcon icon={faPlus} /> Añadir
+                  </button>
+                </div>
+
+                {/* 2. Generador de imágenes con IA */}
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
                   <input
                     type="text"
@@ -1223,6 +1393,14 @@ export default function CreateModal({
                           <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: '4px' }}>
                             <button
                               type="button"
+                              onClick={() => setCropModalImage(img)}
+                              title="Recortar y reencuadrar imagen"
+                              style={{ background: 'rgba(255, 211, 107, 0.9)', border: 'none', color: '#000', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
+                            >
+                              <FontAwesomeIcon icon={faCrop} />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleOpenEditImageModal(img)}
                               title="Modificar esta imagen con IA (img2img)"
                               style={{ background: 'rgba(99, 102, 241, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
@@ -1263,12 +1441,21 @@ export default function CreateModal({
                 )}
               </div>
 
-              {/* INTRODUCCIÓN / SALUDO INICIAL */}
+              {/* INTRODUCCIÓN (Límite 250 caracteres e indexada para el contexto) */}
               <div className="field-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                    {itemType === 'Escenario' ? 'Introducción / Sinopsis' : 'Introducción / Saludo Inicial'}
-                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
+                      Introducción
+                    </label>
+                    <span style={{ 
+                      fontSize: '0.72rem', 
+                      color: (intro || '').length >= 240 ? '#f87171' : 'rgba(255,255,255,0.45)',
+                      fontWeight: '600'
+                    }}>
+                      {(intro || '').length}/250
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={() => handleEnhanceField('intro')}
@@ -1280,8 +1467,9 @@ export default function CreateModal({
                 </div>
                 <textarea
                   value={intro}
-                  onChange={(e) => handleFieldChange(setIntro, e.target.value)}
-                  placeholder="Escribe el primer contacto o introducción..."
+                  onChange={(e) => handleFieldChange(setIntro, e.target.value.slice(0, 250))}
+                  maxLength={250}
+                  placeholder="Breve introducción de la entidad para el índice de contexto (máximo 250 caracteres)..."
                   rows={3}
                   style={{
                     width: '100%',
@@ -1620,6 +1808,20 @@ export default function CreateModal({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Recorte de Imagen */}
+      {cropModalImage && (
+        <ImageCropperModal
+          isOpen={!!cropModalImage}
+          imageSrc={cropModalImage.url}
+          aspectRatio={itemType === 'Escenario' ? 16 / 9 : 3 / 4}
+          onClose={() => setCropModalImage(null)}
+          onCropComplete={(croppedUrl) => {
+            handleUpdateImageCropped(cropModalImage.id, croppedUrl);
+            setCropModalImage(null);
+          }}
+        />
       )}
 
       {/* Modal de Advertencia de Cambios no Guardados */}
