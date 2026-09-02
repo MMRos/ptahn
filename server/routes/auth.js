@@ -75,7 +75,9 @@ router.post('/register', (req, res) => {
       return res.status(400).json({ success: false, error: 'Las contraseñas no coinciden' });
     }
 
-    const user = registerUser({ email, username, password, bio, avatar, coverUrl, preferences, role });
+    // Public registration can only register as 'user' (or 'guest'), never 'admin' or 'it'
+    const cleanRole = (role === 'guest') ? 'guest' : undefined;
+    const user = registerUser({ email, username, password, bio, avatar, coverUrl, preferences, role: cleanRole });
     const token = generateSessionToken(user.id, Boolean(rememberMe));
 
     res.status(201).json({

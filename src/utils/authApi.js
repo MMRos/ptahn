@@ -250,12 +250,15 @@ export async function fetchCurrentUser(baseUrl = getServerBaseUrl()) {
         saveStoredAuth(parsed.data.user, token, rememberMe !== false);
         return parsed.data;
       }
+      if (res.status === 401) {
+        clearStoredAuth();
+      }
     } catch (error) {
       if (localUser) return { success: true, user: localUser, offline: true };
     }
   }
 
-  // Si no hay sesión guardada en este ordenador, conectar automáticamente con la cuenta dueña local (Azgael)
+  // Si no hay sesión válida en este ordenador, conectar automáticamente con la cuenta dueña local (Azgael)
   try {
     const ownerRes = await fetch(`${baseUrl}/api/auth/local-owner`);
     const ownerParsed = await safeParseResponse(ownerRes);

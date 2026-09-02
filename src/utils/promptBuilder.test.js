@@ -86,4 +86,50 @@ describe('promptBuilder Utilities', () => {
     expect(prompt).toContain('The HUMAN PLAYER (Protagonist) is: "Azgael"');
     expect(prompt).toContain('ABSOLUTELY FORBIDDEN to name any NPC, creature, or world character "Azgael"');
   });
+
+  test('buildStorytellerSystemPrompt anchors in media res scene state to prevent context drift', () => {
+    const prompt = buildStorytellerSystemPrompt({
+      scenario: { title: 'Tierra de Bestias' },
+      userChar: { title: 'Vampiro' },
+      messages: [{ from: 'user', text: 'coloco el sable en su yugular' }],
+      sceneContext: {
+        turn: 3,
+        primaryTarget: 'Lobo Gris',
+        targetType: 'Criatura',
+        targetTraits: ['Feroz', 'Depredador'],
+        activeLocation: 'Claro en la llanura',
+        timeOfDay: 'Amanecer',
+        weather: 'Viento fuerte'
+      }
+    });
+
+    expect(prompt).toContain('[ESTADO ACTUAL DE LA ESCENA IN MEDIA RES - ANCLAJE DE COHERENCIA]');
+    expect(prompt).toContain('SECUENCIA / TURNO ACTUAL: #3.');
+    expect(prompt).toContain('MOMENTO DEL DÍA: "Amanecer".');
+    expect(prompt).toContain('CLIMA / CONDICIÓN ATMOSFÉRICA: "Viento fuerte".');
+    expect(prompt).toContain('FOCO PRINCIPAL Y OBJETIVO DE LA ACCIÓN: "Lobo Gris" (Criatura) [Rasgos: Feroz, Depredador]');
+    expect(prompt).toContain('ENTORNO FÍSICO INMEDIATO: "Claro en la llanura"');
+    expect(prompt).toContain('QUEDA TERMINANTEMENTE PROHIBIDO sustituir, transformar o convertir a este sujeto');
+    expect(prompt).toContain('QUEDA TERMINANTEMENTE PROHIBIDO alterar repentinamente el entorno físico, el clima o el momento del día');
+  });
+
+  test('buildStorytellerSystemPrompt strictly eliminates synthetic <think> scratchpads and 4-phase reasoning', () => {
+    const prompt = buildStorytellerSystemPrompt({
+      scenario: { title: 'Tierra de Bestias' },
+      userChar: { title: 'Azgael' },
+      messages: [{ from: 'user', text: 'Avanzo con cautela.' }]
+    });
+
+    expect(prompt).not.toContain('<think>');
+    expect(prompt).not.toContain('</think>');
+    expect(prompt).not.toContain('FASE 1: PLANIFICACIÓN');
+    expect(prompt).not.toContain('FASE 2: REDACCIÓN');
+    expect(prompt).not.toContain('AUTO-CRÍTICA');
+    expect(prompt).not.toContain('SALIDA FINAL');
+
+    // Asserts strict 3rd person narrative rule
+    expect(prompt).toContain('STRICT THIRD-PERSON');
+    expect(prompt).toContain('FORBIDDEN to use invasive second-person style');
+  });
 });
+

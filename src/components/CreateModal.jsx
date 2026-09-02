@@ -11,7 +11,9 @@ import {
   faEdit,
   faRedo,
   faFolderOpen,
-  faPlus
+  faPlus,
+  faSuitcase,
+  faTrashAlt
 } from '@fortawesome/free-solid-svg-icons';
 import NarratorForm from './NarratorForm';
 import ToolWorkshopForm from './ToolWorkshopForm';
@@ -20,6 +22,9 @@ import { enhanceFieldWithAI, autoCompleteEntityWithAI } from '../utils/aiEnhance
 import '../pages/create.css';
 import ModalCloseButton from './common/ModalCloseButton';
 import ImageCropperModal from './ImageCropperModal';
+import ConnectionSelector from './ConnectionSelector';
+import ScenarioMediaHeader from './create/ScenarioMediaHeader';
+import { normalizeInitialMessages } from '../utils/scenarioScoping';
 
 const CARD_TYPES = ['Personaje', 'Historia', 'Inventario', 'Memoria', 'Raza', 'Facción', 'Regla', 'Criatura', 'Objeto', 'Lugar', 'Otros'];
 const CATEGORIES = [
@@ -58,7 +63,10 @@ export default function CreateModal({
   initialType = 'Personaje', // Default a Personaje
   appData = {},
   onSaveItem = () => { },
-  editItem = null
+  editItem = null,
+  currentUser = null,
+  folderHandle = null,
+  zIndex = 1200
 }) {
   const [itemType, setItemType] = useState(initialType || 'Personaje');
   const [isDirty, setIsDirty] = useState(false);
@@ -74,6 +82,7 @@ export default function CreateModal({
   const [isPublic, setIsPublic] = useState(false);
   const [selectedCards, setSelectedCards] = useState([]);
   const [isScenario, setIsScenario] = useState(false);
+  const [nestedCardModalState, setNestedCardModalState] = useState(null);
 
   // States para rasgos de personaje (Traits)
   const [selectedTraits, setSelectedTraits] = useState([]);
@@ -87,6 +96,8 @@ export default function CreateModal({
   // States para clasificación on-demand y presets de imágenes
         
   // States específicos para Escenario
+  const [initialMessages, setInitialMessages] = useState([{ id: 'init-1', title: 'Inicio 1', text: '' }]);
+  const [activeInitialMessageId, setActiveInitialMessageId] = useState('init-1');
   const [presentation, setPresentation] = useState('');
   const [baseContext, setBaseContext] = useState('');
   const [aiInstructions, setAiInstructions] = useState('');
@@ -187,7 +198,12 @@ export default function CreateModal({
                     setIntro(editItem.intro || '');
           setText(editItem.text || '');
           setCover(editItem.cover || '');
-          setPresentation(editItem.presentation || '');
+          const normInits = normalizeInitialMessages(editItem);
+          setInitialMessages(normInits);
+          const activeInitId = editItem.activeInitialMessageId || normInits[0]?.id || 'init-1';
+          setActiveInitialMessageId(activeInitId);
+          const activeInitMsg = normInits.find(m => m.id === activeInitId) || normInits[0];
+          setPresentation(activeInitMsg?.text || editItem.presentation || '');
           setBaseContext(editItem.baseContext || '');
           setAiInstructions(editItem.aiInstructions || '');
           setSelectedTags(editItem.tags || []);
@@ -273,6 +289,8 @@ export default function CreateModal({
                 setIntro('');
         setText(''); // Limpieza obligatoria del texto
         setCover('');
+        setInitialMessages([{ id: 'init-1', title: 'Inicio 1', text: '' }]);
+        setActiveInitialMessageId('init-1');
         setPresentation('');
         setBaseContext('');
         setAiInstructions('');
@@ -330,7 +348,49 @@ export default function CreateModal({
   // Si no está abierto el modal, no renderizar nada
   if (!isOpen) return null;
 
-  const isWide = itemType === 'Escenario' || (itemType === 'Narrador' && narratorTools.length > 0);
+  const handleGenerateAiCover = async (prompt = '', style = '') => {
+    if (prompt) setCoverAiPrompt(prompt);
+    if (style) setCoverAiStyle(style);
+    const rawPrompt = prompt || coverAiPrompt;
+    if (!rawPrompt.trim() && !title.trim()) {
+      alert('Introduce una descripción o nombre para guiar la generación de la imagen.');
+      return;
+    }
+
+    setIsGeneratingAiImage(true);
+    try {
+      const promptToUse = rawPrompt.trim() || `${title}. ${intro || ''}`;
+      const styleToUse = style || coverAiStyle;
+      const width = 768;
+      const height = 512;
+
+      setLastGenParams({
+        prompt: promptToUse,
+        style: styleToUse,
+        target: 'cover',
+        width,
+        height,
+        guides: []
+      });
+
+      const generatedUrl = await generateImageLocal(promptToUse, {
+        style: styleToUse,
+        width,
+        height
+      });
+
+      if (generatedUrl) {
+        setCover(generatedUrl);
+        setIsDirty(true);
+      }
+    } catch (err) {
+      alert(`Error al generar imagen con IA: ${err.message}`);
+    } finally {
+      setIsGeneratingAiImage(false);
+    }
+  };
+
+  const isWide = itemType === 'Escenario' || itemType === 'Herramienta' || itemType === 'Inventario' || (itemType === 'Narrador' && narratorTools.length > 0);
 
   // AI Field Enhancement Handler
   const handleEnhanceField = async (field) => {
@@ -368,6 +428,7 @@ export default function CreateModal({
         setSelectedTags(merged);
       } else if (field === 'scenario_presentation' && typeof result === 'string') {
         setPresentation(result);
+        setInitialMessages(prev => prev.map(m => m.id === activeInitialMessageId ? { ...m, text: result } : m));
       } else if (field === 'scenario_context' && typeof result === 'string') {
         setBaseContext(result);
       } else if (field === 'scenario_instructions' && typeof result === 'string') {
@@ -380,6 +441,49 @@ export default function CreateModal({
     } finally {
       setIsEnhancingField(null);
     }
+  };
+
+  // Handlers para pestañas de múltiples mensajes iniciales en Escenarios
+  const handleSelectInitialMessageTab = (tabId) => {
+    setInitialMessages(prev => prev.map(m => m.id === activeInitialMessageId ? { ...m, text: presentation } : m));
+    setActiveInitialMessageId(tabId);
+    const target = initialMessages.find(m => m.id === tabId);
+    setPresentation(target ? target.text : '');
+  };
+
+  const handleAddInitialMessageTab = () => {
+    if (initialMessages.length >= 10) return;
+    const newId = `init-${Date.now()}`;
+    const newTitle = `Inicio ${initialMessages.length + 1}`;
+    const updated = initialMessages.map(m => m.id === activeInitialMessageId ? { ...m, text: presentation } : m);
+    setInitialMessages([...updated, { id: newId, title: newTitle, text: '' }]);
+    setActiveInitialMessageId(newId);
+    setPresentation('');
+    setIsDirty(true);
+  };
+
+  const handleRemoveInitialMessageTab = (tabId, e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (initialMessages.length <= 1) return;
+    const filtered = initialMessages.filter(m => m.id !== tabId);
+    setInitialMessages(filtered);
+    if (activeInitialMessageId === tabId) {
+      const nextTab = filtered[0];
+      setActiveInitialMessageId(nextTab.id);
+      setPresentation(nextTab.text);
+    }
+    setIsDirty(true);
+  };
+
+  const handleRenameInitialMessageTab = (tabId, newTitle) => {
+    setInitialMessages(prev => prev.map(m => m.id === tabId ? { ...m, title: newTitle } : m));
+    setIsDirty(true);
+  };
+
+  const handleInitialMessageTextChange = (newText) => {
+    setPresentation(newText);
+    setInitialMessages(prev => prev.map(m => m.id === activeInitialMessageId ? { ...m, text: newText } : m));
+    setIsDirty(true);
   };
 
   // AI Auto-Complete All Handler
@@ -447,13 +551,21 @@ export default function CreateModal({
       if (!editItem) narratorData.createdAt = new Date().toISOString();
       onSaveItem({ type: 'narrator', data: narratorData, isEdit: !!editItem });
     } else if (itemType === 'Escenario') {
+      const finalInitialMessages = initialMessages.map(m => 
+        m.id === activeInitialMessageId ? { ...m, text: presentation.trim() } : { ...m, text: (m.text || '').trim() }
+      );
+      const activeObj = finalInitialMessages.find(m => m.id === activeInitialMessageId) || finalInitialMessages[0];
+      const activeText = activeObj ? activeObj.text : presentation.trim();
+
       const scenarioData = {
         id: editItem ? editItem.id : `scenario-${Date.now()}`,
         title: trimmedTitle,
         category: category,
         intro: intro.trim(),
         cover: cover.trim(),
-        presentation: presentation.trim(),
+        presentation: activeText,
+        initialMessages: finalInitialMessages,
+        activeInitialMessageId: activeInitialMessageId,
         baseContext: baseContext.trim(),
         aiInstructions: aiInstructions.trim(),
         tags: selectedTags,
@@ -791,7 +903,7 @@ export default function CreateModal({
   };
 
   const modalContent = (
-    <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex: 1200 }} onClick={handleBackdropClick}>
+    <div className="char-backdrop" role="dialog" aria-modal="true" style={{ zIndex }} onClick={handleBackdropClick}>
       <div className="char-modal" style={{
         width: isWide ? '82vw' : '100%',
         maxWidth: isWide ? '1200px' : '620px',
@@ -1158,288 +1270,358 @@ export default function CreateModal({
                 </div>
               )}
 
-              {/* SECCIÓN DE IMÁGENES, EXPRESIONES, GUÍAS MÚLTIPLES Y RETRY */}
-              <div className="field-group" style={{ background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-                  <label style={{ fontSize: '0.85rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <FontAwesomeIcon icon={faImage} /> Imágenes y Expresiones ({characterImages.length})
-                  </label>
-                  {lastGenParams && (
-                    <button
-                      type="button"
-                      onClick={handleRetryLastImageGen}
-                      disabled={isGeneratingAiImage}
-                      title="Reintentar última generación con nueva semilla"
-                      style={{
-                        background: 'rgba(255, 211, 107, 0.1)',
-                        border: '1px solid rgba(255, 211, 107, 0.3)',
-                        color: '#ffd36b',
-                        borderRadius: '6px',
-                        padding: '4px 8px',
-                        fontSize: '0.75rem',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      <FontAwesomeIcon icon={faRedo} spin={isGeneratingAiImage} /> Reintentar Imagen
-                    </button>
-                  )}
-                </div>
-
-                {/* Guías Visuales de Referencia si hay imágenes existentes */}
-                {characterImages.length > 0 && (
-                  <div style={{
-                    background: 'rgba(99, 102, 241, 0.08)',
-                    border: '1px solid rgba(129, 140, 248, 0.25)',
-                    borderRadius: '8px',
-                    padding: '8px 10px',
-                    marginBottom: '10px'
-                  }}>
-                    <div style={{ fontSize: '0.75rem', color: '#c7d2fe', fontWeight: '700', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <FontAwesomeIcon icon={faImages} /> Guías visuales de referencia ({selectedGuideIds.length} seleccionadas)
+              {/* SECCIÓN MULTIMEDIA: ESCENARIO (2 COLUMNAS) vs TARJETAS ESTÁNDAR (GALERÍA DE EXPRESIONES) */}
+              {itemType === 'Escenario' ? (
+                <ScenarioMediaHeader
+                  cover={cover}
+                  onCoverChange={(newCover) => handleFieldChange(setCover, newCover)}
+                  category={category}
+                  onCategoryChange={(newCat) => handleFieldChange(setCategory, newCat)}
+                  categories={CATEGORIES}
+                  tags={selectedTags}
+                  onTagsChange={(newTags) => handleFieldChange(setSelectedTags, newTags)}
+                  onOpenCropper={(imgUrl) => setCropModalImage({ url: imgUrl, id: 'cover' })}
+                  onGenerateAiCover={handleGenerateAiCover}
+                  isGeneratingAi={isGeneratingAiImage}
+                />
+              ) : (
+                <>
+                  <div className="field-group" style={{ background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                      <label style={{ fontSize: '0.85rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <FontAwesomeIcon icon={faImage} /> Imágenes y Expresiones ({characterImages.length})
+                      </label>
+                      {lastGenParams && (
+                        <button
+                          type="button"
+                          onClick={handleRetryLastImageGen}
+                          disabled={isGeneratingAiImage}
+                          title="Reintentar última generación con nueva semilla"
+                          style={{
+                            background: 'rgba(255, 211, 107, 0.1)',
+                            border: '1px solid rgba(255, 211, 107, 0.3)',
+                            color: '#ffd36b',
+                            borderRadius: '6px',
+                            padding: '4px 8px',
+                            fontSize: '0.75rem',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <FontAwesomeIcon icon={faRedo} spin={isGeneratingAiImage} /> Reintentar Imagen
+                        </button>
+                      )}
                     </div>
-                    <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-                      {characterImages.map(img => {
-                        const isSelectedGuide = selectedGuideIds.includes(img.id);
-                        return (
-                          <div
-                            key={img.id}
-                            onClick={() => handleToggleGuideSelection(img.id)}
-                            style={{
-                              position: 'relative',
-                              width: '48px',
-                              height: '48px',
-                              borderRadius: '6px',
-                              overflow: 'hidden',
-                              border: isSelectedGuide ? '2px solid #818cf8' : '1px solid rgba(255,255,255,0.1)',
-                              cursor: 'pointer',
-                              opacity: isSelectedGuide ? 1 : 0.45,
-                              flexShrink: 0
-                            }}
-                            title={`${img.label || 'Imagen'} (Clic para usar como guía visual)`}
-                          >
-                            <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            {isSelectedGuide && (
-                              <div style={{ position: 'absolute', top: 2, right: 2, background: '#818cf8', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', color: '#000' }}>
-                                ✓
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
-                {/* 1. Input Unificado de URL / Archivo de Disco */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <input
-                    type="text"
-                    value={customImageUrl}
-                    onChange={(e) => setCustomImageUrl(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddCustomUrl();
-                      }
-                    }}
-                    placeholder="URL de imagen o dirección de archivo cargado..."
-                    style={{
-                      flex: 1,
-                      minWidth: '220px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: '6px',
-                      padding: '7px 10px',
-                      color: '#fff',
-                      fontSize: '0.82rem'
-                    }}
-                  />
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    accept="image/*"
-                    multiple
-                    style={{ display: 'none' }}
-                    onChange={handleFileSelect}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      background: 'rgba(255,255,255,0.08)',
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      color: '#ffd36b',
-                      fontWeight: '600',
-                      padding: '7px 12px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '0.82rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      whiteSpace: 'nowrap'
-                    }}
-                    title="Buscar archivo de imagen en el disco duro"
-                  >
-                    <FontAwesomeIcon icon={faFolderOpen} /> Buscar en disco
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAddCustomUrl}
-                    disabled={!customImageUrl.trim()}
-                    style={{
-                      background: customImageUrl.trim() ? 'rgba(255, 211, 107, 0.2)' : 'rgba(255,255,255,0.04)',
-                      border: customImageUrl.trim() ? '1px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
-                      color: customImageUrl.trim() ? '#ffd36b' : 'rgba(255,255,255,0.4)',
-                      fontWeight: '700',
-                      padding: '7px 12px',
-                      borderRadius: '6px',
-                      cursor: customImageUrl.trim() ? 'pointer' : 'default',
-                      fontSize: '0.82rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      whiteSpace: 'nowrap'
-                    }}
-                    title="Añadir imagen por URL"
-                  >
-                    <FontAwesomeIcon icon={faPlus} /> Añadir
-                  </button>
-                </div>
-
-                {/* 2. Generador de imágenes con IA */}
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
-                  <input
-                    type="text"
-                    value={charAiPrompt}
-                    onChange={(e) => setCharAiPrompt(e.target.value)}
-                    placeholder="Descripción visual / Expresión (ej. sonriendo, cabello rojo, armadura ligera)..."
-                    style={{
-                      flex: 1,
-                      minWidth: '220px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: '6px',
-                      padding: '7px 10px',
-                      color: '#fff',
-                      fontSize: '0.82rem'
-                    }}
-                  />
-                  <select
-                    value={coverAiStyle}
-                    onChange={(e) => setCoverAiStyle(e.target.value)}
-                    style={{
-                      background: '#1a1a24',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                      borderRadius: '6px',
-                      padding: '7px',
-                      color: '#fff',
-                      fontSize: '0.8rem'
-                    }}
-                  >
-                    <option value="Anime / Ilustración Estilizada 2.5D">Anime / 2.5D</option>
-                    <option value="Fantasía Oscura / Entornos">Fantasía Oscura</option>
-                    <option value="Cyberpunk / Neón">Cyberpunk</option>
-                    <option value="Fotorealista / Retrato">Fotorealista</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => handleGenerateAiImage('char')}
-                    disabled={isGeneratingAiImage}
-                    style={{
-                      background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
-                      border: 'none',
-                      color: '#000',
-                      fontWeight: '700',
-                      padding: '7px 12px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '0.82rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    <FontAwesomeIcon icon={faMagic} spin={isGeneratingAiImage} /> Generar
-                  </button>
-                </div>
-
-                {/* Galería de Expresiones */}
-                {characterImages.length > 0 && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px', marginTop: '10px' }}>
-                    {characterImages.map(img => (
-                      <div
-                        key={img.id}
-                        style={{
-                          background: 'rgba(20,18,30,0.85)',
-                          border: img.isDefault ? '2px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: '8px',
-                          overflow: 'hidden',
-                          display: 'flex',
-                          flexDirection: 'column'
-                        }}
-                      >
-                        <div style={{ position: 'relative', height: '110px' }}>
-                          <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          {img.isDefault && (
-                            <span style={{ position: 'absolute', top: 4, left: 4, background: '#ffd36b', color: '#000', fontSize: '0.65rem', fontWeight: '800', padding: '1px 5px', borderRadius: '4px' }}>
-                              Principal
-                            </span>
-                          )}
-                          <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: '4px' }}>
-                            <button
-                              type="button"
-                              onClick={() => setCropModalImage(img)}
-                              title="Recortar y reencuadrar imagen"
-                              style={{ background: 'rgba(255, 211, 107, 0.9)', border: 'none', color: '#000', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
-                            >
-                              <FontAwesomeIcon icon={faCrop} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditImageModal(img)}
-                              title="Modificar esta imagen con IA (img2img)"
-                              style={{ background: 'rgba(99, 102, 241, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
-                            >
-                              <FontAwesomeIcon icon={faEdit} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveCharacterImage(img.id)}
-                              title="Eliminar expresión"
-                              style={{ background: 'rgba(239, 68, 68, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
-                            >
-                              <FontAwesomeIcon icon={faTimes} />
-                            </button>
-                          </div>
+                    {/* Guías Visuales de Referencia si hay imágenes existentes */}
+                    {characterImages.length > 0 && (
+                      <div style={{
+                        background: 'rgba(99, 102, 241, 0.08)',
+                        border: '1px solid rgba(129, 140, 248, 0.25)',
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        marginBottom: '10px'
+                      }}>
+                        <div style={{ fontSize: '0.75rem', color: '#c7d2fe', fontWeight: '700', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <FontAwesomeIcon icon={faImages} /> Guías visuales de referencia ({selectedGuideIds.length} seleccionadas)
                         </div>
-                        <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <input
-                            type="text"
-                            value={img.label || ''}
-                            onChange={(e) => handleUpdateCharacterImageTags(img.id, e.target.value)}
-                            placeholder="Etiqueta / Expresión"
-                            style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.72rem', width: '100%', outline: 'none' }}
-                          />
-                          {!img.isDefault && (
-                            <button
-                              type="button"
-                              onClick={() => handleSetDefaultCharacterImage(img.id)}
-                              style={{ background: 'rgba(255,211,107,0.1)', border: '1px solid rgba(255,211,107,0.2)', color: '#ffd36b', fontSize: '0.68rem', borderRadius: '4px', padding: '2px', cursor: 'pointer' }}
-                            >
-                              Hacer Principal
-                            </button>
-                          )}
+                        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+                          {characterImages.map(img => {
+                            const isSelectedGuide = selectedGuideIds.includes(img.id);
+                            return (
+                              <div
+                                key={img.id}
+                                onClick={() => handleToggleGuideSelection(img.id)}
+                                style={{
+                                  position: 'relative',
+                                  width: '48px',
+                                  height: '48px',
+                                  borderRadius: '6px',
+                                  overflow: 'hidden',
+                                  border: isSelectedGuide ? '2px solid #818cf8' : '1px solid rgba(255,255,255,0.1)',
+                                  cursor: 'pointer',
+                                  opacity: isSelectedGuide ? 1 : 0.45,
+                                  flexShrink: 0
+                                }}
+                                title={`${img.label || 'Imagen'} (Clic para usar como guía visual)`}
+                              >
+                                <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                {isSelectedGuide && (
+                                  <div style={{ position: 'absolute', top: 2, right: 2, background: '#818cf8', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', color: '#000' }}>
+                                    ✓
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {/* 1. Input Unificado de URL / Archivo de Disco */}
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        value={customImageUrl}
+                        onChange={(e) => setCustomImageUrl(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddCustomUrl();
+                          }
+                        }}
+                        placeholder="URL de imagen o dirección de archivo cargado..."
+                        style={{
+                          flex: '1 1 220px',
+                          minWidth: '180px',
+                          background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '6px',
+                          padding: '7px 10px',
+                          color: '#fff',
+                          fontSize: '0.82rem'
+                        }}
+                      />
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={handleFileSelect}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{
+                          background: 'rgba(255,255,255,0.08)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          color: '#ffd36b',
+                          fontWeight: '600',
+                          padding: '7px 12px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '0.82rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                        title="Buscar archivo de imagen en el disco duro"
+                      >
+                        <FontAwesomeIcon icon={faFolderOpen} /> Buscar en disco
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddCustomUrl}
+                        disabled={!customImageUrl.trim()}
+                        style={{
+                          background: customImageUrl.trim() ? 'rgba(255, 211, 107, 0.2)' : 'rgba(255,255,255,0.04)',
+                          border: customImageUrl.trim() ? '1px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
+                          color: customImageUrl.trim() ? '#ffd36b' : 'rgba(255,255,255,0.4)',
+                          fontWeight: '700',
+                          padding: '7px 12px',
+                          borderRadius: '6px',
+                          cursor: customImageUrl.trim() ? 'pointer' : 'default',
+                          fontSize: '0.82rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                        title="Añadir imagen por URL"
+                      >
+                        <FontAwesomeIcon icon={faPlus} /> Añadir
+                      </button>
+                    </div>
+
+                    {/* 2. Generador de imágenes con IA destacado */}
+                    <div style={{
+                      background: 'rgba(255, 211, 107, 0.04)',
+                      border: '1px solid rgba(255, 211, 107, 0.22)',
+                      borderRadius: '8px',
+                      padding: '10px 12px',
+                      marginBottom: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}>
+                      <div style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <FontAwesomeIcon icon={faMagic} /> Generador de Imágenes con IA
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <input
+                          type="text"
+                          value={charAiPrompt}
+                          onChange={(e) => setCharAiPrompt(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleGenerateAiImage('char');
+                            }
+                          }}
+                          placeholder="Descripción visual / Expresión (ej. sonriendo, cabello rojo, armadura ligera)..."
+                          style={{
+                            flex: '1 1 200px',
+                            minWidth: '180px',
+                            background: 'rgba(0, 0, 0, 0.35)',
+                            border: '1px solid rgba(255, 255, 255, 0.15)',
+                            borderRadius: '6px',
+                            padding: '7px 10px',
+                            color: '#fff',
+                            fontSize: '0.82rem',
+                            outline: 'none'
+                          }}
+                        />
+                        <select
+                          data-testid="char-ai-style-select"
+                          value={coverAiStyle}
+                          onChange={(e) => setCoverAiStyle(e.target.value)}
+                          style={{
+                            width: '145px',
+                            flexShrink: 0,
+                            background: '#1a1a24',
+                            border: '1px solid rgba(255, 255, 255, 0.18)',
+                            borderRadius: '6px',
+                            padding: '7px 8px',
+                            color: '#fff',
+                            fontSize: '0.8rem',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="Anime / Ilustración Estilizada 2.5D">Anime / 2.5D</option>
+                          <option value="Fantasía Oscura / Entornos">Fantasía Oscura</option>
+                          <option value="Cyberpunk / Neón">Cyberpunk</option>
+                          <option value="Fotorealista / Retrato">Fotorealista</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateAiImage('char')}
+                          disabled={isGeneratingAiImage}
+                          style={{
+                            background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)',
+                            border: 'none',
+                            color: '#000',
+                            fontWeight: '700',
+                            padding: '7px 14px',
+                            borderRadius: '6px',
+                            cursor: isGeneratingAiImage ? 'not-allowed' : 'pointer',
+                            fontSize: '0.82rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          <FontAwesomeIcon icon={faMagic} spin={isGeneratingAiImage} /> Generar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Galería de Expresiones */}
+                    {characterImages.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px', marginTop: '10px' }}>
+                        {characterImages.map(img => (
+                          <div
+                            key={img.id}
+                            style={{
+                              background: 'rgba(20,18,30,0.85)',
+                              border: img.isDefault ? '2px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
+                              borderRadius: '8px',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column'
+                            }}
+                          >
+                            <div style={{ position: 'relative', height: '110px' }}>
+                              <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              {img.isDefault && (
+                                <span style={{ position: 'absolute', top: 4, left: 4, background: '#ffd36b', color: '#000', fontSize: '0.65rem', fontWeight: '800', padding: '1px 5px', borderRadius: '4px' }}>
+                                  Principal
+                                </span>
+                              )}
+                              <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: '4px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setCropModalImage(img)}
+                                  title="Recortar y reencuadrar imagen"
+                                  style={{ background: 'rgba(255, 211, 107, 0.9)', border: 'none', color: '#000', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                >
+                                  <FontAwesomeIcon icon={faCrop} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditImageModal(img)}
+                                  title="Modificar esta imagen con IA (img2img)"
+                                  style={{ background: 'rgba(99, 102, 241, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                >
+                                  <FontAwesomeIcon icon={faEdit} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveCharacterImage(img.id)}
+                                  title="Eliminar expresión"
+                                  style={{ background: 'rgba(239, 68, 68, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                >
+                                  <FontAwesomeIcon icon={faTimes} />
+                                </button>
+                              </div>
+                            </div>
+                            <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <input
+                                type="text"
+                                value={img.label || ''}
+                                onChange={(e) => handleUpdateCharacterImageTags(img.id, e.target.value)}
+                                placeholder="Etiqueta / Expresión"
+                                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.72rem', width: '100%', outline: 'none' }}
+                              />
+                              {!img.isDefault && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetDefaultCharacterImage(img.id)}
+                                  style={{ background: 'rgba(255,211,107,0.1)', border: '1px solid rgba(255,211,107,0.2)', color: '#ffd36b', fontSize: '0.68rem', borderRadius: '4px', padding: '2px', cursor: 'pointer' }}
+                                >
+                                  Hacer Principal
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+
+                  {/* SELECTOR DE CATEGORÍA */}
+                  <div className="field-group">
+                    <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', marginBottom: '4px', display: 'block' }}>
+                      Categoría de la Tarjeta
+                    </label>
+                    <select
+                      value={category}
+                      onChange={(e) => handleFieldChange(setCategory, e.target.value)}
+                      style={{
+                        width: '100%',
+                        background: '#1a1a28',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        borderRadius: '6px',
+                        padding: '8px 10px',
+                        color: '#fff',
+                        fontSize: '0.85rem'
+                      }}
+                    >
+                      {CATEGORIES.map(cat => (
+                        <option key={cat} value={cat} style={{ background: '#1a1a28', color: '#fff' }}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
 
               {/* INTRODUCCIÓN (Límite 250 caracteres e indexada para el contexto) */}
               <div className="field-group">
@@ -1484,38 +1666,40 @@ export default function CreateModal({
                 />
               </div>
 
-              {/* DESCRIPCIÓN DETALLADA / APARIENCIA / LORE */}
-              <div className="field-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                    Descripción Detallada / Apariencia y Lore
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleEnhanceField('lore')}
-                    disabled={isEnhancingField === 'lore'}
-                    style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
-                  >
-                    <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'lore'} /> Expandir con IA
-                  </button>
+              {/* DESCRIPCIÓN DETALLADA / APARIENCIA / LORE (Solo para tarjetas, no para Escenarios) */}
+              {itemType !== 'Escenario' && (
+                <div className="field-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
+                      Descripción Detallada / Apariencia y Lore
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleEnhanceField('lore')}
+                      disabled={isEnhancingField === 'lore'}
+                      style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
+                    >
+                      <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'lore'} /> Expandir con IA
+                    </button>
+                  </div>
+                  <textarea
+                    value={text}
+                    onChange={(e) => handleFieldChange(setText, e.target.value)}
+                    placeholder="Detalles visuales, vestimenta, peinado, personalidad, historia..."
+                    rows={5}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: '8px',
+                      padding: '8px 10px',
+                      color: '#fff',
+                      fontSize: '0.85rem',
+                      resize: 'vertical'
+                    }}
+                  />
                 </div>
-                <textarea
-                  value={text}
-                  onChange={(e) => handleFieldChange(setText, e.target.value)}
-                  placeholder="Detalles visuales, vestimenta, peinado, personalidad, historia..."
-                  rows={5}
-                  style={{
-                    width: '100%',
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: '8px',
-                    padding: '8px 10px',
-                    color: '#fff',
-                    fontSize: '0.85rem',
-                    resize: 'vertical'
-                  }}
-                />
-              </div>
+              )}
 
               {/* RASGOS DE PERSONALIDAD (TRAITS) PARA PERSONAJE */}
               {itemType === 'Personaje' && (
@@ -1588,16 +1772,52 @@ export default function CreateModal({
                       fontSize: '0.8rem'
                     }}
                   />
+
+                  {/* Mochila / Inventario Vinculado */}
+                  <div style={{ marginTop: '12px', background: 'rgba(255, 211, 107, 0.04)', border: '1px solid rgba(255, 211, 107, 0.2)', borderRadius: '8px', padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <FontAwesomeIcon icon={faSuitcase} /> Mochila / Inventario del Personaje
+                      </span>
+                      {(() => {
+                        const existingInv = (appData?.cards || []).find(c => c && c.type === 'Inventario' && (c.linkedCharacterId === editItem?.id || (editItem?.title && c.linkedCharacterId === editItem.title)));
+                        if (existingInv) {
+                          return (
+                            <span style={{ fontSize: '0.74rem', color: '#6ee7b7', fontWeight: '600' }}>
+                              ✓ Vinculado ({Array.isArray(existingInv.items) ? existingInv.items.length : 0} objetos)
+                            </span>
+                          );
+                        }
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setItemType('Inventario');
+                              setTitle(`Inventario de ${title || editItem?.title || 'Personaje'}`);
+                              setInventoryOwnerCharId(editItem?.id || '');
+                              setIsDirty(true);
+                            }}
+                            style={{ background: 'rgba(255, 211, 107, 0.15)', border: '1px solid rgba(255, 211, 107, 0.35)', color: '#ffd36b', padding: '4px 10px', borderRadius: '5px', fontSize: '0.72rem', cursor: 'pointer', fontWeight: '700' }}
+                          >
+                            <FontAwesomeIcon icon={faPlus} /> Crear Mochila
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  </div>
                 </div>
               )}
 
               {/* CAMPOS ADICIONALES DE ESCENARIO */}
               {itemType === 'Escenario' && (
                 <>
-                  <div className="field-group">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                        Presentación / Mensaje de Apertura
+                  <div className="field-group" style={{ marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                      <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>Mensaje Inicial</span>
+                        <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.45)', fontWeight: '400' }}>
+                          ({initialMessages.length} {initialMessages.length === 1 ? 'inicio' : 'inicios'})
+                        </span>
                       </label>
                       <button
                         type="button"
@@ -1608,19 +1828,123 @@ export default function CreateModal({
                         <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'scenario_presentation'} /> Generar con IA
                       </button>
                     </div>
+
+                    {/* Barra de pestañas de Inicios */}
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
+                      {initialMessages.map((tab) => {
+                        const isActive = tab.id === activeInitialMessageId;
+                        return (
+                          <div
+                            key={tab.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              background: isActive ? 'rgba(255, 211, 107, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                              border: isActive ? '1px solid #ffd36b' : '1px solid rgba(255, 255, 255, 0.12)',
+                              borderRadius: '6px',
+                              padding: '3px 8px',
+                              gap: '6px'
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleSelectInitialMessageTab(tab.id)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: isActive ? '#ffd36b' : 'rgba(255, 255, 255, 0.7)',
+                                fontWeight: isActive ? '700' : '500',
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                                padding: 0
+                              }}
+                            >
+                              {tab.title}
+                            </button>
+                            {initialMessages.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleRemoveInitialMessageTab(tab.id, e)}
+                                title="Eliminar este inicio"
+                                aria-label={`Eliminar ${tab.title}`}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: 'rgba(255, 255, 255, 0.4)',
+                                  fontSize: '0.72rem',
+                                  cursor: 'pointer',
+                                  padding: '0 2px',
+                                  lineHeight: 1
+                                }}
+                              >
+                                <FontAwesomeIcon icon={faTimes} />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {initialMessages.length < 10 && (
+                        <button
+                          type="button"
+                          onClick={handleAddInitialMessageTab}
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            border: '1px dashed rgba(255, 211, 107, 0.4)',
+                            color: '#ffd36b',
+                            borderRadius: '6px',
+                            padding: '4px 10px',
+                            fontSize: '0.76rem',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <FontAwesomeIcon icon={faPlus} /> Agregar inicio
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Renombrar pestaña activa */}
+                    {(() => {
+                      const activeTab = initialMessages.find(m => m.id === activeInitialMessageId) || initialMessages[0];
+                      return (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.5)' }}>Nombre del inicio:</span>
+                          <input
+                            type="text"
+                            value={activeTab?.title || ''}
+                            onChange={(e) => handleRenameInitialMessageTab(activeInitialMessageId, e.target.value)}
+                            placeholder="Nombre del inicio..."
+                            style={{
+                              flex: 1,
+                              maxWidth: '260px',
+                              background: 'rgba(255, 255, 255, 0.05)',
+                              border: '1px solid rgba(255, 255, 255, 0.12)',
+                              borderRadius: '4px',
+                              padding: '4px 8px',
+                              color: '#fff',
+                              fontSize: '0.78rem'
+                            }}
+                          />
+                        </div>
+                      );
+                    })()}
+
                     <textarea
                       value={presentation}
-                      onChange={(e) => handleFieldChange(setPresentation, e.target.value)}
-                      placeholder="Mensaje inmersivo con el que comenzará la partida para el jugador..."
-                      rows={3}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '8px 10px', color: '#fff', fontSize: '0.85rem' }}
+                      onChange={(e) => handleInitialMessageTextChange(e.target.value)}
+                      placeholder="El texto de bienvenida que verá el jugador al comenzar la partida con este inicio..."
+                      rows={5}
+                      style={{ width: '100%', minHeight: '120px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', padding: '10px 12px', color: '#fff', fontSize: '0.85rem', boxSizing: 'border-box', resize: 'vertical' }}
                     />
                   </div>
 
                   <div className="field-group">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                        Contexto Base / Worldbuilding
+                        Contexto en Detalle
                       </label>
                       <button
                         type="button"
@@ -1634,16 +1958,16 @@ export default function CreateModal({
                     <textarea
                       value={baseContext}
                       onChange={(e) => handleFieldChange(setBaseContext, e.target.value)}
-                      placeholder="Reglas del mundo, facciones, ambientación y lore general..."
-                      rows={4}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '8px 10px', color: '#fff', fontSize: '0.85rem' }}
+                      placeholder="Geografía, política, historia, leyes mágicas y lore del escenario..."
+                      rows={8}
+                      style={{ width: '100%', minHeight: '180px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', padding: '10px 12px', color: '#fff', fontSize: '0.85rem', boxSizing: 'border-box', resize: 'vertical' }}
                     />
                   </div>
 
                   <div className="field-group">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                        Instrucciones del Sistema para la IA
+                        Instrucciones del Brain del GM / IA
                       </label>
                       <button
                         type="button"
@@ -1657,85 +1981,542 @@ export default function CreateModal({
                     <textarea
                       value={aiInstructions}
                       onChange={(e) => handleFieldChange(setAiInstructions, e.target.value)}
-                      placeholder="Directivas narrativas, tono, secretos y estilo para el Narrador..."
-                      rows={3}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '8px 10px', color: '#fff', fontSize: '0.85rem' }}
+                      placeholder="Directivas narrativas, tono, secretos y directrices para el Narrador..."
+                      rows={5}
+                      style={{ width: '100%', minHeight: '120px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', padding: '10px 12px', color: '#fff', fontSize: '0.85rem', boxSizing: 'border-box', resize: 'vertical' }}
                     />
                   </div>
                 </>
               )}
 
-              {/* ETIQUETAS (TAGS) */}
-              <div className="field-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                    Etiquetas ({selectedTags.length}/5)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleEnhanceField('tags')}
-                    disabled={isEnhancingField === 'tags'}
-                    style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
-                  >
-                    <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'tags'} /> Sugerir Tags
-                  </button>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
-                  {selectedTags.map(t => (
-                    <span
-                      key={t}
-                      style={{
-                        background: 'rgba(255,255,255,0.08)',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        borderRadius: '12px',
-                        padding: '2px 8px',
-                        fontSize: '0.75rem',
-                        color: '#fff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '5px'
-                      }}
-                    >
-                      {t}
+              {/* CAMPOS ESPECIALIZADOS DE INVENTARIO */}
+              {itemType === 'Inventario' && (
+                <div style={{
+                  background: 'rgba(255, 211, 107, 0.04)',
+                  border: '1px solid rgba(255, 211, 107, 0.25)',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  marginBottom: '16px'
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '6px' }}>
+                        👤 Personaje Propietario
+                      </label>
+                      <select
+                        value={inventoryOwnerCharId}
+                        onChange={(e) => handleFieldChange(setInventoryOwnerCharId, e.target.value)}
+                        style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }}
+                      >
+                        <option value="">(Inventario General / Sin Asignar)</option>
+                        {(appData?.cards || []).filter(c => c && (c.type === 'Personaje' || c.type === 'PJ')).map(char => (
+                          <option key={char.id} value={char.id}>{char.title || char.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '6px' }}>
+                        ⚖️ Capacidad / Límite de Carga
+                      </label>
+                      <input
+                        value={inventoryCapacity}
+                        onChange={(e) => handleFieldChange(setInventoryCapacity, e.target.value)}
+                        placeholder="Ej. 20 kg / 10 slots"
+                        style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Gestor interactivo de ítems */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <FontAwesomeIcon icon={faSuitcase} /> Objetos en el Inventario ({inventoryItems.length})
+                      </label>
                       <button
                         type="button"
                         onClick={() => {
-                          setSelectedTags(prev => prev.filter(x => x !== t));
-                          setIsDirty(true);
+                          const newItem = {
+                            id: `item-${Date.now()}`,
+                            name: 'Nuevo Objeto',
+                            qty: 1,
+                            rarity: 'Común',
+                            equipped: false,
+                            weight: '1 kg',
+                            desc: 'Descripción del objeto...'
+                          };
+                          handleFieldChange(setInventoryItems, [...inventoryItems, newItem]);
                         }}
-                        style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: 0, fontSize: '0.75rem' }}
+                        style={{ background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)', color: '#0d0e16', border: 'none', padding: '5px 12px', borderRadius: '6px', fontSize: '0.76rem', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
                       >
-                        ✕
+                        <FontAwesomeIcon icon={faPlus} /> Añadir Objeto
                       </button>
-                    </span>
-                  ))}
+                    </div>
+
+                    {inventoryItems.length === 0 ? (
+                      <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>
+                        No hay objetos en esta mochila. Pulsa "+ Añadir Objeto" para registrar equipamiento o pertenencias.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {inventoryItems.map((item, idx) => (
+                          <div key={item.id || idx} style={{ background: '#181824', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '10px', display: 'grid', gridTemplateColumns: 'minmax(140px, 2fr) 65px 110px 100px minmax(140px, 2fr) auto', gap: '8px', alignItems: 'center' }}>
+                            <input
+                              value={item.name || ''}
+                              onChange={(e) => {
+                                const updated = [...inventoryItems];
+                                updated[idx] = { ...updated[idx], name: e.target.value };
+                                handleFieldChange(setInventoryItems, updated);
+                              }}
+                              placeholder="Nombre del objeto"
+                              style={{ padding: '6px 8px', background: '#12121c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.78rem' }}
+                            />
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.qty || 1}
+                              onChange={(e) => {
+                                const updated = [...inventoryItems];
+                                updated[idx] = { ...updated[idx], qty: Math.max(1, Number(e.target.value) || 1) };
+                                handleFieldChange(setInventoryItems, updated);
+                              }}
+                              placeholder="Cant."
+                              title="Cantidad"
+                              style={{ padding: '6px 4px', background: '#12121c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.78rem', textAlign: 'center' }}
+                            />
+                            <select
+                              value={item.rarity || 'Común'}
+                              onChange={(e) => {
+                                const updated = [...inventoryItems];
+                                updated[idx] = { ...updated[idx], rarity: e.target.value };
+                                handleFieldChange(setInventoryItems, updated);
+                              }}
+                              style={{ padding: '6px 4px', background: '#12121c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#ffd36b', fontSize: '0.74rem' }}
+                            >
+                              <option value="Común">Común</option>
+                              <option value="Poco común">Poco común</option>
+                              <option value="Raro">Raro</option>
+                              <option value="Épico">Épico</option>
+                              <option value="Legendario">Legendario</option>
+                            </select>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.74rem', color: item.equipped ? '#6ee7b7' : 'rgba(255,255,255,0.6)', cursor: 'pointer', userSelect: 'none' }}>
+                              <input
+                                type="checkbox"
+                                checked={!!item.equipped}
+                                onChange={(e) => {
+                                  const updated = [...inventoryItems];
+                                  updated[idx] = { ...updated[idx], equipped: e.target.checked };
+                                  handleFieldChange(setInventoryItems, updated);
+                                }}
+                                style={{ accentColor: '#6ee7b7', cursor: 'pointer' }}
+                              />
+                              <span>{item.equipped ? '⚔️ Equipado' : '🎒 En bolsa'}</span>
+                            </label>
+                            <input
+                              value={item.desc || ''}
+                              onChange={(e) => {
+                                const updated = [...inventoryItems];
+                                updated[idx] = { ...updated[idx], desc: e.target.value };
+                                handleFieldChange(setInventoryItems, updated);
+                              }}
+                              placeholder="Efectos, peso o notas..."
+                              style={{ padding: '6px 8px', background: '#12121c', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', color: 'rgba(255,255,255,0.85)', fontSize: '0.74rem' }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = inventoryItems.filter((_, i) => i !== idx);
+                                handleFieldChange(setInventoryItems, updated);
+                              }}
+                              style={{ background: 'transparent', border: 'none', color: '#eb5757', cursor: 'pointer', padding: '6px' }}
+                              title="Eliminar objeto"
+                            >
+                              <FontAwesomeIcon icon={faTrashAlt} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <input
-                  type="text"
-                  value={tagQuery}
-                  onChange={(e) => setTagQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && tagQuery.trim()) {
-                      e.preventDefault();
-                      if (!selectedTags.includes(tagQuery.trim()) && selectedTags.length < 5) {
-                        setSelectedTags(prev => [...prev, tagQuery.trim()]);
-                        setTagQuery('');
-                        setIsDirty(true);
+              )}
+
+              {/* ETIQUETAS (TAGS) (Solo para tarjetas estándar, en Escenario está en ScenarioMediaHeader) */}
+              {itemType !== 'Escenario' && (
+                <div className="field-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
+                      Etiquetas ({selectedTags.length}/5)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleEnhanceField('tags')}
+                      disabled={isEnhancingField === 'tags'}
+                      style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
+                    >
+                      <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'tags'} /> Sugerir Tags
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+                    {selectedTags.map(t => (
+                      <span
+                        key={t}
+                        style={{
+                          background: 'rgba(255,255,255,0.08)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '12px',
+                          padding: '2px 8px',
+                          fontSize: '0.75rem',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '5px'
+                        }}
+                      >
+                        {t}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTags(prev => prev.filter(x => x !== t));
+                            setIsDirty(true);
+                          }}
+                          style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: 0, fontSize: '0.75rem' }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={tagQuery}
+                    onChange={(e) => setTagQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && tagQuery.trim()) {
+                        e.preventDefault();
+                        if (!selectedTags.includes(tagQuery.trim()) && selectedTags.length < 5) {
+                          setSelectedTags(prev => [...prev, tagQuery.trim()]);
+                          setTagQuery('');
+                          setIsDirty(true);
+                        }
                       }
-                    }
-                  }}
-                  placeholder="Añadir etiqueta (ej. Aventura, Cyberpunk)..."
-                  style={{
-                    width: '100%',
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: '6px',
-                    padding: '6px 10px',
-                    color: '#fff',
-                    fontSize: '0.8rem'
-                  }}
-                />
-              </div>
+                    }}
+                    placeholder="Añadir etiqueta (ej. Aventura, Cyberpunk)..."
+                    style={{
+                      width: '100%',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: '6px',
+                      padding: '6px 10px',
+                      color: '#fff',
+                      fontSize: '0.8rem'
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* PALABRAS DE LLAMADA / ACTIVACIÓN (Para todas las tarjetas excepto Escenario/Narrador/Herramienta) */}
+              {itemType !== 'Escenario' && itemType !== 'Narrador' && itemType !== 'Herramienta' && (
+                <div className="field-group" style={{ marginBottom: '14px' }}>
+                  <label style={{ fontSize: '0.82rem', color: '#ffd36b', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold' }}>
+                    📢 Palabras de Llamada (Call Words / Keywords)
+                  </label>
+                  <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', marginBottom: '6px' }}>
+                    Palabras o frases separadas por comas que, al detectarse en el chat, aumentan el peso de esta tarjeta e introducen su contexto inmediatamente.
+                  </div>
+                  <input
+                    type="text"
+                    value={callWords}
+                    onChange={(e) => handleFieldChange(setCallWords, e.target.value)}
+                    placeholder="ej. espada dragón, filo ancestral, reliquia (separadas por comas)..."
+                    style={{ width: '100%', padding: '8px 12px', background: '#1e1e2c', border: '1px solid rgba(255, 211, 107, 0.25)', borderRadius: '6px', color: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+              )}
+
+              {/* PANEL DE IMPORTANCIA Y PESOS (Para todas las tarjetas excepto Escenario/Narrador/Herramienta) */}
+              {itemType !== 'Escenario' && itemType !== 'Narrador' && itemType !== 'Herramienta' && (
+                <div style={{
+                  background: 'rgba(255, 211, 107, 0.04)',
+                  border: '1px solid rgba(255, 211, 107, 0.2)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  marginTop: '12px',
+                  marginBottom: '14px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '0.78rem', color: '#ffd36b', fontWeight: '700', margin: 0 }}>
+                      ⚖️ Presencia y Peso en Contexto de Chat
+                    </label>
+                    <span style={{ fontSize: '0.72rem', color: isPinned ? '#ffd36b' : 'rgba(255,255,255,0.7)', fontWeight: 'bold' }}>
+                      {isPinned ? '📌 Anclado Permanente' : `Prioridad Base: ${importance}/10`}
+                    </span>
+                  </div>
+
+                  {/* Slider de Importancia Base */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.6)', minWidth: '75px' }}>Importancia:</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      disabled={isPinned}
+                      value={importance}
+                      onChange={(e) => handleFieldChange(setImportance, Number(e.target.value))}
+                      style={{ flex: 1, accentColor: '#ffd36b', cursor: isPinned ? 'not-allowed' : 'pointer' }}
+                    />
+                    <span style={{ fontSize: '0.76rem', color: '#ffd36b', fontWeight: 'bold', minWidth: '25px', textAlign: 'right' }}>
+                      {importance}
+                    </span>
+                  </div>
+
+                  {/* Checkbox Anclado & Modo de Activación */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', color: isPinned ? '#ffd36b' : 'rgba(255,255,255,0.85)', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={isPinned}
+                        onChange={(e) => handleFieldChange(setIsPinned, e.target.checked)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <span>📌 Anclado (Siempre en contexto)</span>
+                    </label>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.72rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', color: activationMode === 'dynamic' ? '#6ee7b7' : 'rgba(255,255,255,0.6)', cursor: isPinned ? 'not-allowed' : 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="cardActivationMode"
+                          disabled={isPinned}
+                          checked={activationMode === 'dynamic'}
+                          onChange={() => handleFieldChange(setActivationMode, 'dynamic')}
+                        />
+                        <span>⚡ Dinámico</span>
+                      </label>
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', color: activationMode === 'strict_mention' ? '#93c5fd' : 'rgba(255,255,255,0.6)', cursor: isPinned ? 'not-allowed' : 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="cardActivationMode"
+                          disabled={isPinned}
+                          checked={activationMode === 'strict_mention'}
+                          onChange={() => handleFieldChange(setActivationMode, 'strict_mention')}
+                        />
+                        <span>🎯 Solo mención</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* CONEXIONES MODULARES (Para tarjetas normales) */}
+              {itemType !== 'Escenario' && itemType !== 'Narrador' && itemType !== 'Herramienta' && (
+                <div style={{ marginTop: '14px', marginBottom: '14px' }}>
+                  <ConnectionSelector
+                    availableCards={(appData.cards || []).filter(c => c.id !== (editItem?.id || ''))}
+                    selectedCardIds={selectedCards}
+                    onSelectCard={(id) => handleFieldChange(setSelectedCards, [...selectedCards, id])}
+                    onRemoveCard={(id) => handleFieldChange(setSelectedCards, selectedCards.filter(cId => cId !== id))}
+                  />
+                </div>
+              )}
+
+              {/* CONSTRUCCIÓN DEL ESCENARIO (LORE PIECES GRID - FICTIONLAB STYLE) */}
+              {itemType === 'Escenario' && (
+                <div style={{ marginTop: '24px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '20px' }}>
+                  <h4 style={{ margin: '0 0 16px 0', color: '#ffd36b', fontSize: '1.05rem', fontWeight: '700' }}>
+                    Construcción del Escenario (Lore Pieces)
+                  </h4>
+
+                  {/* Buscador Rápido para Importar Tarjetas Existentes */}
+                  <div style={{ marginBottom: '24px' }}>
+                    <ConnectionSelector
+                      availableCards={appData.cards || []}
+                      selectedCardIds={selectedCards.map(c => (typeof c === 'object' ? c.id : c))}
+                      onSelectCard={(id) => handleFieldChange(setSelectedCards, [...selectedCards, id])}
+                      onRemoveCard={(id) => handleFieldChange(setSelectedCards, selectedCards.filter(sc => (typeof sc === 'object' ? sc.id : sc) !== id))}
+                    />
+                  </div>
+
+                  {/* Cuadrículas agrupadas por tipo con diseño elegante y botón de añadir */}
+                  {['Personaje', 'Lugar', 'Facción', 'Raza', 'Criatura', 'Objeto', 'Memoria', 'Inventario', 'Regla', 'Otros'].map(type => {
+                    const allCardsPool = [...(appData.cards || [])];
+                    selectedCards.forEach(sc => {
+                      if (typeof sc === 'object' && sc !== null && sc.id && !allCardsPool.some(x => x.id === sc.id)) {
+                        allCardsPool.push(sc);
+                      }
+                    });
+                    const linkedCardsOfType = allCardsPool.filter(c => {
+                      const isSelected = selectedCards.some(sc => (typeof sc === 'object' ? sc.id : sc) === c.id);
+                      if (!isSelected) return false;
+                      if (c.type === type) return true;
+                      if (type === 'Otros' && !['Personaje', 'Lugar', 'Facción', 'Raza', 'Criatura', 'Objeto', 'Memoria', 'Inventario', 'Regla'].includes(c.type)) return true;
+                      return false;
+                    });
+                    const typeLabel = type === 'Personaje' ? 'Personajes' : type === 'Lugar' ? 'Lugares' : type === 'Facción' ? 'Facciones' : type === 'Raza' ? 'Razas' : type === 'Criatura' ? 'Criaturas' : type === 'Objeto' ? 'Objetos' : type === 'Memoria' ? 'Memorias' : type === 'Inventario' ? 'Inventarios' : type === 'Regla' ? 'Reglas / Leyes' : 'Otros / Personalizados';
+
+                    return (
+                      <div key={type} style={{ marginBottom: '24px' }}>
+                        <h5 style={{ margin: '0 0 10px 0', color: '#ffffff', fontSize: '0.88rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>{typeLabel} ({linkedCardsOfType.length})</span>
+                          <button
+                            type="button"
+                            onClick={() => setNestedCardModalState({ isOpen: true, type, editItem: null })}
+                            style={{ background: 'transparent', border: 'none', color: '#ffd36b', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            + Crear nuevo {type}
+                          </button>
+                        </h5>
+
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                          gap: '12px'
+                        }}>
+                          {/* Tarjetas conectadas de este tipo */}
+                          {linkedCardsOfType.map(card => {
+                            return (
+                              <div
+                                key={card.id}
+                                onClick={() => setNestedCardModalState({ isOpen: true, type: card.type || 'Personaje', editItem: card })}
+                                style={{
+                                  background: 'rgba(255, 255, 255, 0.02)',
+                                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                                  borderRadius: '10px',
+                                  overflow: 'hidden',
+                                  position: 'relative',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  height: '175px',
+                                  transition: 'all 0.2s',
+                                  cursor: 'pointer'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.borderColor = 'rgba(255, 211, 107, 0.4)';
+                                  e.currentTarget.style.transform = 'translateY(-2px)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                  e.currentTarget.style.transform = 'none';
+                                }}
+                                title={`Clic para editar "${card.title}"`}
+                              >
+                                {/* Botones de Acción (Editar y Desenlazar) */}
+                                <div style={{ position: 'absolute', top: '6px', right: '6px', display: 'flex', gap: '4px', zIndex: 5 }}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setNestedCardModalState({ isOpen: true, type: card.type || 'Personaje', editItem: card });
+                                    }}
+                                    style={{
+                                      background: 'rgba(0, 0, 0, 0.7)',
+                                      border: '1px solid rgba(255, 211, 107, 0.4)',
+                                      color: '#ffd36b',
+                                      width: '22px',
+                                      height: '22px',
+                                      borderRadius: '50%',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '0.7rem'
+                                    }}
+                                    title="Editar tarjeta completa"
+                                  >
+                                    <FontAwesomeIcon icon={faEdit} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleFieldChange(setSelectedCards, selectedCards.filter(sc => (typeof sc === 'object' ? sc.id : sc) !== card.id));
+                                    }}
+                                    style={{
+                                      background: 'rgba(0, 0, 0, 0.7)',
+                                      border: '1px solid rgba(255, 107, 107, 0.4)',
+                                      color: '#ff6b6b',
+                                      width: '22px',
+                                      height: '22px',
+                                      borderRadius: '50%',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '0.8rem',
+                                      fontWeight: 'bold'
+                                    }}
+                                    title="Desenlazar del escenario"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+
+                                {/* Portada */}
+                                <div style={{
+                                  height: '85px',
+                                  backgroundSize: 'cover',
+                                  backgroundPosition: 'center',
+                                  backgroundImage: `url(${card.cover || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=300&q=80'})`,
+                                  backgroundColor: '#1a1a24'
+                                }} />
+
+                                {/* Info */}
+                                <div style={{ padding: '8px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                                  <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={card.title}>
+                                    {card.title}
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                      {card.type}
+                                    </span>
+                                    <span style={{ fontSize: '0.68rem', color: '#ffd36b', fontWeight: '600' }}>
+                                      ✏️ Editar
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {/* Ranura Dotted "Crear Nuevo" */}
+                          <div
+                            onClick={() => setNestedCardModalState({ isOpen: true, type, editItem: null })}
+                            style={{
+                              border: '2px dashed rgba(255, 211, 107, 0.3)',
+                              borderRadius: '10px',
+                              height: '170px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              color: '#ffd36b',
+                              fontSize: '0.78rem',
+                              fontWeight: '600',
+                              gap: '6px',
+                              transition: 'all 0.2s',
+                              background: 'rgba(255,211,107,0.01)'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.border = '2px dashed rgba(255, 211, 107, 0.6)';
+                              e.currentTarget.style.background = 'rgba(255,211,107,0.04)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.border = '2px dashed rgba(255, 211, 107, 0.3)';
+                              e.currentTarget.style.background = 'rgba(255,211,107,0.01)';
+                            }}
+                          >
+                            <FontAwesomeIcon icon={faPlus} style={{ fontSize: '1rem' }} />
+                            <span>+ Añadir {type}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
             </div>
           )}
@@ -1821,6 +2602,38 @@ export default function CreateModal({
             handleUpdateImageCropped(cropModalImage.id, croppedUrl);
             setCropModalImage(null);
           }}
+        />
+      )}
+
+      {/* Modal idéntico y completo para crear/editar tarjetas anidadas del escenario */}
+      {nestedCardModalState && (
+        <CreateModal
+          isOpen={true}
+          initialType={nestedCardModalState.type || 'Personaje'}
+          editItem={nestedCardModalState.editItem}
+          onClose={() => setNestedCardModalState(null)}
+          onSaveItem={(savePayload) => {
+            const savedCard = savePayload.data;
+            setSelectedCards(prev => {
+              const existingIdx = prev.findIndex(entry => (typeof entry === 'object' ? entry.id : entry) === savedCard.id);
+              if (existingIdx !== -1) {
+                const copy = [...prev];
+                copy[existingIdx] = savedCard;
+                return copy;
+              } else {
+                return [...prev, savedCard];
+              }
+            });
+            if (onSaveItem) {
+              onSaveItem(savePayload);
+            }
+            setNestedCardModalState(null);
+            setIsDirty(true);
+          }}
+          appData={appData}
+          currentUser={currentUser}
+          folderHandle={folderHandle}
+          zIndex={zIndex + 100}
         />
       )}
 

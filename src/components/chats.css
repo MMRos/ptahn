@@ -213,20 +213,23 @@
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.8);
-  padding: 4px 10px;
+  padding: 5px 8px;
+  min-width: 32px;
+  height: 28px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.78rem;
-  display: flex;
+  font-size: 0.82rem;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   transition: all 0.15s ease;
 }
 
 .tool-btn:hover {
-  background: rgba(255, 211, 107, 0.12);
+  background: rgba(255, 211, 107, 0.15);
   color: #ffd36b;
-  border-color: rgba(255, 211, 107, 0.3);
+  border-color: rgba(255, 211, 107, 0.35);
+  transform: translateY(-1px);
 }
 
 .tool-btn.action {
@@ -286,9 +289,47 @@
   font-size: 0.78rem;
 }
 
+.msg-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .msg-author {
   font-weight: 700;
   color: #ffd36b;
+}
+
+.msg-turn-badge {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 211, 107, 0.12);
+  color: #ffd36b;
+  border: 1px solid rgba(255, 211, 107, 0.25);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.msg-scene-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.68rem;
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+.msg-scene-pill span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .msg-toolbar {

@@ -12,7 +12,7 @@ import {
   faSpinner, 
   faPaperPlane,
   faEye,
-  faLayerGroup,
+  faImage,
   faUserCircle
 } from '@fortawesome/free-solid-svg-icons';
 
@@ -93,40 +93,40 @@ export default function ChatInputDock({
             type="button" 
             className="tool-btn" 
             onClick={() => insertFormattingToken('"', '"')}
-            title='Insertar diálogo hablado: "Hola"'
+            title='Diálogo: Insertar diálogo hablado ("Hola")'
+            aria-label="Diálogo"
           >
             <FontAwesomeIcon icon={faCommentDots} />
-            <span>Diálogo</span>
           </button>
 
           <button 
             type="button" 
             className="tool-btn" 
             onClick={() => insertFormattingToken('*', '*')}
-            title="Insertar acción o acotación: *Camina en silencio*"
+            title="Acción: Insertar acción o acotación (*Camina en silencio*)"
+            aria-label="Acción"
           >
             <FontAwesomeIcon icon={faRunning} />
-            <span>Acción</span>
           </button>
 
           <button 
             type="button" 
             className="tool-btn" 
             onClick={() => insertFormattingToken('~', '~')}
-            title="Insertar pensamiento interno del personaje: ~No sé si confiar en él~"
+            title="Pensamiento: Insertar pensamiento interno (~No sé si confiar en él~)"
+            aria-label="Pensamiento"
           >
             <FontAwesomeIcon icon={faBrain} />
-            <span>Pensamiento</span>
           </button>
 
           <button 
             type="button" 
             className="tool-btn" 
             onClick={() => insertFormattingToken('==', '==')}
-            title="Resaltar entidad o lugar clave: ==Garrison=="
+            title="Resaltar: Resaltar entidad o lugar clave (==Entidad==)"
+            aria-label="Resaltar"
           >
             <FontAwesomeIcon icon={faHighlighter} />
-            <span>Resaltar</span>
           </button>
 
           {/* Selector de Transparencia Peek */}
@@ -134,7 +134,8 @@ export default function ChatInputDock({
             type="button"
             className="tool-btn"
             onClick={onTogglePeek}
-            title="Alternar vista transparente para apreciar el fondo del escenario"
+            title="Ver Fondo: Alternar vista transparente para apreciar el fondo del escenario"
+            aria-label="Ver Fondo"
             style={{
               background: isPeekTransparent ? 'rgba(255, 211, 107, 0.25)' : 'rgba(255, 255, 255, 0.05)',
               color: isPeekTransparent ? '#ffd36b' : 'rgba(255, 255, 255, 0.8)',
@@ -142,7 +143,6 @@ export default function ChatInputDock({
             }}
           >
             <FontAwesomeIcon icon={faEye} />
-            <span>Ver Fondo</span>
           </button>
 
           {/* Checkbox Generar tarjetas con IA */}
@@ -217,10 +217,10 @@ export default function ChatInputDock({
             className="tool-btn action"
             onClick={onContinue}
             disabled={isSending}
-            title="Pide al narrador que continúe describiendo los eventos o el entorno"
+            title="Continuar: Pide al narrador que continúe describiendo los eventos o el entorno"
+            aria-label="Continuar"
           >
             <FontAwesomeIcon icon={faPlay} />
-            <span>Continuar</span>
           </button>
 
           <button
@@ -228,10 +228,10 @@ export default function ChatInputDock({
             className="tool-btn action"
             onClick={() => onRedo(null)}
             disabled={isSending}
-            title="Regenera el último turno del narrador con una respuesta diferente"
+            title="Rehacer: Regenera el último turno del narrador con una respuesta diferente"
+            aria-label="Rehacer"
           >
             <FontAwesomeIcon icon={faRedo} />
-            <span>Rehacer</span>
           </button>
 
           {onOpenStaging && (
@@ -240,10 +240,10 @@ export default function ChatInputDock({
               className="tool-btn action"
               onClick={onOpenStaging}
               disabled={isSending}
-              title="Abre la ventana de escenificación para inyectar eventos, PNJ o cambios de rumbo en la historia"
+              title="Escenificar: Generar imagen de la escena a partir de mensajes y personajes del chat"
+              aria-label="Escenificar"
             >
-              <FontAwesomeIcon icon={faLayerGroup} />
-              <span>Escenificar</span>
+              <FontAwesomeIcon icon={faImage} />
             </button>
           )}
 
@@ -252,10 +252,10 @@ export default function ChatInputDock({
             className="tool-btn action"
             onClick={onBranchChat}
             disabled={isSending}
-            title="Crea una línea temporal paralela (ramificación) a partir de este punto"
+            title="Ramificar: Crea una línea temporal paralela (ramificación) a partir de este punto"
+            aria-label="Ramificar"
           >
             <FontAwesomeIcon icon={faCodeBranch} />
-            <span>Ramificar</span>
           </button>
 
           {chatSettings.showCharacterSidebar !== false && isCharacterSidebarClosed && activeCharacter && (
@@ -268,10 +268,10 @@ export default function ChatInputDock({
                 border: '1px solid rgba(255, 211, 107, 0.3)',
                 color: '#ffd36b'
               }}
-              title="Mostrar panel de personaje (Zona B)"
+              title="Retrato: Mostrar panel de personaje (Zona B)"
+              aria-label="Retrato"
             >
               <FontAwesomeIcon icon={faUserCircle} />
-              <span>Retrato</span>
             </button>
           )}
         </div>

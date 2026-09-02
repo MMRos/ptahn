@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { llamaEngine } = require('../engine/llamaEngine');
+const { rerankerEngine } = require('../engine/rerankerEngine');
 const { isServerRunning } = require('./lifecycle');
 
 // GET /api/ai/status - Check native engine status
@@ -77,5 +78,21 @@ async function handleChatCompletion(req, res) {
 // POST /api/ai/chat and /v1/chat/completions
 router.post('/chat', handleChatCompletion);
 router.post('/completions', handleChatCompletion);
+
+// POST /api/ai/rerank - Pairwise semantic relevance scoring
+router.post('/rerank', async (req, res) => {
+  try {
+    const { query, candidates = [] } = req.body;
+    const scores = await rerankerEngine.scoreCandidates(query, candidates);
+    res.json({
+      success: true,
+      scores,
+      count: Object.keys(scores).length
+    });
+  } catch (error) {
+    console.error('[AI Rerank Error]:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 module.exports = router;

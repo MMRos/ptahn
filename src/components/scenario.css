@@ -71,8 +71,8 @@
 .scenario-actions .icon:hover { background: rgba(255,255,255,0.06); }
 
 .char-modal {
-  width: 100% !important;
-  max-width: 620px !important;
+  width: 100%;
+  max-width: 620px;
   max-height: calc(100vh - 40px) !important;
   overflow-y: auto !important;
   margin: auto !important;
@@ -83,6 +83,11 @@
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
   position: relative !important;
   box-sizing: border-box !important;
+}
+.char-modal.wide-modal,
+.char-modal.scenario-wide-modal {
+  max-width: min(96vw, 1600px) !important;
+  width: 96vw !important;
 }
 .char-modal h4 { margin: 0 0 6px 0; color: #ffffff; font-size: 1.1rem; }
 .char-select-btn { 

@@ -6,6 +6,7 @@ import {
   createTranslationPrompt,
   createVisualPromptTranslationPrompt,
   cleanHeuristicVisualPrompt,
+  adaptPromptForDiffusionArchitecture,
   SUPPORTED_LANGUAGES
 } from './language';
 
@@ -93,5 +94,22 @@ describe('Language Detection & Multilingual Management Tests', () => {
     expect(system).toContain('Stable Diffusion SDXL');
     expect(system).toContain('Danbooru / CLIP tokens');
     expect(user).toContain('Kaelen alfa équido');
+    // Ensure system prompt does not contain biased anime tropes that pollute places or animals
+    expect(system).not.toContain('1girl, solo, smug, arrogant smile, rich girl');
+  });
+
+  test('adaptPromptForDiffusionArchitecture does not inject human tags into places or animals', () => {
+    // Scenery / place should NOT have 1girl, solo or 1boy, solo injected
+    const tavernPrompt = 'dark wooden tavern, stone fireplace, smoky atmosphere, rustic tables';
+    const adaptedTavern = adaptPromptForDiffusionArchitecture(tavernPrompt, 'v6.safetensors');
+    expect(adaptedTavern).not.toContain('1girl, solo');
+    expect(adaptedTavern).not.toContain('1boy, solo');
+
+    // Beast / creature should NOT have 1boy, solo or 1girl, solo injected
+    const wolfPrompt = 'grey dire wolf, thick fur, sharp fangs, glowing red eyes, menacing stance';
+    const adaptedWolf = adaptPromptForDiffusionArchitecture(wolfPrompt, 'v6.safetensors');
+    expect(adaptedWolf).not.toContain('1girl, solo');
+    expect(adaptedWolf).not.toContain('1boy, solo');
   });
 });
+

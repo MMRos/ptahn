@@ -29,7 +29,7 @@ export function resolveEntityInheritance(entity, masterCards = []) {
 
   const overrides = entity.overrides || {};
 
-  return {
+  const resolved = {
     ...masterParent,
     ...entity,
     ...overrides,
@@ -43,6 +43,12 @@ export function resolveEntityInheritance(entity, masterCards = []) {
     inventory: overrides.inventory || entity.inventory || masterParent.inventory || [],
     callWords: overrides.callWords || entity.callWords || masterParent.callWords || masterParent.tags || []
   };
+
+  if (entity.connections || overrides.connections || masterParent.connections) {
+    resolved.connections = entity.connections || overrides.connections || masterParent.connections || [];
+  }
+
+  return resolved;
 }
 
 /**

@@ -9,23 +9,23 @@ class LlamaEngineManager {
     this.model = null;
     this.context = null;
     this.activeModelName = null;
-    this.allocatedContextSize = 4096;
+    this.allocatedContextSize = 8192;
     this.isNativeLoaded = false;
     this.isLoading = false;
-    this.gpuInfo = 'CPU / Auto-detect';
+    this.gpuInfo = 'Hardware Accelerated (Vulkan)';
     this.lastError = null;
     this._executionMutex = Promise.resolve();
   }
 
   /**
-   * Initializes the Llama runtime if available
+   * Initializes the Llama runtime if available with GPU acceleration
    */
   async initRuntime() {
     if (this.llama && this.isNativeLoaded) return true;
     try {
       const { getLlama } = await import('node-llama-cpp');
-      this.llama = await getLlama();
-      this.gpuInfo = this.llama.gpu || 'Hardware Accelerated (Vulkan/CUDA)';
+      this.llama = await getLlama({ gpu: 'vulkan' });
+      this.gpuInfo = this.llama.gpu || 'Hardware Accelerated (Vulkan)';
       this.isNativeLoaded = true;
       console.log(`[LlamaEngine]: Native runtime loaded successfully with GPU: ${this.gpuInfo}`);
       return true;
@@ -33,7 +33,7 @@ class LlamaEngineManager {
       this.isNativeLoaded = false;
       this.llama = null;
       this.lastError = error.message;
-      console.warn(`[LlamaEngine]: node-llama-cpp native bindings not active: ${error.message}`);
+      console.warn(`[LlamaEngine]: node-llama-cpp native bindings fallback error: ${error.message}`);
       return false;
     }
   }
@@ -115,7 +115,7 @@ class LlamaEngineManager {
           // Free previous model and context first to release GPU VRAM
           await this._disposeCurrent();
 
-          // Tiered context allocation to guarantee loading without VRAM crash
+          // Tiered context allocation to guarantee loading into GPU VRAM
           const contextTiers = [8192, 4096, 2048];
           let loaded = false;
 
@@ -124,7 +124,7 @@ class LlamaEngineManager {
               await this._disposeCurrent();
               this.model = await this.llama.loadModel({
                 modelPath: fullPath,
-                gpuLayers: { fitContext: { contextSize: ctxSize } }
+                gpuLayers: 99
               });
               this.context = await this.model.createContext({
                 contextSize: ctxSize,
@@ -132,7 +132,7 @@ class LlamaEngineManager {
               });
               this.allocatedContextSize = ctxSize;
               loaded = true;
-              console.log(`[LlamaEngine]: Loaded model ${targetBaseName} into VRAM with context ${ctxSize} successfully.`);
+              console.log(`[LlamaEngine]: Loaded model ${targetBaseName} into GPU VRAM with context ${ctxSize} successfully.`);
               break;
             } catch (tierErr) {
               console.warn(`[LlamaEngine]: Context ${ctxSize} tier failed for ${targetBaseName} (${tierErr.message}), trying next tier...`);
@@ -168,7 +168,7 @@ class LlamaEngineManager {
   }
 
   /**
-   * Executes chat completion for a list of messages (Serialized via Mutex to prevent race conditions)
+   * Executes chat completion for a list of messages with complete conversational history
    * @param {Array<{role: string, content: string}>} messages 
    * @param {object} options 
    * @param {function} onToken
@@ -189,10 +189,10 @@ class LlamaEngineManager {
             throw new Error('No se encontraron modelos .gguf en la carpeta ./models/. Coloca un archivo .gguf para activar la inferencia nativa.');
           }
         }
-      } else if (options.forceModelSwitch && options.model) {
-        // Only force model switch if explicitly requested
+      } else if (options.model) {
         const resolved = this.resolveModelPath(options.model);
         if (resolved && path.basename(resolved) !== this.activeModelName) {
+          console.log(`[LlamaEngine]: Dynamic model switch requested: ${this.activeModelName} -> ${path.basename(resolved)}`);
           await this.loadModel(resolved);
         }
       }
@@ -213,13 +213,31 @@ class LlamaEngineManager {
 
         const systemMsg = messages.find(m => m.role === 'system')?.content || '';
         const nonSystemMessages = messages.filter(m => m.role !== 'system');
-        const lastUserMsg = nonSystemMessages.filter(m => m.role === 'user').pop()?.content || nonSystemMessages[nonSystemMessages.length - 1]?.content || '';
+        
+        // Build full conversational history for node-llama-cpp
+        const chatHistory = [];
+        if (systemMsg) {
+          chatHistory.push({ type: 'system', text: systemMsg });
+        }
+
+        const historyItems = nonSystemMessages.slice(0, -1);
+        const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
+        const lastUserMsg = lastMessage ? lastMessage.content : 'Continuar narración.';
+
+        for (const item of historyItems) {
+          if (item.role === 'user') {
+            chatHistory.push({ type: 'user', text: item.content });
+          } else if (item.role === 'assistant') {
+            chatHistory.push({ type: 'model', response: [item.content] });
+          }
+        }
 
         const sequence = this.context.getSequence();
         const session = new LlamaChatSession({
           contextSequence: sequence,
           autoDisposeSequence: true,
           systemPrompt: systemMsg || undefined,
+          chatHistory: chatHistory.length > 0 ? chatHistory : undefined,
           contextShift: {
             strategy: 'eraseBeginning'
           }

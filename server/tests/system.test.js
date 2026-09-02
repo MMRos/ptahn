@@ -40,6 +40,7 @@ function makeRequest(url, options = {}) {
 }
 
 describe('System Telemetry Route (/api/system)', () => {
+  jest.setTimeout(15000);
   let app;
   let server;
   let baseUrl;

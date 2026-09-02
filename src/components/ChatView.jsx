@@ -18,6 +18,8 @@ import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generat
 import { resolveTargetLanguage } from '../utils/language';
 import { autoCompleteEntityWithAI } from '../utils/aiEnhancer';
 import { buildStorytellerSystemPrompt } from '../utils/promptBuilder';
+import { isEntityEligibleForAutoCard } from '../utils/cardGatekeeper';
+import { normalizeMessageTurns, resolveSceneState } from '../utils/sceneStateTracker';
 import ActiveEntityModal from './chat/ActiveEntityModal';
 import ChatInputDock from './chat/ChatInputDock';
 
@@ -28,6 +30,7 @@ import { detectActiveCharacter, matchCharacterExpression, resolveLocationWallpap
 
 import { executeInboundOrchestration, executeOutboundOrchestration } from '../utils/orchestratorPipeline';
 import { addChat } from '../utils/db';
+import { getActiveInitialMessageText } from '../utils/scenarioScoping';
 
 
 import StagingModal from './StagingModal';
@@ -36,48 +39,91 @@ import CharacterSidebar from './CharacterSidebar';
 import ConfirmModal from './ConfirmModal';
 import './chats.css';
 
+export function resolveUserCharacter(chat, appData) {
+  if (!chat || !appData?.cards) return null;
+  const targetId = chat.userCharacterId || chat.characterId || chat.character;
+  const targetName = (chat.userCharacterName || chat.character || chat.characterId || '').trim().toLowerCase();
+
+  return (appData.cards || []).find(c => {
+    if (c.type !== 'Personaje' && c.type !== 'User') return false;
+    const cTitle = (c.title || c.name || '').trim().toLowerCase();
+    return c.id === targetId ||
+           (targetName && cTitle === targetName) ||
+           (chat.userCharacterId && c.id === chat.userCharacterId) ||
+           (chat.characterId && (c.id === chat.characterId || cTitle === chat.characterId.trim().toLowerCase())) ||
+           (chat.character && (c.id === chat.character || cTitle === chat.character.trim().toLowerCase())) ||
+           (chat.userCharacterName && cTitle === chat.userCharacterName.trim().toLowerCase());
+  }) || findMatchingEntity(targetName, appData.cards) || null;
+}
+
 export function getScenarioCards(scenario, chat, appData, userChar) {
   const allCards = appData?.cards || [];
-  const scenarioCardIdsOrTitles = Array.isArray(scenario?.cards) ? scenario.cards : [];
-  const chatCharacterIdsOrTitles = Array.isArray(chat?.characters) ? chat.characters.map(c => c.id || c.name) : [];
+  const scenarioCardsArray = Array.isArray(scenario?.cards) ? scenario.cards : [];
+  const chatCharactersArray = Array.isArray(chat?.characters) ? chat.characters : [];
+  const activeScenarioId = scenario?.id || chat?.scenarioId;
+  const activeScenarioTitle = scenario?.title || chat?.scenario;
 
-  return allCards.filter(c => {
+  // Incluir objetos embebidos directos si existen en scenario.cards
+  const embeddedScenarioCards = scenarioCardsArray.filter(item => item && typeof item === 'object');
+  const combinedPool = [...allCards, ...embeddedScenarioCards];
+  const seen = new Set();
+  const uniquePool = [];
+  for (const c of combinedPool) {
+    const key = c.id || c.title || c.name;
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      uniquePool.push(c);
+    }
+  }
+
+  return uniquePool.filter(c => {
     if (!c) return false;
     if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
     if (c.type === 'Inventario' || c.type === 'Memoria') return false;
 
-    // 1. Direct link in scenario.cards
-    const isDirectlyLinked = scenarioCardIdsOrTitles.some(idOrTitle => 
-      idOrTitle === c.id || 
-      idOrTitle === c.title || 
-      (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
-    );
-    if (isDirectlyLinked) return true;
+    // 1. Vinculación directa en scenario.cards (por id o título)
+    const isDirectlyInScenario = scenarioCardsArray.some(ref => {
+      if (!ref) return false;
+      const refId = typeof ref === 'string' ? ref : ref.id;
+      const refTitle = typeof ref === 'string' ? ref : (ref.title || ref.name);
+      return (
+        (refId && (c.id === refId || normalizeEntityName(c.id) === normalizeEntityName(refId))) ||
+        (refTitle && (c.title === refTitle || normalizeEntityName(c.title) === normalizeEntityName(refTitle)))
+      );
+    });
+    if (isDirectlyInScenario) return true;
 
-    // 2. Direct link in chat.characters
-    const isChatLinked = chatCharacterIdsOrTitles.some(idOrTitle => 
-      idOrTitle === c.id || 
-      idOrTitle === c.title || 
-      (c.title && idOrTitle && normalizeEntityName(c.title) === normalizeEntityName(idOrTitle))
-    );
-    if (isChatLinked) return true;
+    // 2. Vinculación directa en chat.characters
+    const isDirectlyInChat = chatCharactersArray.some(ref => {
+      if (!ref) return false;
+      const refId = typeof ref === 'string' ? ref : ref.id;
+      const refTitle = typeof ref === 'string' ? ref : (ref.title || ref.name);
+      return (
+        (refId && (c.id === refId || normalizeEntityName(c.id) === normalizeEntityName(refId))) ||
+        (refTitle && (c.title === refTitle || normalizeEntityName(c.title) === normalizeEntityName(refTitle)))
+      );
+    });
+    if (isDirectlyInChat) return true;
 
-    // 3. Card has linkedScenario matching scenario ID or title
-    const isScenarioLinked = c.linkedScenario === chat?.scenarioId || 
-                             c.linkedScenario === scenario?.title || 
-                             c.linkedScenario === scenario?.id || 
-                             (scenario?.title && c.linkedScenario && normalizeEntityName(c.linkedScenario) === normalizeEntityName(scenario.title));
-    if (isScenarioLinked) return true;
+    // 3. Tarjeta creada o vinculada explícitamente a este escenario
+    if (c.linkedScenario) {
+      if (activeScenarioId && (c.linkedScenario === activeScenarioId || normalizeEntityName(c.linkedScenario) === normalizeEntityName(activeScenarioId))) return true;
+      if (activeScenarioTitle && (c.linkedScenario === activeScenarioTitle || normalizeEntityName(c.linkedScenario) === normalizeEntityName(activeScenarioTitle))) return true;
+    }
 
-    // 4. Connected cards matching scenario
-    const isConnected = Array.isArray(c.connectedCards) && (
-      (chat?.scenarioId && c.connectedCards.includes(chat.scenarioId)) || 
-      (scenario?.title && c.connectedCards.includes(scenario.title)) || 
-      (scenario?.id && c.connectedCards.includes(scenario.id)) ||
-      (scenario?.title && c.connectedCards.some(cc => normalizeEntityName(cc) === normalizeEntityName(scenario.title)))
-    );
-    if (isConnected) return true;
+    // 4. Tarjetas conectadas explícitamente a este escenario
+    if (Array.isArray(c.connectedCards) && c.connectedCards.length > 0) {
+      const isConnected = c.connectedCards.some(cc => {
+        if (!cc || typeof cc !== 'string') return false;
+        return (
+          (activeScenarioId && (cc === activeScenarioId || normalizeEntityName(cc) === normalizeEntityName(activeScenarioId))) ||
+          (activeScenarioTitle && (cc === activeScenarioTitle || normalizeEntityName(cc) === normalizeEntityName(activeScenarioTitle)))
+        );
+      });
+      if (isConnected) return true;
+    }
 
+    // AISLAMIENTO TOTAL: No existen tarjetas globales. Toda entidad fuera del escenario queda excluida.
     return false;
   });
 }
@@ -127,25 +173,58 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, onD
     }
   };
 
+  // Estado ambiental y espacial persistente (F048)
+  const [currentSceneState, setCurrentSceneState] = useState(() => chat?.currentSceneState || chat?.messages?.slice(-1)[0]?.sceneState || null);
+
   // Scroll instantáneo y sincronización de mensajes al montar o cambiar de chat
   useEffect(() => {
     activeChatIdRef.current = chat?.id;
     let currentMsgs = chat?.messages || [];
+    let activeScene = chat?.currentSceneState || null;
+
     if (currentMsgs.length === 0 && chat?.scenarioId) {
       const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId) || 
                        (appData?.cards || []).find(c => c.id === chat.scenarioId);
-      const firstText = (scenario?.presentation || scenario?.intro || '').trim();
+      const firstText = getActiveInitialMessageText(scenario);
       if (firstText) {
+        activeScene = resolveSceneState({
+          currentText: firstText,
+          scenario,
+          currentTurn: 0
+        });
         currentMsgs = [
           {
             from: 'narrator',
             text: firstText,
-            createdAt: new Date().toISOString()
+            turn: 0,
+            createdAt: new Date().toISOString(),
+            sceneState: activeScene
           }
         ];
-        persistChatMessages(chat?.id, chat, currentMsgs);
+        persistChatMessages(chat?.id, { ...chat, currentSceneState: activeScene }, currentMsgs, activeScene);
+      }
+    } else {
+      currentMsgs = normalizeMessageTurns(currentMsgs);
+      activeScene = activeScene || currentMsgs.slice(-1)[0]?.sceneState || null;
+      if (!activeScene || !activeScene.location) {
+        const scenario = (appData?.scenarios || []).find(s => s.id === chat?.scenarioId) || 
+                         (appData?.cards || []).find(c => c.id === chat?.scenarioId);
+        const firstText = currentMsgs[0]?.text || '';
+        const initialScene = resolveSceneState({
+          currentText: firstText,
+          scenario,
+          currentTurn: 0
+        });
+        if (initialScene) {
+          activeScene = { ...(initialScene || {}), ...(activeScene || {}) };
+          if (currentMsgs.length > 0 && !currentMsgs[0].sceneState) {
+            currentMsgs[0] = { ...currentMsgs[0], sceneState: initialScene };
+          }
+        }
       }
     }
+
+    setCurrentSceneState(activeScene);
     setMessages(currentMsgs);
     setManualCharacterOverride(null);
     setManualCharacterImageId(null);
@@ -385,13 +464,15 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     }
   }, [selectedMessagesForCard, isSelectingForCard, messages, onOpenCreateModal]);
 
-  const persistChatMessages = async (targetChatId, targetChatMeta, nextMsgs) => {
+  const persistChatMessages = async (targetChatId, targetChatMeta, nextMsgs, sceneState = currentSceneState) => {
     if (!targetChatId) return;
     const now = new Date().toISOString();
+    const normalizedMsgs = normalizeMessageTurns(nextMsgs);
     const updatedChat = { 
       ...(targetChatMeta || {}),
       id: targetChatId,
-      messages: nextMsgs,
+      messages: normalizedMsgs,
+      currentSceneState: sceneState,
       updatedAt: now
     };
     try { await addChat(updatedChat); } catch(err) { console.warn('IndexedDB save err:', err); }
@@ -399,15 +480,15 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       try { await saveChatToFolder(updatedChat, folderHandle); } catch (err) {}
     }
     if (activeChatIdRef.current === targetChatId) {
-      setMessages(nextMsgs);
+      setMessages(normalizedMsgs);
       if (onUpdateChat) {
         onUpdateChat(updatedChat);
       }
     }
   };
 
-  const persistMessages = async (nextMsgs) => {
-    return persistChatMessages(chat?.id, chat, nextMsgs);
+  const persistMessages = async (nextMsgs, sceneState = currentSceneState) => {
+    return persistChatMessages(chat?.id, chat, nextMsgs, sceneState);
   };
 
   const handleSpeakMessage = async (message, idx) => {
@@ -509,15 +590,21 @@ Respond directly with the descriptive lore text without introductory fluff or pr
   // Construcción unificada y estructurada del systemPrompt (arnés de contexto).
   // Consolida los detalles del escenario, personajes/PNJs preestablecidos, narrador, herramientas del taller, jugador, inventario y memorias.
   // Construcción unificada y estructurada del systemPrompt delegada al módulo promptBuilder.
-  const buildSystemPrompt = (preFilteredEntities = null) => {
-    const scenario = (appData?.scenarios || []).find(s => s.id === chat.scenarioId || s.title?.toLowerCase() === (chat.scenario || "").toLowerCase()) ||
-                     (appData?.cards || []).find(c => c.id === chat.scenarioId || c.title?.toLowerCase() === (chat.scenario || "").toLowerCase()) ||
-                     findMatchingEntity(chat.scenario, appData);
+  const buildSystemPrompt = (preFilteredEntities = null, sceneContext = null, targetChatOverride = null) => {
+    const activeChat = targetChatOverride || chat;
+    const scenario = (appData?.scenarios || []).find(s => s.id === activeChat?.scenarioId || s.title?.toLowerCase() === (activeChat?.scenario || "").toLowerCase()) ||
+                     (appData?.cards || []).find(c => c.id === activeChat?.scenarioId || c.title?.toLowerCase() === (activeChat?.scenario || "").toLowerCase()) ||
+                     findMatchingEntity(activeChat?.scenario, appData);
     const narrator = (appData?.narrators || []).find(n => n.id === scenario?.narrator);
-    const userChar = (appData?.cards || []).find(c => c.id === chat.characterId || c.title?.toLowerCase() === (chat.character || "").toLowerCase()) ||
-                     findMatchingEntity(chat.character, appData?.cards);
+    const userChar = resolveUserCharacter(activeChat, appData);
     const assignedTools = (appData?.narratorTools || []).filter(t => (narrator?.tools || []).includes(t.id));
-    const userInventories = (appData?.cards || []).filter(c => c.type === 'Inventario' && c.ownerId === userChar?.id);
+    const userInventories = (appData?.cards || []).filter(c => 
+      c && c.type === 'Inventario' && (
+        (userChar?.id && c.linkedCharacterId === userChar.id) ||
+        (userChar?.title && c.linkedCharacterId === userChar.title) ||
+        (userChar?.id && c.ownerId === userChar.id)
+      )
+    );
     const relevantEntities = preFilteredEntities || scenarioCards;
 
     return buildStorytellerSystemPrompt({
@@ -527,29 +614,55 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       userChar,
       userInventories,
       relevantEntities,
-      chat,
-      messages,
-      chatSettings
+      chat: activeChat,
+      messages: messages.slice(-10),
+      chatSettings,
+      sceneContext
     });
   };
   const runBackgroundSummarization = (finalMsgs, targetChatSnapshot = chat) => {
+    // Generar recuerdos fácticos cada 4 turnos narrativos
+    if (!finalMsgs || finalMsgs.length < 4 || finalMsgs.length % 4 !== 0) return;
+
     setTimeout(async () => {
       try {
         const targetChat = targetChatSnapshot || chat;
         const targetChatId = targetChat?.id;
         if (!targetChatId) return;
 
+        // Tomar exactamente el bloque de los últimos 4 mensajes
+        const blockMessages = finalMsgs.slice(-4);
+
         const newSummary = await sendContextSummarizationTask({
-          messages: finalMsgs,
-          currentMemory: targetChat.memoryCards || [],
-          modelId: chatSettings?.preferredModel,
+          messages: blockMessages,
+          currentMemory: (targetChat.memoryCards || []).map(m => typeof m === 'string' ? m : (m.summary || m.text || '')),
+          modelId: chatSettings?.orchestratorModel || chatSettings?.preferredModel,
           preferredLanguage: chatSettings?.preferredLanguage || 'auto',
           baseUrl: chatSettings?.lmStudioUrl
         });
+
         if (newSummary && typeof newSummary === 'string' && newSummary.trim()) {
-          console.log('[Context Summary Task]: Nueva memoria generada:', newSummary);
-          const nextMemory = [...(targetChat.memoryCards || []), newSummary.trim()];
-          
+          console.log('[Context Summary Task]: Nueva memoria episódica generada:', newSummary);
+
+          // Detectar qué tarjetas del escenario estaban activas/mencionadas en este bloque de 4 mensajes
+          const blockText = blockMessages.map(m => m.text || '').join(' ').toLowerCase();
+          const activeScenario = scenario || (appData?.scenarios || []).find(s => s.id === targetChat?.scenarioId);
+          const activeScenarioCards = getScenarioCards(activeScenario, targetChat, appData, userChar);
+          const connectedCards = activeScenarioCards.filter(c => {
+            const name = (c.title || c.name || '').toLowerCase();
+            return name && name.length > 2 && blockText.includes(name);
+          }).map(c => c.id || c.title);
+
+          const newMemoryEntry = {
+            id: `mem-${Date.now()}`,
+            type: 'Memoria',
+            turnRange: `${Math.max(0, finalMsgs.length - 4)}-${finalMsgs.length - 1}`,
+            summary: newSummary.trim(),
+            connectedCards,
+            createdAt: new Date().toISOString()
+          };
+
+          const nextMemory = [...(targetChat.memoryCards || []), newMemoryEntry];
           targetChat.memoryCards = nextMemory;
           
           const updatedChat = { ...targetChat, messages: finalMsgs, memoryCards: nextMemory };
@@ -577,24 +690,46 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         const targetChat = targetChatSnapshot || chat;
         const scenario = (appData?.scenarios || []).find(s => s.id === targetChat?.scenarioId || s.title?.toLowerCase() === (targetChat?.scenario || '').toLowerCase()) ||
                          (appData?.cards || []).find(c => c.id === targetChat?.scenarioId || c.title?.toLowerCase() === (targetChat?.scenario || '').toLowerCase());
-        const existingCards = appData?.cards || [];
-        const existingScenarios = appData?.scenarios || [];
+        const userChar = resolveUserCharacter(targetChat, appData);
+        
+        // Aislamiento estricto: solo tarjetas del escenario activo, no las 33 globales
+        const activeScenarioCards = getScenarioCards(scenario, targetChat, appData, userChar);
+        const allKnownCards = [...activeScenarioCards, ...(targetChat?.cards || []), ...(scenario ? [scenario] : [])];
+
         const extractedEntities = await sendExtractCardsTask({
-          messages: finalMsgs,
-          existingCards: existingCards,
-          existingScenarios: existingScenarios,
+          messages: finalMsgs.slice(-10),
+          existingCards: activeScenarioCards,
+          existingScenarios: scenario ? [scenario] : [],
           activeScenario: scenario,
-          modelId: chatSettings?.preferredModel,
+          userChar: userChar,
+          modelId: chatSettings?.orchestratorModel || chatSettings?.preferredModel,
           preferredLanguage: chatSettings?.preferredLanguage || 'auto',
           baseUrl: chatSettings?.lmStudioUrl
         });
 
         if (Array.isArray(extractedEntities) && extractedEntities.length > 0) {
-          console.log(`[Auto-Card Task]: ${extractedEntities.length} entidades detectadas por IA:`, extractedEntities);
+          // Filtro de cuatro capas: Recurrencia, Significancia, Deduplicación y Protección del Protagonista (F047)
+          const eligibleEntities = extractedEntities.filter(entity => {
+            const isEligible = isEntityEligibleForAutoCard(entity, finalMsgs, {
+              minRecurrence: 3,
+              existingCards: allKnownCards,
+              userChar
+            });
+            if (!isEligible) {
+              console.log(`[Auto-Card Gatekeeper]: Descartado por duplicado, persona del jugador, animal incidental o no alcanzar recurrencia >= 3 turnos: "${entity.title}"`);
+            }
+            return isEligible;
+          });
+
+          if (eligibleEntities.length === 0) {
+            return;
+          }
+
+          console.log(`[Auto-Card Task]: ${eligibleEntities.length} entidades aprobadas por el gatekeeper:`, eligibleEntities);
           const newCardObjects = [];
           const recentStoryContext = finalMsgs.slice(-6).map(m => `${m.from === 'user' ? 'Jugador' : 'Narrador'}: ${m.text}`).join('\n\n');
 
-          for (const entity of extractedEntities) {
+          for (const entity of eligibleEntities) {
             let workingEntity = { ...entity };
 
             // Rellenado inteligente obligatorio con IA si los campos vienen vacíos o escuetos (< 40 caracteres)
@@ -648,6 +783,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
               type: workingEntity.type || 'Personaje',
               characterRole: isChar ? 'npc' : undefined,
               title: workingEntity.title,
+              linkedScenario: targetChat?.scenarioId || scenario?.id || scenario?.title || undefined,
               intro: workingEntity.intro || (workingEntity.text ? workingEntity.text.substring(0, 100) + '...' : ''),
               text: workingEntity.text || '',
               cover: coverUrl || '',
@@ -768,23 +904,39 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     }
 
     try {
+      const activeScenario = scenario || (appData?.scenarios || []).find(s => 
+        s.id === targetChatSnapshot?.scenarioId || s.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
+      ) || (appData?.cards || []).find(c => 
+        c.id === targetChatSnapshot?.scenarioId || c.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
+      ) || findMatchingEntity(targetChatSnapshot?.scenario, appData);
+
+      const activeUserChar = resolveUserCharacter(targetChatSnapshot, appData);
+
       // 1. Orquestación Inbound (Pre-Vuelo con estricto ámbito de escenario)
-      const activeScenarioCards = getScenarioCards(scenario, targetChatSnapshot, appData, userChar);
+      const activeScenarioCards = getScenarioCards(activeScenario, targetChatSnapshot, appData, activeUserChar);
       const lastUserPrompt = promptMessages[promptMessages.length - 1]?.text || '';
+      const redoTurn = historyBefore.length > 0
+        ? (historyBefore[historyBefore.length - 1].turn !== undefined ? historyBefore[historyBefore.length - 1].turn + 1 : historyBefore.length)
+        : 0;
+      const previousState = historyBefore.length > 0 ? historyBefore[historyBefore.length - 1].sceneState : currentSceneState;
+
       const inbound = await executeInboundOrchestration({
         orchestratorModel: chatSettings?.orchestratorModel,
         userMessage: lastUserPrompt,
         cards: activeScenarioCards,
-        recentMessages: historyBefore,
+        recentMessages: historyBefore.slice(-10),
         chatSettings,
-        baseUrl: chatSettings?.lmStudioUrl
+        baseUrl: chatSettings?.lmStudioUrl,
+        previousSceneState: previousState,
+        scenario: activeScenario,
+        currentTurn: redoTurn
       });
 
-      const systemPrompt = buildSystemPrompt(inbound.filteredCards);
+      const systemPrompt = buildSystemPrompt(inbound.filteredCards, inbound.sceneContext, targetChatSnapshot);
       const res = await sendChatMessage({
-        messages: promptMessages,
+        messages: promptMessages.slice(-10),
         systemInstruction: systemPrompt,
-        contextDocuments: targetChatSnapshot.contextDocuments || [],
+        contextDocuments: (inbound.filteredCards && inbound.filteredCards.length > 0) ? inbound.filteredCards : (targetChatSnapshot.contextDocuments || []),
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
@@ -821,13 +973,22 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       const finalNarrative = (outbound?.formattedText && outbound.formattedText.trim().length > 0)
         ? outbound.formattedText.trim()
         : ((res?.text && res.text.trim().length > 0) ? res.text.trim() : 'Sin respuesta.');
+      const finalSceneState = resolveSceneState({
+        previousState: inbound.sceneState,
+        currentText: finalNarrative,
+        scenario: activeScenario,
+        currentTurn: redoTurn
+      });
+      setCurrentSceneState(finalSceneState);
       const newAiMsg = {
         from: aiRole,
         text: finalNarrative,
-        timestamp: new Date().toISOString()
+        turn: redoTurn,
+        timestamp: new Date().toISOString(),
+        sceneState: finalSceneState
       };
       const finalMsgs = [...historyBefore, newAiMsg];
-      await persistChatMessages(executionChatId, targetChatSnapshot, finalMsgs);
+      await persistChatMessages(executionChatId, targetChatSnapshot, finalMsgs, finalSceneState);
       runBackgroundSummarization(finalMsgs, targetChatSnapshot);
       runBackgroundCardGeneration(finalMsgs, targetChatSnapshot);
 
@@ -854,13 +1015,24 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     const executionChatId = chat?.id;
     const targetChatSnapshot = { ...chat };
 
-    const newMsg = { from: 'user', text: textToSend.trim() || '...', timestamp: new Date().toISOString() };
+    const lastTurn = messages.length > 0
+      ? (messages[messages.length - 1].turn !== undefined ? messages[messages.length - 1].turn : messages.length - 1)
+      : -1;
+    const userTurn = lastTurn + 1;
+
+    const newMsg = {
+      from: 'user',
+      text: textToSend.trim() || '...',
+      turn: userTurn,
+      timestamp: new Date().toISOString(),
+      sceneState: currentSceneState
+    };
     const nextMsgs = textToSend.trim() ? [...messages, newMsg] : messages;
     
-    const streamingAiMsg = { from: 'ai', text: '', timestamp: new Date().toISOString() };
+    const streamingAiMsg = { from: 'ai', text: '', turn: userTurn + 1, timestamp: new Date().toISOString() };
     
     if (textToSend.trim()) {
-      await persistChatMessages(executionChatId, targetChatSnapshot, nextMsgs);
+      await persistChatMessages(executionChatId, targetChatSnapshot, nextMsgs, currentSceneState);
     }
     
     if (activeChatIdRef.current === executionChatId) {
@@ -871,24 +1043,40 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     }
 
     try {
+      const activeScenario = scenario || (appData?.scenarios || []).find(s => 
+        s.id === targetChatSnapshot?.scenarioId || s.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
+      ) || (appData?.cards || []).find(c => 
+        c.id === targetChatSnapshot?.scenarioId || c.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
+      ) || findMatchingEntity(targetChatSnapshot?.scenario, appData);
+
+      const activeUserChar = resolveUserCharacter(targetChatSnapshot, appData);
+
       // 1. Orquestación Inbound (Pre-Vuelo con aislamiento estricto de tarjetas del escenario)
-      const activeScenarioCards = getScenarioCards(scenario, targetChatSnapshot, appData, userChar);
+      const activeScenarioCards = getScenarioCards(activeScenario, targetChatSnapshot, appData, activeUserChar);
       const inbound = await executeInboundOrchestration({
         orchestratorModel: chatSettings?.orchestratorModel,
         userMessage: textToSend.trim(),
         cards: activeScenarioCards,
-        recentMessages: messages,
+        recentMessages: messages.slice(-10),
         chatSettings,
-        baseUrl: chatSettings?.lmStudioUrl
+        baseUrl: chatSettings?.lmStudioUrl,
+        previousSceneState: currentSceneState,
+        scenario: activeScenario,
+        currentTurn: userTurn
       });
 
+      if (inbound.sceneState) {
+        newMsg.sceneState = inbound.sceneState;
+        setCurrentSceneState(inbound.sceneState);
+      }
+
       // 2. Generación Principal con Storyteller
-      const systemPrompt = buildSystemPrompt(inbound.filteredCards);
+      const systemPrompt = buildSystemPrompt(inbound.filteredCards, inbound.sceneContext, targetChatSnapshot);
 
       const res = await sendChatMessage({
-        messages: nextMsgs,
+        messages: nextMsgs.slice(-10),
         systemInstruction: systemPrompt,
-        contextDocuments: targetChatSnapshot.contextDocuments || [],
+        contextDocuments: (inbound.filteredCards && inbound.filteredCards.length > 0) ? inbound.filteredCards : (targetChatSnapshot.contextDocuments || []),
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
@@ -925,9 +1113,23 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       const finalNarrative = (outbound?.formattedText && outbound.formattedText.trim().length > 0)
         ? outbound.formattedText.trim()
         : ((res?.text && res.text.trim().length > 0) ? res.text.trim() : 'Sin respuesta.');
-      const aiMsg = { from: 'ai', text: finalNarrative, timestamp: new Date().toISOString() };
+      const aiTurn = userTurn + 1;
+      const finalSceneState = resolveSceneState({
+        previousState: inbound.sceneState || currentSceneState,
+        currentText: finalNarrative,
+        scenario: activeScenario,
+        currentTurn: aiTurn
+      });
+      setCurrentSceneState(finalSceneState);
+      const aiMsg = {
+        from: 'ai',
+        text: finalNarrative,
+        turn: aiTurn,
+        timestamp: new Date().toISOString(),
+        sceneState: finalSceneState
+      };
       const finalMsgs = [...nextMsgs, aiMsg];
-      await persistChatMessages(executionChatId, targetChatSnapshot, finalMsgs);
+      await persistChatMessages(executionChatId, targetChatSnapshot, finalMsgs, finalSceneState);
 
       // 4. Auto-creación de tarjetas de entidades descubiertas
       if (chatSettings?.autoCardCreation !== 'off' && outbound.discoveredEntities?.length > 0 && appData && onUpdateAppData) {
@@ -993,14 +1195,22 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     }
 
     try {
-      const activeScenarioCards = getScenarioCards(scenario, targetChatSnapshot, appData, userChar);
-      const basePrompt = buildSystemPrompt();
+      const activeScenario = scenario || (appData?.scenarios || []).find(s => 
+        s.id === targetChatSnapshot?.scenarioId || s.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
+      ) || (appData?.cards || []).find(c => 
+        c.id === targetChatSnapshot?.scenarioId || c.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
+      ) || findMatchingEntity(targetChatSnapshot?.scenario, appData);
+
+      const activeUserChar = resolveUserCharacter(targetChatSnapshot, appData);
+
+      const activeScenarioCards = getScenarioCards(activeScenario, targetChatSnapshot, appData, activeUserChar);
+      const basePrompt = buildSystemPrompt(null, null, targetChatSnapshot);
       const systemPrompt = `${basePrompt}\n\n[ÓRDENE EXTRA DE INMEDIATA]: Continúa la narración desde el punto exacto donde quedó.`;
 
       const res = await sendChatMessage({
-        messages: messages,
+        messages: messages.slice(-10),
         systemInstruction: systemPrompt,
-        contextDocuments: targetChatSnapshot.contextDocuments || [],
+        contextDocuments: (activeScenarioCards && activeScenarioCards.length > 0) ? activeScenarioCards : (targetChatSnapshot.contextDocuments || []),
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
@@ -1085,16 +1295,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
   };
 
   // Personaje del jugador
-  const userChar = (appData?.cards || []).find(c => 
-    (c.type === 'Personaje' || c.type === 'User') && (
-      c.id === chat?.userCharacterId || 
-      (c.title && c.title === chat?.userCharacterName) ||
-      c.id === chat?.characterId ||
-      (c.title && c.title === chat?.character) ||
-      c.id === chat?.character ||
-      (c.name && c.name === chat?.character)
-    )
-  ) || findMatchingEntity(chat?.character, appData?.cards);
+  const userChar = resolveUserCharacter(chat, appData);
 
   // Escenario activo
   const scenario = (appData?.scenarios || []).find(s => 
@@ -1194,12 +1395,27 @@ Respond directly with the descriptive lore text without introductory fluff or pr
             )}
             <div className={`chat-message-bubble ${m.from === 'user' ? 'user' : 'ai'}`} style={{ flex: 1 }}>
               <div className="msg-header">
-                <span className="msg-author">
-                  {m.from === 'user' 
-                    ? 'Tú' 
-                    : (appData?.scenarios?.find(s => s.id === chat.scenarioId)?.narrator ? '🧙 Narrador (IA)' : 'Narrador (IA)')
-                  }
-                </span>
+                <div className="msg-header-left">
+                  <span className="msg-author">
+                    {m.from === 'user' 
+                      ? 'Tú' 
+                      : (appData?.scenarios?.find(s => s.id === chat.scenarioId)?.narrator ? '🧙 Narrador (IA)' : 'Narrador (IA)')
+                    }
+                  </span>
+                  <span className="msg-turn-badge" title={`Secuencia de mensaje #${m.turn !== undefined ? m.turn : idx}`}>
+                    #{m.turn !== undefined ? m.turn : idx}
+                  </span>
+                  {m.sceneState && (m.sceneState.location || m.sceneState.timeOfDay || m.sceneState.weather) && (
+                    <span 
+                      className="msg-scene-pill" 
+                      title={`Lugar: ${m.sceneState.location || 'N/A'} | Momento: ${m.sceneState.timeOfDay || 'N/A'} | Clima: ${m.sceneState.weather || 'N/A'}`}
+                    >
+                      {m.sceneState.location && <span>📍 {m.sceneState.location}</span>}
+                      {m.sceneState.timeOfDay && <span>🕒 {m.sceneState.timeOfDay}</span>}
+                      {m.sceneState.weather && <span>⛅ {m.sceneState.weather}</span>}
+                    </span>
+                  )}
+                </div>
                 <div className="msg-toolbar">
                   {m.from !== 'user' && (
                     <button 
@@ -1420,17 +1636,32 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         isOpen={isStagingOpen}
         onClose={() => setIsStagingOpen(false)}
         messages={messages}
-        characters={chat.characters || []}
+        characters={scenarioCharacters.length > 0 ? scenarioCharacters : (Array.isArray(chat?.characters) ? chat.characters : [])}
         onGenerateImage={async (stagingData) => {
-          const localUrl = await generateImageLocal(stagingData.prompt, stagingData.style);
-          const imageMsg = {
-            from: 'ai',
-            isImage: true,
-            imageUrl: localUrl,
-            text: `[Escena generada]: ${stagingData.prompt}`,
-            timestamp: new Date().toISOString()
-          };
-          persistMessages([...messages, imageMsg]);
+          try {
+            const { width = 768, height = 512 } = stagingData;
+            const localUrl = await generateImageLocal(
+              stagingData.prompt, 
+              stagingData.style,
+              chatSettings?.imageServerUrl,
+              chatSettings?.preferredImageModel,
+              width,
+              height
+            );
+            if (localUrl) {
+              const imageMsg = {
+                from: 'narrator',
+                isImage: true,
+                imageUrl: localUrl,
+                text: `[Escena generada]: ${stagingData.summary || stagingData.prompt}`,
+                createdAt: new Date().toISOString()
+              };
+              persistMessages([...messages, imageMsg]);
+            }
+          } catch (err) {
+            console.warn('[Staging]: Error generating scene image:', err);
+            alert(`[Escenificación]: No se pudo generar la imagen de escena. ${err.message || 'Verifica que el motor de difusión local esté activo.'}`);
+          }
         }}
       />
 

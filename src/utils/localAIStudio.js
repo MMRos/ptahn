@@ -13,6 +13,7 @@ import { findMatchingEntity } from './textFormatter';
 import { generateNativeImage, getServerBaseUrl } from './serverApi';
 import { emitAILog } from './aiLogEmitter';
 import { recordTokensTelemetry, calculateTokensSpeed } from './systemTelemetry';
+import { isEntityEligibleForAutoCard } from './cardGatekeeper';
 
 /**
  * Local AI Studio Multimodal Manager for Ptahn
@@ -35,7 +36,7 @@ export function getBaseUrl(baseUrl) {
   }
   
   const settings = loadChatSettings();
-  const url = settings.lmStudioUrl || settings.llmServerUrl || 'http://127.0.0.1:1234';
+  const url = settings.lmStudioUrl || settings.llmServerUrl || 'http://localhost:3001';
   return url.replace(/\/$/, '');
 }
 
@@ -82,31 +83,25 @@ export async function apiFetch(endpoint, options = {}, baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  // Dynamic timeout: Long (180s) for LLM/SLM inference & diffusion; short (3.5s) for discovery & health checks
+  // Dynamic timeout: Long (180s) for LLM/SLM inference & diffusion; short (6s) for discovery & health checks
   const isHeavyEndpoint = cleanEndpoint.includes('/chat/completions') || cleanEndpoint.includes('/images/') || cleanEndpoint.includes('/models/load') || cleanEndpoint.includes('/completions');
-  const defaultTimeoutMs = isHeavyEndpoint ? 180000 : 3500;
+  const defaultTimeoutMs = isHeavyEndpoint ? 180000 : 6000;
   const defaultTimeout = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(defaultTimeoutMs) : undefined;
   const fetchOptions = {
     ...options,
     signal: options.signal || defaultTimeout
   };
 
-  // 1. Direct attempt to native backend
+  const directUrl = `${finalBaseUrl}${cleanEndpoint}`;
   try {
-    const directUrl = `${finalBaseUrl}${cleanEndpoint}`;
     const directRes = await fetch(directUrl, fetchOptions);
-    if (directRes.ok) {
-      return directRes;
-    }
+    return directRes;
   } catch (directErr) {
-    // Network fallback
-  }
-
-  // 2. Relative endpoint fallback
-  try {
-    return await fetch(cleanEndpoint, fetchOptions);
-  } catch (fallbackErr) {
-    throw fallbackErr;
+    // If base URL was custom and failed, only fallback to relative if running on same origin
+    if (typeof window !== 'undefined' && window.location && window.location.origin === finalBaseUrl) {
+      return await fetch(cleanEndpoint, fetchOptions);
+    }
+    throw directErr;
   }
 }
 
@@ -116,12 +111,12 @@ export async function apiFetch(endpoint, options = {}, baseUrl) {
 export async function getAvailableModels(baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   try {
-    const response = await apiFetch('/api/models', {}, finalBaseUrl).catch(() => apiFetch('/v1/models', {}, finalBaseUrl));
+    const response = await apiFetch('/v1/models', {}, finalBaseUrl);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
-    return data.models || data.data || [];
+    return data.data || data.models || [];
   } catch (error) {
-    console.warn('[Ptahn AI Engine]: Native AI server offline or unreachable:', error.message);
+    console.warn('[Ptahn AI Engine]: AI server unreachable on /v1/models:', error.message);
     return [];
   }
 }
@@ -131,6 +126,7 @@ export async function getAvailableModels(baseUrl) {
  */
 export async function getLoadedModel(baseUrl) {
   const finalBaseUrl = getBaseUrl(baseUrl);
+  if (!finalBaseUrl.includes(':3001')) return null;
   try {
     const response = await apiFetch('/api/models', {}, finalBaseUrl);
     if (response.ok) {
@@ -272,7 +268,8 @@ export async function loadDualModels(storytellerId, orchestratorId, baseUrl) {
     if (storytellerId) {
       results.storyteller = await loadModel(storytellerId, finalBaseUrl);
     }
-    if (orchestratorId && orchestratorId !== storytellerId) {
+    // En el motor nativo (:3001), solo un modelo reside en VRAM a la vez. No desplazar al Storyteller.
+    if (orchestratorId && orchestratorId !== storytellerId && !finalBaseUrl.includes(':3001')) {
       results.orchestrator = await loadModel(orchestratorId, finalBaseUrl);
     }
   } catch (e) {}
@@ -409,6 +406,10 @@ export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fa
           { role: 'user', content: user }
         ],
         temperature: 0.2,
+        max_tokens: 120,
+        repetition_penalty: 1.2,
+        frequency_penalty: 0.3,
+        presence_penalty: 0.2,
         stream: false
       })
     }, finalBaseUrl);
@@ -420,6 +421,19 @@ export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fa
         // Strip think blocks and markdown code fences
         translated = translated.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
         translated = translated.replace(/^```[a-z]*\s*/i, '').replace(/```$/i, '').trim();
+
+        // Anti-repetition token deduplication and meta-words filtering (e.g. intro, details)
+        const rawTokens = translated.split(/[,;\n]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
+        const seenTokens = new Set();
+        const filteredTokens = [];
+        for (const token of rawTokens) {
+          if (!['intro', 'details', 'title', 'narrative', 'scene'].includes(token) && !seenTokens.has(token)) {
+            seenTokens.add(token);
+            filteredTokens.push(token);
+          }
+        }
+        translated = filteredTokens.join(', ');
+
         if (translated.length > 5) {
           const styleModifier = STYLE_PROMPT_PRESETS[style] || STYLE_PROMPT_PRESETS['Fantasía Oscura'] || 'cinematic lighting, masterpiece, high quality, highly detailed';
           const combined = `${translated}, style: ${styleModifier}, sharp focus, detailed composition`;
@@ -791,17 +805,28 @@ export async function sendChatMessage({
   try {
     const recentText = messages.slice(-3).map(m => m.text).join(' ').toLowerCase();
     
-    const weightedDocs = contextDocuments.filter(doc => {
-      if (!doc) return false;
-      const titleMatch = doc.title && recentText.includes(doc.title.toLowerCase());
-      const tagMatch = doc.tags && doc.tags.some(t => recentText.includes(t.toLowerCase()));
-      return titleMatch || tagMatch;
-    });
+    const weightedDocs = (contextDocuments && contextDocuments.length > 0)
+      ? contextDocuments.filter(doc => {
+          if (!doc) return false;
+          // Si el llamador ya seleccionó documentos específicos (inbound.filteredCards <= 10 docs o con peso calculado)
+          if (contextDocuments.length <= 10 || doc._selected || doc.directWeight !== undefined || doc.finalWeight !== undefined) {
+            return true;
+          }
+          const title = (doc.title || doc.name || '').toLowerCase().trim();
+          const cleanTitle = title.replace(/^(el|la|los|las|un|una)\s+/i, '');
+          const titleMatch = title && (recentText.includes(title) || (cleanTitle.length > 2 && recentText.includes(cleanTitle)));
+          const tagMatch = doc.tags && doc.tags.some(t => recentText.includes(String(t).toLowerCase()));
+          return titleMatch || tagMatch;
+        })
+      : [];
 
     let contextText = '';
     if (weightedDocs.length > 0) {
-      contextText = '\n\n[TAG-ACTIVATED RELEVANT LORE CONTEXT]:\n' + 
-        weightedDocs.map(d => `- ${d.title} (${d.type}): ${d.intro || d.text}`).join('\n');
+      const unincludedDocs = weightedDocs.filter(d => !systemInstruction.includes(d.title));
+      if (unincludedDocs.length > 0) {
+        contextText = '\n\n[TAG-ACTIVATED RELEVANT LORE CONTEXT]:\n' + 
+          unincludedDocs.map(d => `- ${d.title} (${d.type}): ${d.intro || d.text}`).join('\n');
+      }
     }
 
     const fullSystemPrompt = `${systemInstruction}${contextText}`.trim();
@@ -830,7 +855,10 @@ export async function sendChatMessage({
     }
 
     const narrationId = (await resolveModelId(modelId, finalBaseUrl)) || modelId;
-    await loadModel(narrationId, finalBaseUrl);
+    // Solo llamar a loadModel si estamos en el servidor nativo de Ptahn (puerto 3001)
+    if (finalBaseUrl.includes(':3001')) {
+      await loadModel(narrationId, finalBaseUrl).catch(() => {});
+    }
 
     emitAILog({
       from: callerType === 'INTERMEDIARY_SLM' ? 'INTERMEDIARY_SLM' : 'CHAT_VIEW',
@@ -844,10 +872,24 @@ export async function sendChatMessage({
 
     const isStream = typeof onChunk === 'function';
 
+    const stopWords = [
+      '\n{{user}}:',
+      '\nUser:',
+      '\nUsuario:',
+      '\nJugador:',
+      '\nPlayer:',
+      '\nTu turno:'
+    ];
+
+    const chatSettings = loadChatSettings();
+    const maxTokensLimit = chatSettings?.responseLength ? Math.min(Math.max(250, chatSettings.responseLength), 850) : 650;
+
     const requestBody = JSON.stringify({
       model: narrationId,
       messages: formattedMessages,
       temperature: temperature,
+      max_tokens: maxTokensLimit,
+      stop: stopWords,
       stream: isStream
     });
 
@@ -866,6 +908,8 @@ export async function sendChatMessage({
           model: currentlyLoaded,
           messages: formattedMessages,
           temperature: temperature,
+          max_tokens: maxTokensLimit,
+          stop: stopWords,
           stream: isStream
         });
         response = await apiFetch('/v1/chat/completions', {
@@ -963,10 +1007,7 @@ export async function sendChatMessage({
       type: 'ERROR',
       summary: `Error en turno narrativo: ${error.message}`
     });
-    return {
-      text: `[Simulation Mode / Local AI Studio server not detected at ${finalBaseUrl}]: Ensure your LLM server is active.\n\n*The game master watches the room in silence...*`,
-      usedContextDocs: []
-    };
+    throw error;
   }
 }
 
@@ -1040,6 +1081,7 @@ export async function sendExtractCardsTask({
   existingCards = [],
   existingScenarios = [],
   activeScenario = null,
+  userChar = null,
   modelId = '',
   preferredLanguage = 'auto',
   baseUrl
@@ -1058,13 +1100,24 @@ export async function sendExtractCardsTask({
     const existingNames = allExisting.map(c => (c.title || c.name || '').trim()).filter(Boolean);
 
     const systemInstruction = `You are the Compendium Archivist of a tabletop RPG.
-Your task is to analyze the recent game messages and extract significant NEW characters, creatures, locations, or items that deserve a compendium card.
+Your task is to analyze the recent game messages and extract significant NEW settlements, mob species, or recurring characters that genuinely deserve a permanent compendium card.
 
-CRITICAL RULES FOR CHARACTER LORE:
-1. Grounding in the scene: The "intro" and "text" fields MUST accurately reflect the entity's current condition, physical state, social role, and situation as described in the story.
-2. Never invent contradictory, generic mythological archetypes that contradict the ongoing scene.
-3. Language: All "title", "intro", "text", "tags", and "traits" MUST be written strictly in ${targetLang.name} (${targetLang.code}).
-4. "imagePrompt" must be in English for SDXL image generation with appropriate lighting and aesthetic modifiers.
+CRITICAL SIGNIFICANCE & RECURRENCE RULES (STRICT FILTER):
+1. STRICTLY FORBIDDEN - WILD ANIMALS & INCIDENTAL BEASTS:
+   - NEVER extract wild animals, wolves, predators, or beasts (e.g. "Lobo", "Lobo Gris", "Lobo del Bosque", "Oso", "Jabalí", "Cuervos").
+   - Encounters with fauna, predators, or incidental beasts belong strictly to the narrative prose, NEVER to compendium cards.
+   - Do NOT create cards for temporary combat encounters or ambient creatures.
+   - ONLY extract if it is a major sentient SPECIES or CIVILIZATION (e.g. "Elfos Silvanos", "Enanos") explicitly cataloged with "(Especie)" in title.
+2. STRICTLY FORBIDDEN - THE PROTAGONIST / PLAYER CHARACTER:
+   - NEVER extract the player character, protagonist, or user persona (e.g. {{user}}, the main protagonist).
+3. FORBIDDEN - GENERIC ANONYMOUS ROLES:
+   - NEVER extract generic nameless NPCs (e.g. "el posadero", "un guardia", "un bandido", "el mercader").
+   - ONLY extract individual characters if they have an explicit PROPER NAME and demonstrate continuing narrative importance across multiple turns.
+4. ENCOURAGED - SETTLEMENTS & GEOGRAPHY:
+   - ALWAYS extract named settlements, towns, cities, fortresses, taverns, or distinct geographical landmarks.
+5. Grounding in the scene: The "intro" and "text" fields MUST accurately reflect the entity's condition and role as described in the story.
+6. Language: All "title", "intro", "text", "tags", and "traits" MUST be written strictly in ${targetLang.name} (${targetLang.code}).
+7. "imagePrompt" must be in English for SDXL image generation with appropriate lighting and aesthetic modifiers.
 
 Registered entities already in the compendium (DO NOT EXTRACT THESE OR CREATE DUPLICATES FOR THEM):
 ${existingNames.join(', ') || 'None'}.
@@ -1132,11 +1185,16 @@ Do not add any explanation or text outside the JSON.`;
     try {
       const parsed = JSON.parse(rawContent);
       if (Array.isArray(parsed)) {
+        // Enforce deduplication, significance gatekeeper, animal rejection and player character protection
         const filtered = parsed.filter(item => {
           if (!item || !item.title || typeof item.title !== 'string') return false;
-          // Strict duplicate check against all existing entities using findMatchingEntity
           const duplicate = findMatchingEntity(item.title, allExisting);
-          return !duplicate;
+          if (duplicate) return false;
+          return isEntityEligibleForAutoCard(item, messages, {
+            minRecurrence: 3,
+            existingCards: allExisting,
+            userChar: userChar || activeScenario?.userChar || (allExisting.find(e => e?.type === 'Personaje' && (e.title === 'Protagonista' || e.isPlayer)))
+          });
         });
 
         emitAILog({

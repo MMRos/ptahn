@@ -282,4 +282,22 @@ export async function pollServerOnline({ baseUrl = getServerBaseUrl(), intervalM
   return false;
 }
 
+export async function requestRerank(query, candidates = [], baseUrl = getServerBaseUrl()) {
+  if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
+    return {};
+  }
+  try {
+    const res = await fetch(`${baseUrl}/api/ai/rerank`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, candidates })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return (data && data.scores && typeof data.scores === 'object') ? data.scores : {};
+  } catch (error) {
+    return {};
+  }
+}
+
 

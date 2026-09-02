@@ -59,9 +59,18 @@ function createApp() {
   // Serve static client build if available
   const buildDir = path.join(ROOT_DIR, 'build');
   if (fs.existsSync(buildDir)) {
-    app.use(express.static(buildDir));
+    app.use(express.static(buildDir, {
+      etag: false,
+      maxAge: 0,
+      setHeaders: (res, path) => {
+        if (path.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+      }
+    }));
     app.use((req, res, next) => {
-      if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/v1')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         return res.sendFile(path.join(buildDir, 'index.html'));
       }
       next();

@@ -48,10 +48,20 @@ router.post('/generate', async (req, res) => {
   }
 });
 
-// GET /api/images/files/:filename - Serve generated image files
+// GET /api/images/files/:filename - Serve generated image files (Path Traversal Protected)
 router.get('/files/:filename', (req, res) => {
   const { filename } = req.params;
-  const filePath = path.join(DATA_DIR, 'generated_images', filename);
+  if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\') || filename.includes('\0')) {
+    return res.status(400).json({ success: false, error: 'Invalid filename or path traversal detected' });
+  }
+
+  const targetDir = path.resolve(DATA_DIR, 'generated_images');
+  const filePath = path.resolve(targetDir, filename);
+
+  if (!filePath.startsWith(targetDir)) {
+    return res.status(400).json({ success: false, error: 'Access denied: path traversal attempt' });
+  }
+
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
   } else {

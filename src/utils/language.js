@@ -449,12 +449,16 @@ export function adaptPromptForDiffusionArchitecture(prompt = '', modelName = '',
     clean = clean.replace(/score_\d(_up|_down)?/gi, '').replace(/rating:(general|questionable|explicit)/gi, '').trim();
     clean = clean.replace(/^[,\s]+|[,\s]+$/g, '');
 
-    // Ensure solo subject tag if character is mentioned to prevent group photo hallucination
-    const isFemale = /\b(girl|woman|she|her|daughter|queen|princess|waifu|chica|mujer|ella|femme)\b/i.test(clean);
-    const isMale = /\b(man|boy|he|his|son|king|prince|chico|hombre|él)\b/i.test(clean);
+    // Ensure solo subject tag ONLY if a humanoid character is mentioned to prevent group photo hallucination
+    // Must NOT match beasts, animals, or environmental locations
+    const isHumanoid = /\b(man|woman|boy|girl|warrior|mage|knight|sorcerer|sorceress|priest|king|queen|prince|princess|villager|person)\b/i.test(clean);
+    const isAnimalOrPlace = /\b(wolf|dire wolf|beast|creature|dragon|monster|horse|bear|hound|tavern|inn|castle|city|ruins|landscape|forest|valley|mountains|dungeon|room|interior|exterior|building)\b/i.test(clean);
+
+    const isFemale = /\b(girl|woman|daughter|queen|princess|waifu|sorceress)\b/i.test(clean);
+    const isMale = /\b(man|boy|son|king|prince|sorcerer)\b/i.test(clean);
 
     let subjectTag = '';
-    if (!clean.includes('solo') && !clean.includes('1girl') && !clean.includes('1boy')) {
+    if (isHumanoid && !isAnimalOrPlace && !clean.includes('solo') && !clean.includes('1girl') && !clean.includes('1boy')) {
       if (isFemale && !isMale) subjectTag = '1girl, solo, ';
       else if (isMale && !isFemale) subjectTag = '1boy, solo, ';
     }
@@ -478,14 +482,16 @@ export function createVisualPromptTranslationPrompt(text = '', style = '', targe
 
   return {
     system: `You are an expert AI image prompt engineer and synthesizer for Stable Diffusion SDXL and Pony Diffusion anime models.
-Your task is to analyze character lore, biography, or scene descriptions (which may contain narrative prose, backstories, or Spanish text) and distill it EXCLUSIVELY into concise, comma-separated English visual tags (Danbooru tokens).
+Your task is to analyze character lore, biography, creature descriptions, or location scenery and distill it EXCLUSIVELY into concise, comma-separated English visual tags (Danbooru tokens).
 
 CRITICAL RULES:
 1. Output ONLY English comma-separated visual tags (Danbooru / CLIP tokens).
 2. DISTILL VISUALS, IGNORE NARRATIVE PROSE:
-   - Convert abstract lore (e.g. "grew up under pressure of high society, spoiled brat who breaks men") into concrete visual tags: "1girl, solo, smug, arrogant smile, rich girl, luxury dress, jewelry, upper body, looking at viewer".
-   - Never output words like "family", "mother", "daughter", "society", "pressure", "trophy" if only a single character should be drawn.
-3. ${isPony ? 'Structure for Pony Diffusion: Focus on character appearance, outfit, pose, expression, and environment without filler words.' : 'Structure for SDXL: Include subject, detailed appearance, attire, lighting, and camera composition.'}
+   - For characters: convert lore into concrete visual traits (e.g. "1man, warrior, silver armor, scarred cheek, holding broadsword" or "1woman, sorceress, crimson robe, staff, glowing runes").
+   - For locations & scenery: focus on physical space, materials, and lighting (e.g. "cozy wooden tavern, stone fireplace, warm lanterns, dark fantasy interior, rustic tables").
+   - For creatures & beasts: focus on anatomy, fur, and pose (e.g. "dire wolf, thick grey fur, sharp fangs, glowing red eyes, menacing stance, forest background").
+   - Never output abstract concepts like "family", "society", "pressure", "immortality", "responsibility", "task", "destiny" or meta labels like "intro", "details", "title".
+3. ${isPony ? 'Structure for Pony Diffusion: Focus on subject appearance, outfit, pose, expression, and environment without filler words.' : 'Structure for SDXL: Include subject, detailed appearance, attire, lighting, and camera composition.'}
 4. Do NOT include conversational filler, notes, prefixes, or markdown. Output ONLY the comma-separated English tags.`,
     user: `Convert this character or scene narrative into clean English visual diffusion tags:\n${text}`
   };

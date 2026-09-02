@@ -5,8 +5,10 @@
  * using an intelligent lightweight SLM orchestrator.
  */
 
-import { sendChatMessage, resolveIntermediaryModelId } from './localAIStudio';
+
 import { filterAndSortRelevantCards } from './weightCalculator';
+import { requestRerank, getServerBaseUrl } from './serverApi';
+import { resolveSceneState } from './sceneStateTracker';
 
 /**
  * Parses JSON block from raw LLM/SLM response with resilient fallback.
@@ -161,87 +163,117 @@ export async function executeInboundOrchestration({
   cards = [],
   recentMessages = [],
   chatSettings = {},
-  baseUrl
+  baseUrl,
+  previousSceneState = null,
+  scenario = null,
+  currentTurn = null
 }) {
-  const modelToUse = await resolveIntermediaryModelId(orchestratorModel || chatSettings.orchestratorModel, baseUrl || chatSettings.lmStudioUrl);
-  
-  if (!modelToUse) {
-    return {
-      translatedInput: userMessage,
-      filteredCards: cards.slice(0, 8),
-      contextSummary: '',
-      sceneContext: {}
-    };
-  }
+  const recentText = [
+    ...recentMessages.slice(-3).map(m => m.text || ''),
+    userMessage
+  ].join(' ');
 
-  const cardsSummaryList = cards.map(c => ({
-    id: c.id,
-    name: c.title || c.name,
-    type: c.type,
-    summary: c.intro || (c.text ? c.text.substring(0, 60) : '')
+  // 1. Pre-filtrado acotado de candidatos del escenario para Cross-Encoder (Etapa 1: máx 15 candidatos)
+  const candidatePool = (cards || []).slice(0, 15).map(c => ({
+    id: c.id || c.title,
+    title: c.title || c.name || '',
+    text: `${c.title || c.name || ''}. Tipo: ${c.type || 'Entidad'}. ${c.intro || ''} ${Array.isArray(c.traits) ? c.traits.join(', ') : ''} ${Array.isArray(c.tags) ? c.tags.join(', ') : ''}`.trim()
   }));
 
-  const systemPrompt = `You are Ptahn's High-Speed Orchestrator Middleware.
-Your job is to analyze the user's latest message and return a SINGLE valid JSON object with:
-1. "translatedInput": Faithful English translation of the user's message (or pristine original if already in English).
-2. "semanticScores": An object mapping card IDs to a float relevance score between 0.0 and 1.0 based on what is relevant to the user's action.
-3. "contextSummary": Ultra-brief 1-line summary of recent context.
-4. "sceneContext": { "currentLocation": "...", "activeCharacters": ["..."] }
-
-AVAILABLE SCENARIO CARDS:
-${JSON.stringify(cardsSummaryList)}
-
-Respond ONLY with valid JSON.`;
-
-  try {
-    // Timeout de 4s para evitar congelamientos si el servidor de LLM está ocupado
-    const inboundPromise = sendChatMessage({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `LATEST USER MESSAGE:\n"${userMessage}"` }
-      ],
-      modelId: modelToUse,
-      baseUrl: baseUrl || chatSettings.lmStudioUrl,
-      temperature: 0.1,
-      maxTokens: 300,
-      callerType: 'INTERMEDIARY_SLM'
-    });
-
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Orchestrator inbound timeout (fast-path triggered)')), 4500)
-    );
-
-    const response = await Promise.race([inboundPromise, timeoutPromise]);
-
-    const parsed = parseOrchestratorInboundJSON(response, userMessage);
-    
-    // Combine semantic scores with hybrid weight calculator
-    const recentText = [
-      ...recentMessages.slice(-3).map(m => m.text || ''),
-      userMessage
-    ].join(' ');
-
-    const filteredCards = filterAndSortRelevantCards(cards, {
-      recentText,
-      semanticScores: parsed.semanticScores,
-      maxLimit: 8
-    });
-
-    return {
-      translatedInput: parsed.translatedInput,
-      filteredCards,
-      contextSummary: parsed.contextSummary,
-      sceneContext: parsed.sceneContext
-    };
-  } catch (err) {
-    console.warn('[Orchestrator Pipeline]: Inbound pass bypassed:', err.message);
-    return {
-      translatedInput: userMessage,
-      filteredCards: cards.slice(0, 8),
-      contextSummary: '',
-      sceneContext: {}
-    };
+  // 2. Scoring semántico con el Cross-Encoder / Re-Ranker nativo de CPU (Etapa 2)
+  let semanticScores = {};
+  if (candidatePool.length > 0 && userMessage) {
+    try {
+      const scoringContext = [
+        ...recentMessages.slice(-1).map(m => m.text || ''),
+        userMessage
+      ].join(' ').trim();
+      semanticScores = await requestRerank(
+        scoringContext,
+        candidatePool,
+        baseUrl || (chatSettings?.serverUrl ? chatSettings.serverUrl : getServerBaseUrl())
+      );
+    } catch (e) {
+      semanticScores = {};
+    }
   }
+
+  // 3. Propagación de pesos por el grafo de relaciones (Spreading Activation)
+  const filteredCards = filterAndSortRelevantCards(cards, {
+    recentText,
+    semanticScores,
+    maxLimit: 8,
+    enableGraphPropagation: true
+  });
+
+  // 4. Extracción y resolución del Marco de Estado de la Escena con persistencia e inercia (F048)
+  const topCharacter = filteredCards.find(c => {
+    const t = (c.type || '').toLowerCase();
+    const isChar = t === 'personaje' || t === 'criatura' || t === 'npc';
+    if (!isChar) return false;
+
+    const cName = (c.title || c.name || '').toLowerCase();
+    const wasAlreadyTarget = previousSceneState?.primaryTarget && 
+      previousSceneState.primaryTarget.toLowerCase() === cName;
+    const isMentionedInRecent = cName && recentText.toLowerCase().includes(cName);
+
+    if (wasAlreadyTarget || isMentionedInRecent) return true;
+
+    const score = (semanticScores && semanticScores[c.id || c.title]) || 0;
+    return score >= 0.45;
+  });
+  const hasPreviousLocation = Boolean(previousSceneState?.location);
+  const hasMovement = /\b(entr(?:ar|o|as|a|amos|an)|viaj(?:ar|o|as|a|amos|an)|camin(?:ar|o|as|a|amos|an)|adentr(?:ar|o|as|a|amos|an)|lleg(?:ar|o|as|a|amos|an)|dirig(?:ir|o|es|e|imos|en)|cruz(?:ar|o|as|a|amos|an)|march(?:ar|o|as|a|amos|an)|descend(?:er|o|es|e|emos|en)|sub(?:ir|o|es|e|imos|en))\b/i.test(recentText);
+
+  const topLocation = filteredCards.find(c => {
+    if ((c.type || '').toLowerCase() !== 'lugar') return false;
+    const cName = (c.title || c.name || '').toLowerCase();
+    const wasAlreadyLocation = previousSceneState?.location && 
+      previousSceneState.location.toLowerCase() === cName;
+    const isMentionedInRecent = cName && recentText.toLowerCase().includes(cName);
+
+    if (wasAlreadyLocation || isMentionedInRecent) return true;
+
+    // Si ya existe una ubicación física previa, exigir desplazamiento explícito para cambiarla
+    if (hasPreviousLocation) {
+      if (hasMovement) {
+        const score = (semanticScores && (semanticScores[c.id] ?? semanticScores[c.title])) || 0;
+        return score >= 0.50;
+      }
+      return false;
+    }
+
+    // Si aún no hay ubicación previa establecida, permitir que la tarjeta de lugar candidata inicialice la escena
+    const score = (semanticScores && (semanticScores[c.id] ?? semanticScores[c.title])) || 0;
+    return score >= 0.45;
+  });
+
+  const resolvedState = resolveSceneState({
+    previousState: previousSceneState,
+    inboundContext: {
+      primaryTarget: topCharacter ? (topCharacter.title || topCharacter.name) : null,
+      targetType: topCharacter ? (topCharacter.type || 'Personaje') : null,
+      targetTraits: topCharacter && Array.isArray(topCharacter.traits) ? topCharacter.traits : [],
+      activeLocation: topLocation ? (topLocation.title || topLocation.name) : null,
+      activeEntities: filteredCards.slice(0, 4).map(c => c.title || c.name)
+    },
+    currentText: recentText,
+    scenario,
+    currentTurn
+  });
+
+  const sceneContext = {
+    ...resolvedState,
+    activeLocation: resolvedState.location
+  };
+
+  return {
+    translatedInput: userMessage,
+    filteredCards,
+    contextSummary: topCharacter ? `Objetivo en foco: ${topCharacter.title || topCharacter.name}` : '',
+    sceneContext,
+    sceneState: resolvedState
+  };
 }
 
 /**
@@ -258,74 +290,12 @@ export async function executeOutboundOrchestration({
   chatSettings = {},
   baseUrl
 }) {
-  const modelToUse = await resolveIntermediaryModelId(orchestratorModel || chatSettings.orchestratorModel, baseUrl || chatSettings.lmStudioUrl);
-
-  if (!modelToUse) {
-    return {
-      formattedText: rawNarrative,
-      areaA_expression: null,
-      areaB_location: null,
-      discoveredEntities: [],
-      diffusionTasks: []
-    };
-  }
-
-  const langCode = typeof targetLang === 'object' ? (targetLang.code || 'es') : (targetLang || 'es');
-  const isSpanish = langCode === 'es';
-
-  const systemPrompt = `You are Ptahn's High-Speed Post-Processing Orchestrator.
-Your job is to parse the storyteller's raw narrative and return a SINGLE valid JSON object with:
-1. "formattedText": The narrative translated faithfully into ${isSpanish ? 'Spanish (Español)' : `language code "${langCode}"`} with clean, literary formatting:
-   - Spoken NPC dialogue MUST be strictly in double quotes without internal asterisks: "¡Hola!" (NEVER "*¡Hola!*" and NEVER *"¡Hola!"*).
-   - Silent internal thoughts MUST be in tildes: ~Qué extraño...~ (NEVER *~...~*).
-   - General narrative prose MUST be standard clean paragraph text without wrapping full sentences or descriptions in asterisks.
-   - Specific short inline actions/gestures can be in asterisks: *sonríe con picardía*.
-   - Key entities, proper names, towns, locations, and characters MUST be wrapped in double equal signs: ==Garrison==, ==Tierra de Bestias==, ==La Forja==, ==Azgael==, ==Leporinos==.
-   ${isSpanish ? '- MANDATORY: The entire formatted narrative MUST be 100% in natural Spanish. Do NOT output English.' : ''}
-2. "areaA_expression": { "characterName": "...", "expression": "smiling / battle / neutral" } or null if no character is active.
-3. "areaB_location": { "locationName": "..." } or null.
-4. "discoveredEntities": Array of any new items, NPCs, or places mentioned for the first time: [{ "name": "...", "type": "Objeto|Lugar|Personaje", "summary": "..." }].
-5. "diffusionTasks": Array of prompts for any newly discovered visual entities: [{ "targetName": "...", "prompt": "high quality diffusion prompt in English", "negativePrompt": "blurry, low quality" }].
-
-Respond ONLY with valid JSON.`;
-
-  try {
-    const outboundPromise = sendChatMessage({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `RAW STORYTELLER NARRATIVE:\n${rawNarrative}` }
-      ],
-      modelId: modelToUse,
-      baseUrl: baseUrl || chatSettings.lmStudioUrl,
-      temperature: 0.1,
-      maxTokens: 500,
-      callerType: 'INTERMEDIARY_SLM'
-    });
-
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Orchestrator outbound timeout (fast-path triggered)')), 4500)
-    );
-
-    const response = await Promise.race([outboundPromise, timeoutPromise]);
-
-    const parsed = parseOrchestratorOutboundJSON(response, rawNarrative);
-    const deduplicatedTasks = deduplicateVisualAssets(parsed.diffusionTasks, compendiumCards);
-
-    return {
-      formattedText: parsed.formattedText,
-      areaA_expression: parsed.areaA_expression,
-      areaB_location: parsed.areaB_location,
-      discoveredEntities: parsed.discoveredEntities,
-      diffusionTasks: deduplicatedTasks
-    };
-  } catch (err) {
-    console.warn('[Orchestrator Pipeline]: Outbound pass bypassed:', err.message);
-    return {
-      formattedText: rawNarrative,
-      areaA_expression: null,
-      areaB_location: null,
-      discoveredEntities: [],
-      diffusionTasks: []
-    };
-  }
+  // Formateo limpio nativo instantáneo (0ms) sin demoras de GPU
+  return {
+    formattedText: rawNarrative || '',
+    areaA_expression: null,
+    areaB_location: null,
+    discoveredEntities: [],
+    diffusionTasks: []
+  };
 }

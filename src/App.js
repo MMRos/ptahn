@@ -22,6 +22,7 @@ import { fetchAppDataFromServer, saveAppDataToServer, getServerBaseUrl, fetchCha
 
 import Profile from './pages/Profile';
 import MusicView from './pages/MusicView';
+import { getActiveInitialMessageText } from './utils/scenarioScoping';
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => getStoredAuth().user);
@@ -50,7 +51,10 @@ function App() {
   const openScenario = (scenario) => { setPopupScenario(scenario); setScenarioOpen(true); };
   const closeScenario = () => { setScenarioOpen(false); setPopupScenario(null); };
 
-  const startChat = () => {
+  const startChat = (chosenScenario) => {
+    if (chosenScenario) {
+      setPopupScenario(chosenScenario);
+    }
     setScenarioOpen(false);
     setCharOpen(true);
   };
@@ -58,7 +62,7 @@ function App() {
   const closeChar = () => setCharOpen(false);
   const handleSelectChar = async (id) => {
     console.log('Selected character:', id);
-    const initialMsgText = (popupScenario?.presentation || popupScenario?.intro || '').trim();
+    const initialMsgText = getActiveInitialMessageText(popupScenario);
     const initialMessages = initialMsgText ? [
       {
         from: 'narrator',
