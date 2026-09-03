@@ -110,8 +110,8 @@ describe('promptBuilder Utilities', () => {
     expect(prompt).toContain('CLIMA / CONDICIÓN ATMOSFÉRICA: "Viento fuerte".');
     expect(prompt).toContain('FOCO PRINCIPAL Y OBJETIVO DE LA ACCIÓN: "Lobo Gris" (Criatura) [Rasgos: Feroz, Depredador]');
     expect(prompt).toContain('ENTORNO FÍSICO INMEDIATO: "Claro en la llanura"');
-    expect(prompt).toContain('QUEDA TERMINANTEMENTE PROHIBIDO sustituir, transformar o convertir a este sujeto');
-    expect(prompt).toContain('QUEDA TERMINANTEMENTE PROHIBIDO alterar repentinamente el entorno físico, el clima o el momento del día');
+    expect(prompt).toContain('CONTINUIDAD Y CAUSALIDAD FÍSICA:');
+    expect(prompt).toContain('resuelve primero la respuesta mecánica o física del entorno');
   });
 
   test('buildStorytellerSystemPrompt strictly eliminates synthetic <think> scratchpads and 4-phase reasoning', () => {
@@ -162,9 +162,36 @@ describe('promptBuilder Utilities', () => {
 
     expect(hook).toContain('[IMMEDIATE RECENCY GUIDANCE - TURN EXECUTION RULES]');
     expect(hook).toContain('1. ABSOLUTE PLAYER AGENCY: You are the Game Master. NEVER speak, act, decide, or narrate internal thoughts for {{user}} (Lucius).');
-    expect(hook).toContain('2. ACTIVE SCENE FOCUS: The immediate action is strictly focused on "Lobo Alfa".');
+    expect(hook).toContain('2. ACTIVE SCENE FOCUS: Maintain continuity with "Lobo Alfa".');
     expect(hook).toContain('3. IMMEDIATE SURROUNDINGS: Current location is "Claro del bosque" (Amanecer).');
     expect(hook).toContain('4. SCENE DIRECTOR META-INSTRUCTION (OOC): Haz que el lobo retroceda asustado si desenvaino la espada.');
+  });
+
+  test('buildStorytellerSystemPrompt includes full cards for active entities and brief intros for background scenario entities', () => {
+    const activeEntities = [
+      { id: 'c-active', title: 'Lobo Alfa', type: 'Personaje', intro: 'Líder feroz de la manada.', text: 'Cuerpo cubierto de cicatrices.' }
+    ];
+    const allScenarioEntities = [
+      { id: 'c-active', title: 'Lobo Alfa', type: 'Personaje', intro: 'Líder feroz de la manada.', text: 'Cuerpo cubierto de cicatrices.' },
+      { id: 'c-bg-1', title: 'Mari Setogaya', type: 'Personaje', intro: 'Estudiante de preparatoria híbrida de súcubo y vampiro.' },
+      { id: 'c-bg-2', title: 'La Forja', type: 'Lugar', intro: 'Vasto espacio retro-tecnológico con marco circular beige.' }
+    ];
+
+    const prompt = buildStorytellerSystemPrompt({
+      scenario: { title: 'The Forge' },
+      userChar: { title: 'Azgael' },
+      relevantEntities: activeEntities,
+      allScenarioEntities: allScenarioEntities
+    });
+
+    // Entidad activa en foco: debe tener ficha completa
+    expect(prompt).toContain('--- [WORLD NPC: Lobo Alfa] ---');
+    expect(prompt).toContain('Cuerpo cubierto de cicatrices.');
+
+    // Entidades de fondo del escenario: deben tener su intro breve
+    expect(prompt).toContain('[SCENARIO WORLD ENTITIES - BACKGROUND ROSTER & INTROS (NOT CURRENTLY IN SCENE)]');
+    expect(prompt).toContain('* Mari Setogaya [Personaje]: Estudiante de preparatoria híbrida de súcubo y vampiro.');
+    expect(prompt).toContain('* La Forja [Lugar]: Vasto espacio retro-tecnológico con marco circular beige.');
   });
 });
 

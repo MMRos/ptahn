@@ -104,24 +104,36 @@ ${invText}
 /**
  * Formatea las entidades del escenario por categorías tipológicas.
  */
-export function formatScenarioEntities(relevantEntities = []) {
-  if (!Array.isArray(relevantEntities) || relevantEntities.length === 0) return '';
+export function formatScenarioEntities(relevantEntities = [], allScenarioEntities = []) {
+  if ((!Array.isArray(relevantEntities) || relevantEntities.length === 0) && (!Array.isArray(allScenarioEntities) || allScenarioEntities.length === 0)) return '';
 
-  const locationCards = relevantEntities.filter(e => (e.type || '').toLowerCase() === 'lugar');
-  const raceCards = relevantEntities.filter(e => (e.type || '').toLowerCase() === 'raza');
-  const characterCards = relevantEntities.filter(e => {
+  const activeCards = Array.isArray(relevantEntities) ? relevantEntities : [];
+  const activeKeys = new Set(activeCards.map(c => (c.id || c.title || c.name || '').toLowerCase()));
+
+  // Entidades conectadas al escenario que NO están en el foco activo (fondo / sin peso suficiente para tarjeta completa)
+  const backgroundCards = (Array.isArray(allScenarioEntities) ? allScenarioEntities : []).filter(c => {
+    if (!c) return false;
+    const key = (c.id || c.title || c.name || '').toLowerCase();
+    if (!key || activeKeys.has(key)) return false;
+    if (c.characterRole === 'user_persona' || c.isUserPersona) return false;
+    return true;
+  });
+
+  const locationCards = activeCards.filter(e => (e.type || '').toLowerCase() === 'lugar');
+  const raceCards = activeCards.filter(e => (e.type || '').toLowerCase() === 'raza');
+  const characterCards = activeCards.filter(e => {
     const t = (e.type || '').toLowerCase();
     return (t === 'personaje' || t === 'npc' || (!t && !e.subtype)) && e.characterRole !== 'user_persona' && !e.isUserPersona;
   });
-  const factionCards = relevantEntities.filter(e => {
+  const factionCards = activeCards.filter(e => {
     const t = (e.type || '').toLowerCase();
     return t === 'facción' || t === 'faccion';
   });
-  const itemCards = relevantEntities.filter(e => {
+  const itemCards = activeCards.filter(e => {
     const t = (e.type || '').toLowerCase();
     return t === 'objeto' || t === 'inventario' || t === 'item';
   });
-  const otherCards = relevantEntities.filter(e => 
+  const otherCards = activeCards.filter(e => 
     !locationCards.includes(e) && !raceCards.includes(e) && !characterCards.includes(e) && !factionCards.includes(e) && !itemCards.includes(e)
   );
 
@@ -155,6 +167,21 @@ ${characterCards.map(c => formatEntityEntry(c, 'WORLD NPC')).join('\n\n')}`);
 
   if (otherCards.length > 0) {
     sections.push(`[SCENARIO COMPENDIUM LORE ENTITIES]:\n${otherCards.map(c => formatEntityEntry(c, 'ENTITY')).join('\n\n')}`);
+  }
+
+  // Resumen ultraliviano de intros breves de las entidades del escenario en segundo plano
+  if (backgroundCards.length > 0) {
+    const bgList = backgroundCards.map(c => {
+      const name = c.title || c.name || 'Entidad';
+      const type = c.type || 'Entidad';
+      const subtype = c.subtype ? ` / ${c.subtype}` : '';
+      const brief = (c.intro || c.description || c.text || '').replace(/\n+/g, ' ').slice(0, 180).trim();
+      return `* ${name} [${type}${subtype}]: ${brief || 'Elemento del compendio del escenario.'}`;
+    }).join('\n');
+
+    sections.push(`[SCENARIO WORLD ENTITIES - BACKGROUND ROSTER & INTROS (NOT CURRENTLY IN SCENE)]:
+The following connected entities exist in this scenario's broader setting. They are NOT in the immediate room with {{user}} right now, but exist in the world as available lore:
+${bgList}`);
   }
 
   return sections.join('\n\n');
@@ -194,6 +221,8 @@ export function buildStorytellerSystemPrompt({
   userChar = null,
   userInventories = [],
   relevantEntities = [],
+  allScenarioEntities = [],
+  scenarioCards = [],
   chat = {},
   messages = [],
   chatSettings = {},
@@ -211,11 +240,15 @@ export function buildStorytellerSystemPrompt({
     npcs: relevantEntities
   });
 
+  const allBackgroundPool = (allScenarioEntities && allScenarioEntities.length > 0) 
+    ? allScenarioEntities 
+    : (scenarioCards && scenarioCards.length > 0 ? scenarioCards : []);
+
   const narratorDetails = formatNarratorProfile(narrator);
   const narratorToolsDetails = formatNarratorTools(assignedTools);
   const userCharDetails = formatPlayerDossier(userChar);
   const userInventoryDetails = formatPlayerInventory(userInventories);
-  const scenarioEntitiesDetails = formatScenarioEntities(relevantEntities);
+  const scenarioEntitiesDetails = formatScenarioEntities(relevantEntities, allBackgroundPool);
   const episodicMemories = formatEpisodicMemories(chat?.memoryCards || [], relevantEntities);
 
   let scenarioDetails = `Scenario: ${chat.scenario || 'Freeplay'}.`;
@@ -240,10 +273,9 @@ ${sceneContext.activeLocation ? `- ENTORNO FÍSICO INMEDIATO: "${sceneContext.ac
 ${sceneContext.timeOfDay ? `- MOMENTO DEL DÍA: "${sceneContext.timeOfDay}".` : ''}
 ${sceneContext.weather ? `- CLIMA / CONDICIÓN ATMOSFÉRICA: "${sceneContext.weather}".` : ''}
 ${sceneContext.primaryTarget ? `- FOCO PRINCIPAL Y OBJETIVO DE LA ACCIÓN: "${sceneContext.primaryTarget}" (${sceneContext.targetType || 'Entidad'})${sceneContext.targetTraits?.length ? ` [Rasgos: ${sceneContext.targetTraits.join(', ')}]` : ''}.` : ''}
-- DIRECTIVA INVIOLABLE ANTI-DESVÍO:
-  La interacción o acción inmediata del jugador está dirigida ESTRICTAMENTE a "${sceneContext.primaryTarget || 'la escena activa'}".
-  QUEDA TERMINANTEMENTE PROHIBIDO sustituir, transformar o convertir a este sujeto en otra criatura o personaje no presente.
-  QUEDA TERMINANTEMENTE PROHIBIDO alterar repentinamente el entorno físico, el clima o el momento del día sin una acción previa explícita o transición lógica.
+- CONTINUIDAD Y CAUSALIDAD FÍSICA:
+  Mantén coherencia estricta con el entorno físico y el hilo causal del turno previo.
+  Si la acción del jugador interactúa con una máquina, consola, objeto o comando de invocación, resuelve primero la respuesta mecánica o física del entorno antes de manifestar entidades o consecuencias finales.
 `.trim();
   }
 
@@ -337,7 +369,9 @@ export function buildRecencyGuidanceHook({ sceneContext = null, userChar = null,
   parts.push(`1. ABSOLUTE PLAYER AGENCY: You are the Game Master. NEVER speak, act, decide, or narrate internal thoughts for {{user}} (${userName}). Describe ONLY the immediate external world and NPC reactions in third-person, then STOP.`);
 
   if (sceneContext?.primaryTarget) {
-    parts.push(`2. ACTIVE SCENE FOCUS: The immediate action is strictly focused on "${sceneContext.primaryTarget}". Do NOT swap, transform, or divert attention away from this entity.`);
+    parts.push(`2. ACTIVE SCENE FOCUS: Maintain continuity with "${sceneContext.primaryTarget}". If {{user}} interacts with a machine, console, portal, or summoning command, resolve that physical mechanism first.`);
+  } else {
+    parts.push('2. CAUSAL CONTINUITY: Follow strict cause-and-effect from the previous turn. If {{user}} interacts with a machine, environment, or command, resolve that physical mechanism before introducing resulting entities.');
   }
 
   if (sceneContext?.activeLocation) {

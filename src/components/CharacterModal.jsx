@@ -8,7 +8,6 @@ import {
   faTimes, 
   faMask, 
   faGamepad, 
-  faUsers, 
   faSearch, 
   faCheck 
 } from '@fortawesome/free-solid-svg-icons';
@@ -23,14 +22,14 @@ export default function CharacterModal({
   scenarioCharacters = [],
   allCards = []
 }) {
-  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'personas' | 'playable' | 'npcs'
+  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'personas' | 'playable'
   const [searchQuery, setSearchQuery] = useState('');
   const [customName, setCustomName] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
 
-  // Normalizar y clasificar los personajes
-  const { userPersonas, playableCharacters, npcCharacters, allCombinedCharacters } = useMemo(() => {
-    // 1. Personas habituales del usuario (tarjetas de personaje creadas por Ã©l)
+  // Normalizar y clasificar únicamente personajes interpretables por el jugador (PJ)
+  const { userPersonas, playableCharacters, allCombinedCharacters } = useMemo(() => {
+    // 1. Personas habituales del usuario (tarjetas de personaje creadas por él para interpretar)
     const personas = (userCards || []).filter(c => {
       const isChar = (c.type || '').toLowerCase() === 'personaje';
       if (!isChar) return false;
@@ -51,43 +50,44 @@ export default function CharacterModal({
     const rawScenarioChars = Array.isArray(scenarioCharacters) ? scenarioCharacters : [];
     
     // Resolver tarjetas conectadas del escenario
-    const resolvedScenarioChars = rawScenarioChars.map((scChar, idx) => {
+    const resolvedScenarioChars = rawScenarioChars.map((scChar) => {
       if (typeof scChar === 'string') {
         const matched = (allCards || userCards || []).find(c => c.id === scChar || c.title === scChar || c.name === scChar);
         if (matched) return matched;
-        return { id: `sc-char-${idx}`, name: scChar, type: 'Personaje', isPlayable: true };
+        // Si no se encuentra una tarjeta existente para este ID, descartar para evitar entidades fantasmas
+        return null;
       }
       return scChar;
-    });
+    }).filter(Boolean);
 
-    // Separar en Jugables vs PNJs
+    // Filtrar estrictamente: SOLO tipo "Personaje" y SOLO que sea jugable por el usuario (isPlayable)
+    // Los personajes no jugables (PNJs controlados por la IA) NO deben mostrarse en esta pantalla de interpretación
     const playables = [];
-    const npcs = [];
 
     resolvedScenarioChars.forEach(char => {
+      const isChar = (char.type || 'Personaje').toLowerCase() === 'personaje';
+      if (!isChar) return; // Ignorar Lugares, Objetos, Facciones, etc.
+
       const isPlayable = char.isPlayable === true || char.characterRole === 'playable';
+      if (!isPlayable) return; // Ignorar PNJs
+
       const item = {
         id: char.id || `sc-char-${char.name || char.title}`,
         name: char.title || char.name || 'Personaje',
         intro: char.intro || char.text || char.description || '',
         cover: char.cover || (char.images && char.images[0]?.url) || (char.avatar) || '',
         traits: char.traits || [],
-        category: isPlayable ? 'playable' : 'npc',
-        badge: isPlayable ? '🎮 Jugable (PJ)' : '👥 PNJ',
-        badgeColor: isPlayable ? '#6ee7b7' : '#93c5fd',
-        badgeBg: isPlayable ? 'rgba(110, 231, 183, 0.15)' : 'rgba(147, 197, 253, 0.15)'
+        category: 'playable',
+        badge: '🎮 Jugable (PJ)',
+        badgeColor: '#6ee7b7',
+        badgeBg: 'rgba(110, 231, 183, 0.15)'
       };
-
-      if (isPlayable) {
-        playables.push(item);
-      } else {
-        npcs.push(item);
-      }
+      playables.push(item);
     });
 
     // Combinar todo evitando duplicados por ID o nombre
     const map = new Map();
-    [...playables, ...personas, ...npcs].forEach(c => {
+    [...playables, ...personas].forEach(c => {
       const key = `${c.name.toLowerCase()}`;
       if (!map.has(key)) {
         map.set(key, c);
@@ -99,20 +99,17 @@ export default function CharacterModal({
     return {
       userPersonas: personas,
       playableCharacters: playables,
-      npcCharacters: npcs,
       allCombinedCharacters: combined
     };
   }, [userCards, scenarioCharacters, allCards]);
 
   if (!isOpen) return null;
 
-  // Filtrar segÃºn pestaÃ±a y bÃºsqueda
+  // Filtrar según pestaña y búsqueda
   const filteredList = (activeTab === 'personas' 
     ? userPersonas 
     : activeTab === 'playable' 
     ? playableCharacters 
-    : activeTab === 'npcs' 
-    ? npcCharacters 
     : allCombinedCharacters
   ).filter(char => {
     if (!searchQuery.trim()) return true;
@@ -209,30 +206,6 @@ export default function CharacterModal({
           >
             <FontAwesomeIcon icon={faGamepad} /> Jugables (PJ) ({playableCharacters.length})
           </button>
-          {npcCharacters.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setActiveTab('npcs')}
-              style={{
-                flex: 1,
-                minWidth: '90px',
-                padding: '6px 10px',
-                borderRadius: '8px',
-                border: 'none',
-                background: activeTab === 'npcs' ? 'linear-gradient(135deg, #ffd36b, #d97706)' : 'transparent',
-                color: activeTab === 'npcs' ? '#000' : 'rgba(255,255,255,0.7)',
-                fontWeight: '700',
-                fontSize: '0.76rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '4px'
-              }}
-            >
-              <FontAwesomeIcon icon={faUsers} /> PNJs ({npcCharacters.length})
-            </button>
-          )}
         </div>
 
         {/* Buscador Rápido */}

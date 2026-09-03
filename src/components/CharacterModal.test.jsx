@@ -44,7 +44,7 @@ describe('CharacterModal - Playable characters & User personas', () => {
     }
   ];
 
-  test('renders modal with tabs and categorized characters', () => {
+  test('renders modal with tabs and categorized characters excluding non-playable NPCs', () => {
     const handleSelect = jest.fn();
     render(
       <CharacterModal
@@ -57,15 +57,17 @@ describe('CharacterModal - Playable characters & User personas', () => {
       />
     );
 
-    // Verificamos que se rendericen los nombres de los personajes
+    // Verificamos que se rendericen los nombres de los personajes jugables y personas
     expect(screen.getByText('Azgael Master')).toBeInTheDocument();
     expect(screen.getByText('Aria la Exploradora')).toBeInTheDocument();
-    expect(screen.getByText('Rey Malakar')).toBeInTheDocument();
+    
+    // Verificamos que los personajes no jugables (PNJs) NO aparezcan en este modal
+    expect(screen.queryByText('Rey Malakar')).not.toBeInTheDocument();
 
-    // Verificamos los badges
+    // Verificamos los badges de PJ
     expect(screen.getByText('🎮 Jugable (PJ)')).toBeInTheDocument();
     expect(screen.getAllByText('🎭 Persona Habitual').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('👥 PNJ')).toBeInTheDocument();
+    expect(screen.queryByText('👥 PNJ')).not.toBeInTheDocument();
   });
 
   test('filters characters when clicking tabs', () => {
@@ -134,5 +136,49 @@ describe('CharacterModal - Playable characters & User personas', () => {
     fireEvent.click(startBtn);
 
     expect(handleSelect).toHaveBeenCalledWith('Héroe Desconocido');
+  });
+
+  test('ignores locations and does not create phantom characters from orphan unresolvable IDs', () => {
+    const rawCardsWithPlaceAndOrphan = [
+      'orphan-id-1234',
+      {
+        id: 'place-1',
+        title: 'La Gran Forja',
+        name: 'La Gran Forja',
+        type: 'Lugar'
+      },
+      {
+        id: 'item-1',
+        title: 'Espada Mágica',
+        name: 'Espada Mágica',
+        type: 'Item'
+      },
+      {
+        id: 'sc-hero',
+        title: 'Guerrero Elegido',
+        name: 'Guerrero Elegido',
+        type: 'Personaje',
+        isPlayable: true
+      }
+    ];
+
+    render(
+      <CharacterModal
+        isOpen={true}
+        onClose={jest.fn()}
+        onSelect={jest.fn()}
+        userCards={[]}
+        scenarioCharacters={rawCardsWithPlaceAndOrphan}
+        allCards={[]}
+      />
+    );
+
+    // El lugar, el item y el id fantasma NO deben aparecer como personajes
+    expect(screen.queryByText('orphan-id-1234')).not.toBeInTheDocument();
+    expect(screen.queryByText('La Gran Forja')).not.toBeInTheDocument();
+    expect(screen.queryByText('Espada Mágica')).not.toBeInTheDocument();
+
+    // Solo el personaje jugable debe ser visible
+    expect(screen.getByText('Guerrero Elegido')).toBeInTheDocument();
   });
 });

@@ -188,6 +188,7 @@ export async function classifyImageWithAI({
   entityType = 'Personaje',
   entityTitle = '',
   entityDesc = '',
+  traits = [],
   currentLabel = '',
   currentTags = '',
   prompt = ''
@@ -195,51 +196,48 @@ export async function classifyImageWithAI({
   const isLocation = entityType === 'Lugar' || entityType === 'Escenario';
   const settings = loadChatSettings();
   const baseUrl = getBaseUrl(settings?.llmServerUrl || settings?.lmStudioUrl);
-  let modelId = settings?.preferredModel || 'local-model';
-  try {
-    const resolved = await resolveModelId(settings?.preferredModel || settings?.orchestratorModel, baseUrl);
-    if (resolved) modelId = resolved;
-  } catch (e) {
-    // Keep fallback modelId
+
+  // 1. Inferencia Nativa de Visión por Computador (PyTorch + BLIP en GPU local)
+  if (imageUrl && typeof imageUrl === 'string' && imageUrl.trim()) {
+    try {
+      const visionRes = await apiFetch('/api/images/vision-classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: imageUrl.trim(),
+          entityTitle: entityTitle || ''
+        })
+      });
+
+      if (visionRes && visionRes.ok) {
+        const visionData = await visionRes.json();
+        if (visionData.success && visionData.tags) {
+          console.log('[imageTagging]: Native GPU vision analysis completed:', visionData.tags, `(Caption: "${visionData.caption}")`);
+          return formatTagsString(visionData.tags);
+        }
+      }
+    } catch (nativeErr) {
+      console.warn('[imageTagging]: Native vision worker failed, trying remote/external VLM fallback:', nativeErr.message);
+    }
   }
 
-  const systemInstruction = isLocation
-    ? `You are an expert anime/visual scene classifier for a roleplay engine.
-Analyze the image or scene context and output EXCLUSIVELY 3 to 6 concise comma-separated English tags describing:
-1. Time of day (e.g. night, day, sunset, dawn)
-2. Weather / Atmosphere (e.g. rain, heavy rain, storm, snow, fog, clear sky)
-3. Environment & Condition (e.g. ruins, abandoned, intact, on fire, bedroom, dungeon, classroom, forest, beach)
-4. Distinct visual features (e.g. dim lighting, neon lights, fantasy landscape)
-RULES: Output ONLY comma-separated English tags. Never add conversational text, explanations, or quotes.
-Example valid outputs:
-night, heavy rain, ruins, abandoned
-sunset, clear sky, fantasy castle, intact
-indoor, bedroom, dim lighting, cozy`
-    : `You are an expert anime visual tagger for an interactive dynamic roleplay engine.
-Analyze the image with extreme attention to narrative intent, emotional nuance, erotic state, and specific interaction with the partner/viewer.
-Output EXCLUSIVELY 3 to 6 concise comma-separated English tags covering:
-1. Exact Outfit or Form (e.g. highschool uniform, sport clothes, underwear, striped bikini, nude, nekomimi form, succubus form, topless)
-2. Nuanced Emotion & Intent (e.g. in heat, pleading, knowing look, surprised, blushing, showing attention, seductive, aroused, embarrassed, confident, furious, crying)
-3. Specific Action & Spatial Interaction (e.g. advancing to genitals, crawling between legs, leaning forward, hands behind head, looking up, gazing at viewer, sitting, kneeling)
-4. Distinct features (e.g. cat ears, bat wings, red eyes, cleavage)
-
-GOLD STANDARD EXAMPLES:
-- highschool uniform, advancing to genitals
-- nude, nekomimi form, in heat, pleading
-- underwear, surprised, blushing
-- sport clothes, knowing look
-- highschool uniform, happy, showing attention
-- topless, panties, aroused, bat wings
-
-RULES: Output ONLY comma-separated English tags. Never add conversational filler, preambles, explanations or quotes.`;
-
-// 1. Intento con Vision Multimodal (si hay imageUrl)
+  // 2. Intento de respaldo con VLM Multimodal Remoto/Compatible (OpenAI vision payload)
   if (imageUrl && typeof imageUrl === 'string' && imageUrl.trim()) {
     try {
       let resolvedImgUrl = imageUrl.trim();
       if (!resolvedImgUrl.startsWith('data:') && !resolvedImgUrl.startsWith('http')) {
         resolvedImgUrl = `${baseUrl}${resolvedImgUrl.startsWith('/') ? '' : '/'}${resolvedImgUrl}`;
       }
+
+      let modelId = settings?.preferredModel || 'local-model';
+      try {
+        const resolved = await resolveModelId(settings?.preferredModel || settings?.orchestratorModel, baseUrl);
+        if (resolved) modelId = resolved;
+      } catch (e) {}
+
+      const systemInstruction = isLocation
+        ? `You are an expert visual scene classifier. Output EXCLUSIVELY 3 to 6 concise comma-separated English tags describing time of day, weather, environment and physical condition. Output ONLY comma-separated tags.`
+        : `You are an expert anime visual tagger. Inspect the image pixels directly and output EXCLUSIVELY 3 to 6 concise comma-separated English tags describing exact clothing/nudity state, facial emotion/gaze, pose/posture and biological traits (wings, tail, ears). Output ONLY comma-separated tags.`;
 
       const visionMessages = [
         { role: 'system', content: systemInstruction },
@@ -248,7 +246,7 @@ RULES: Output ONLY comma-separated English tags. Never add conversational filler
           content: [
             {
               type: 'text',
-              text: `Analyze this image for ${entityType} "${entityTitle}". Provide specific visual tags in English:`
+              text: `Analyze this image directly and describe strictly what is visually visible:\n\nOutput 3 to 6 concise comma-separated English tags:`
             },
             {
               type: 'image_url',
@@ -258,7 +256,7 @@ RULES: Output ONLY comma-separated English tags. Never add conversational filler
         }
       ];
 
-      const visionSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(1000) : undefined;
+      const visionSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(15000) : undefined;
       const res = await apiFetch('/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -283,112 +281,11 @@ RULES: Output ONLY comma-separated English tags. Never add conversational filler
         }
       }
     } catch (visionErr) {
-      // Vision model not active or text-only model -> proceed to text LLM analysis
-      console.warn('[imageTagging]: Vision payload failed, attempting contextual LLM:', visionErr.message);
+      console.warn('[imageTagging]: External VLM endpoint failed:', visionErr.message);
     }
   }
 
-  // 2. Intento con LLM Textual
-  const textPrompt = isLocation
-    ? `Task: Output 3 to 5 comma-separated visual tags in English for a roleplay location image variant.
-Location: "${entityTitle || 'Scenery'}"
-Context / Lighting / Atmosphere: "${currentLabel || currentTags || prompt || entityDesc || 'Atmospheric scenery'}"
-
-MANDATORY: Output ONLY 3 to 5 comma-separated tags in English (e.g. "night, rain, ruins, abandoned"). Do NOT write explanations or conversational sentences.`
-    : `Task: Output 3 to 5 comma-separated visual tags in English for a roleplay character image variant.
-Character: "${entityTitle || 'Anime character'}"
-Context / Outfit / Pose: "${currentLabel || currentTags || prompt || entityDesc || 'Casual outfit, looking at viewer'}"
-
-MANDATORY: Output ONLY 3 to 5 comma-separated tags in English (e.g. "highschool uniform, happy, looking at viewer"). Do NOT write explanations or conversational sentences.`;
-
-  try {
-    const timeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(1000) : undefined;
-    const res = await apiFetch('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: timeoutSignal,
-      body: JSON.stringify({
-        model: modelId,
-        messages: [
-          { role: 'system', content: systemInstruction },
-          { role: 'user', content: textPrompt }
-        ],
-        temperature: 0.2,
-        max_tokens: 60,
-        stream: false
-      })
-    }, baseUrl);
-
-    if (res && res.ok) {
-      const data = await res.json();
-      let text = data.choices?.[0]?.message?.content?.trim() || '';
-      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-      text = text.replace(/```[a-z]*\s*/gi, '').replace(/```/g, '').trim();
-      text = text.replace(/^(Tags|Etiquetas|Output):\s*/i, '').trim();
-      if (isValidTagList(text)) {
-        return formatTagsString(text);
-      }
-    }
-  } catch (error) {
-    console.warn('[imageTagging]: Text LLM error:', error.message);
-  }
-
-  // 3. Fallback Heurístico Rico en INGLÉS
-  const combined = `${entityTitle} ${entityDesc} ${currentLabel} ${currentTags} ${prompt}`.toLowerCase();
-  
-  if (isLocation) {
-    const tags = [];
-    if (combined.includes('noche') || combined.includes('night') || combined.includes('dark') || combined.includes('oscur')) tags.push('night', 'dark');
-    else if (combined.includes('tarde') || combined.includes('sunset') || combined.includes('dusk')) tags.push('sunset');
-    else if (combined.includes('amanecer') || combined.includes('dawn')) tags.push('sunrise');
-    else tags.push('day', 'sunny');
-
-    if (combined.includes('lluvia') || combined.includes('rain') || combined.includes('storm') || combined.includes('tormenta')) tags.push('rain', 'storm');
-    else if (combined.includes('niebla') || combined.includes('fog')) tags.push('foggy');
-    else if (combined.includes('nieve') || combined.includes('snow')) tags.push('snow');
-    else tags.push('clear sky');
-
-    if (combined.includes('ruina') || combined.includes('ruin') || combined.includes('abandon') || combined.includes('destru')) tags.push('ruins', 'abandoned');
-    else if (combined.includes('fuego') || combined.includes('fire') || combined.includes('llamas')) tags.push('on fire', 'burning');
-    else if (combined.includes('interior') || combined.includes('room') || combined.includes('habitacion')) tags.push('indoor', 'bedroom');
-    else if (combined.includes('playa') || combined.includes('beach') || combined.includes('mar')) tags.push('beach', 'ocean');
-    else tags.push('intact', 'majestic');
-
-    return formatTagsString(tags);
-  } else {
-    const tags = [];
-    
-    // Ropa / Clothing
-    if (combined.includes('bikini') || combined.includes('bañador') || combined.includes('swimsuit')) tags.push('bikini', 'swimsuit');
-    else if (combined.includes('lenceria') || combined.includes('underwear') || combined.includes('panties') || combined.includes('bragas') || combined.includes('ropa interior')) tags.push('underwear', 'lingerie');
-    else if (combined.includes('topless')) tags.push('topless', 'panties');
-    else if (combined.includes('desnud') || combined.includes('nude') || combined.includes('naked') || combined.includes('sin ropa')) tags.push('nude');
-    else if (combined.includes('uniform') || combined.includes('escolar') || combined.includes('colegial') || combined.includes('blazer')) tags.push('school uniform');
-    else if (combined.includes('sudadera') || combined.includes('hoodie') || combined.includes('tracksuit')) tags.push('hoodie');
-    else if (combined.includes('turtleneck') || combined.includes('cuello alto') || combined.includes('sweater')) tags.push('turtleneck');
-    else if (combined.includes('armadura') || combined.includes('armor') || combined.includes('combate')) tags.push('armor');
-    else if (combined.includes('maid') || combined.includes('sirvienta')) tags.push('maid outfit');
-    else tags.push('casual clothes');
-
-    // Emoción / Emotion
-    if (combined.includes('placer') || combined.includes('pleasure') || combined.includes('aroused') || combined.includes('excitad') || combined.includes('gemid')) tags.push('aroused', 'pleasure');
-    else if (combined.includes('seductor') || combined.includes('seductive') || combined.includes('smug') || combined.includes('picar')) tags.push('seductive', 'smug');
-    else if (combined.includes('sonrojad') || combined.includes('blush') || combined.includes('timid') || combined.includes('shy') || combined.includes('vergonz')) tags.push('blushing', 'shy');
-    else if (combined.includes('evil') || combined.includes('malicios') || combined.includes('grin')) tags.push('evil smile', 'grin');
-    else if (combined.includes('alegre') || combined.includes('feliz') || combined.includes('happy') || combined.includes('smile') || combined.includes('sonri')) tags.push('happy', 'smiling');
-    else if (combined.includes('enojad') || combined.includes('furi') || combined.includes('angry')) tags.push('angry');
-    else if (combined.includes('triste') || combined.includes('sad') || combined.includes('llor') || combined.includes('crying')) tags.push('crying', 'tears');
-    else if (combined.includes('preocupad') || combined.includes('worried') || combined.includes('nervio')) tags.push('worried', 'nervous');
-    else tags.push('neutral');
-
-    // Acciones y Rasgos Especiales
-    if (combined.includes('rodillas') || combined.includes('cuatro patas') || combined.includes('kneel') || combined.includes('crawl')) tags.push('kneeling', 'on all fours');
-    else if (combined.includes('sentad') || combined.includes('sit')) tags.push('sitting');
-    else if (combined.includes('acostad') || combined.includes('bed') || combined.includes('lying')) tags.push('lying down');
-    else if (combined.includes('manos nuca') || combined.includes('hands behind')) tags.push('hands behind head');
-    
-    if (combined.includes('alas') || combined.includes('wings') || combined.includes('sucub') || combined.includes('succubus')) tags.push('bat wings', 'succubus');
-
-    return formatTagsString(tags);
-  }
+  // 3. Si la visión real no está disponible, NO inventar etiquetas leyendo el texto del personaje.
+  console.warn('[imageTagging]: No vision model was able to inspect image pixels.');
+  return '';
 }

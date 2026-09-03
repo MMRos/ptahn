@@ -49,37 +49,72 @@ describe('imageTagging utilities', () => {
   });
 
   test('classifyImageWithAI provides rich English tags for characters and erotic/outfit context', async () => {
+    const localAI = require('./localAIStudio');
+    const originalApiFetch = localAI.apiFetch;
+    localAI.apiFetch = jest.fn().mockImplementation(async (url) => {
+      if (url === '/api/images/vision-classify') {
+        return {
+          ok: true,
+          json: async () => ({ success: true, tags: 'school uniform, kneeling, blushing' })
+        };
+      }
+      return { ok: false };
+    });
+
     const resultUniform = await classifyImageWithAI({
+      imageUrl: '/api/storage/images/test.jpg',
       entityType: 'Personaje',
-      entityTitle: 'Mari Setogaya',
-      entityDesc: 'Estudiante súcubo de rodillas en el suelo con uniforme escolar sonrojada',
-      currentLabel: 'Uniforme de rodillas'
+      entityTitle: 'Mari Setogaya'
     });
     expect(typeof resultUniform).toBe('string');
     expect(resultUniform.toLowerCase()).toContain('school uniform');
     expect(resultUniform.toLowerCase()).toContain('kneeling');
 
+    localAI.apiFetch = jest.fn().mockImplementation(async (url) => {
+      if (url === '/api/images/vision-classify') {
+        return {
+          ok: true,
+          json: async () => ({ success: true, tags: 'underwear, pleasure, bat wings' })
+        };
+      }
+      return { ok: false };
+    });
+
     const resultUnderwear = await classifyImageWithAI({
+      imageUrl: '/api/storage/images/test2.jpg',
       entityType: 'Personaje',
-      entityTitle: 'Mari Setogaya',
-      entityDesc: 'Súcubo con alas en ropa interior y bragas sintiendo placer y excitación',
-      currentLabel: 'Placer en ropa interior'
+      entityTitle: 'Mari Setogaya'
     });
     expect(resultUnderwear.toLowerCase()).toContain('underwear');
     expect(resultUnderwear.toLowerCase()).toContain('pleasure');
     expect(resultUnderwear.toLowerCase()).toContain('bat wings');
+
+    localAI.apiFetch = originalApiFetch;
   });
 
   test('classifyImageWithAI provides rich English tags for locations', async () => {
+    const localAI = require('./localAIStudio');
+    const originalApiFetch = localAI.apiFetch;
+    localAI.apiFetch = jest.fn().mockImplementation(async (url) => {
+      if (url === '/api/images/vision-classify') {
+        return {
+          ok: true,
+          json: async () => ({ success: true, tags: 'night, rain, ruins' })
+        };
+      }
+      return { ok: false };
+    });
+
     const result = await classifyImageWithAI({
+      imageUrl: '/api/storage/images/fortress.jpg',
       entityType: 'Lugar',
-      entityTitle: 'Garrison Fortress',
-      entityDesc: 'Pueblo amurallado de noche con intensa lluvia y ruinas abandonadas',
-      currentLabel: 'Noche Lluvia Ruinas'
+      entityTitle: 'Garrison Fortress'
     });
     expect(typeof result).toBe('string');
     expect(result.toLowerCase()).toContain('night');
     expect(result.toLowerCase()).toContain('rain');
+
+    localAI.apiFetch = originalApiFetch;
   });
 
   test('isValidTagList rejects conversational AI sentences and refusals', () => {

@@ -3,7 +3,24 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const { diffusionEngine } = require('../engine/diffusionEngine');
+const { visionEngine } = require('../engine/visionEngine');
 const { DATA_DIR } = require('../config');
+
+// POST /api/images/vision-classify - Native GPU Vision pixel inspection
+router.post('/vision-classify', async (req, res) => {
+  try {
+    const { imageUrl, imageBase64, entityTitle } = req.body;
+    if (!imageUrl && !imageBase64) {
+      return res.status(400).json({ success: false, error: 'imageUrl or imageBase64 is required' });
+    }
+
+    const result = await visionEngine.classifyImage({ imageUrl, imageBase64, entityTitle });
+    res.json(result);
+  } catch (error) {
+    console.error('[Vision Route Error]:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // GET /api/images/status - Return diffusion engine status
 router.get('/status', (req, res) => {

@@ -536,6 +536,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       userChar,
       userInventories,
       relevantEntities,
+      allScenarioEntities: scenarioCards,
       chat: activeChat,
       messages: messages.slice(-10),
       chatSettings,

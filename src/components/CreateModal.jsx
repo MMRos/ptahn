@@ -11,7 +11,9 @@ import {
   faEdit,
   faRedo,
   faFolderOpen,
-  faPlus
+  faPlus,
+  faTag,
+  faTags
 } from '@fortawesome/free-solid-svg-icons';
 import NarratorForm from './NarratorForm';
 import ToolWorkshopForm from './ToolWorkshopForm';
@@ -21,6 +23,7 @@ import InventoryFormSection from './create/forms/InventoryFormSection';
 import MemoryFormSection from './create/forms/MemoryFormSection';
 import { generateImageLocal, editImageWithAI } from '../utils/localAIStudio';
 import { enhanceFieldWithAI, autoCompleteEntityWithAI } from '../utils/aiEnhancer';
+import { classifyImageWithAI } from '../utils/imageTagging';
 import '../pages/create.css';
 import ModalCloseButton from './common/ModalCloseButton';
 import ImageCropperModal from './ImageCropperModal';
@@ -156,6 +159,8 @@ export default function CreateModal({
   // Galería de imágenes y expresiones del personaje
   const [characterImages, setCharacterImages] = useState([]);
   const [customImageUrl, setCustomImageUrl] = useState('');
+  const [isTaggingImages, setIsTaggingImages] = useState(false);
+  const [taggingImageId, setTaggingImageId] = useState(null);
   const fileInputRef = useRef(null);
   const [cropModalImage, setCropModalImage] = useState(null);
     
@@ -881,8 +886,82 @@ export default function CreateModal({
   };
 
   const handleUpdateCharacterImageTags = (id, newTags) => {
-    setCharacterImages(prev => prev.map(img => img.id === id ? { ...img, tags: newTags, label: img.label || newTags } : img));
+    setCharacterImages(prev => prev.map(img => img.id === id ? { ...img, tags: newTags } : img));
     setIsDirty(true);
+  };
+
+  const handleAutoTagSingleImage = async (img) => {
+    if (!img || !img.url) return;
+    setTaggingImageId(img.id);
+    try {
+      const generatedTags = await classifyImageWithAI({
+        imageUrl: img.url,
+        entityType: itemType,
+        entityTitle: title,
+        entityDesc: intro ? `${intro}. ${text || ''}` : text,
+        traits: selectedTraits,
+        currentLabel: img.label || '',
+        currentTags: img.tags || '',
+        prompt: img.label || ''
+      });
+      if (generatedTags) {
+        setCharacterImages(prev => prev.map(item => {
+          if (item.id === img.id) {
+            return {
+              ...item,
+              tags: generatedTags,
+              label: item.label || generatedTags.split(',')[0].trim()
+            };
+          }
+          return item;
+        }));
+        setIsDirty(true);
+      }
+    } catch (err) {
+      console.warn('[CreateModal]: Error auto-tagging image:', err);
+      alert(`Error al auto-etiquetar imagen: ${err.message}`);
+    } finally {
+      setTaggingImageId(null);
+    }
+  };
+
+  const handleBatchAutoTagImages = async () => {
+    if (characterImages.length === 0) return;
+    setIsTaggingImages(true);
+    try {
+      for (const img of characterImages) {
+        setTaggingImageId(img.id);
+        const generatedTags = await classifyImageWithAI({
+          imageUrl: img.url,
+          entityType: itemType,
+          entityTitle: title,
+          entityDesc: intro ? `${intro}. ${text || ''}` : text,
+          traits: selectedTraits,
+          currentLabel: img.label || '',
+          currentTags: img.tags || '',
+          prompt: img.label || ''
+        });
+        if (generatedTags) {
+          setCharacterImages(prev => prev.map(item => {
+            if (item.id === img.id) {
+              return {
+                ...item,
+                tags: generatedTags,
+                label: item.label || generatedTags.split(',')[0].trim()
+              };
+            }
+            return item;
+          }));
+          setIsDirty(true);
+        }
+      }
+    } catch (err) {
+      console.warn('[CreateModal]: Error in batch auto-tagging:', err);
+      alert(`Error al auto-etiquetar lote: ${err.message}`);
+    } finally {
+      setIsTaggingImages(false);
+      setTaggingImageId(null);
+    }
   };
 
   const handleCloseAttempt = () => {
@@ -1528,73 +1607,158 @@ export default function CreateModal({
 
                     {/* Galería de Expresiones */}
                     {characterImages.length > 0 && (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px', marginTop: '10px' }}>
-                        {characterImages.map(img => (
-                          <div
-                            key={img.id}
+                      <div style={{ marginTop: '12px' }}>
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '8px',
+                          flexWrap: 'wrap',
+                          gap: '8px',
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          padding: '6px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid rgba(255, 255, 255, 0.08)'
+                        }}>
+                          <span style={{ fontSize: '0.78rem', color: '#aaa' }}>
+                            🖼️ <strong>{characterImages.length}</strong> {characterImages.length === 1 ? 'imagen' : 'imágenes'} en la galería
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleBatchAutoTagImages}
+                            disabled={isTaggingImages}
                             style={{
-                              background: 'rgba(20,18,30,0.85)',
-                              border: img.isDefault ? '2px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: '8px',
-                              overflow: 'hidden',
+                              background: isTaggingImages ? 'rgba(99, 102, 241, 0.25)' : 'linear-gradient(90deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2))',
+                              border: '1px solid rgba(168, 85, 247, 0.4)',
+                              color: '#c084fc',
+                              padding: '5px 12px',
+                              borderRadius: '6px',
+                              cursor: isTaggingImages ? 'not-allowed' : 'pointer',
+                              fontSize: '0.78rem',
+                              fontWeight: '700',
                               display: 'flex',
-                              flexDirection: 'column'
+                              alignItems: 'center',
+                              gap: '6px',
+                              transition: 'all 0.2s ease'
                             }}
+                            title="Analizar y auto-etiquetar todas las fotos de la galería usando IA y el contexto del personaje"
                           >
-                            <div style={{ position: 'relative', height: '110px' }}>
-                              <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                              {img.isDefault && (
-                                <span style={{ position: 'absolute', top: 4, left: 4, background: '#ffd36b', color: '#000', fontSize: '0.65rem', fontWeight: '800', padding: '1px 5px', borderRadius: '4px' }}>
-                                  Principal
-                                </span>
-                              )}
-                              <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: '4px' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => setCropModalImage(img)}
-                                  title="Recortar y reencuadrar imagen"
-                                  style={{ background: 'rgba(255, 211, 107, 0.9)', border: 'none', color: '#000', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
-                                >
-                                  <FontAwesomeIcon icon={faCrop} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditImageModal(img)}
-                                  title="Modificar esta imagen con IA (img2img)"
-                                  style={{ background: 'rgba(99, 102, 241, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
-                                >
-                                  <FontAwesomeIcon icon={faEdit} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveCharacterImage(img.id)}
-                                  title="Eliminar expresión"
-                                  style={{ background: 'rgba(239, 68, 68, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
-                                >
-                                  <FontAwesomeIcon icon={faTimes} />
-                                </button>
+                            <FontAwesomeIcon icon={faTags} spin={isTaggingImages} />
+                            {isTaggingImages ? 'Etiquetando lote con IA...' : 'Auto-etiquetar Fotos con IA'}
+                          </button>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px' }}>
+                          {characterImages.map(img => (
+                            <div
+                              key={img.id}
+                              style={{
+                                background: 'rgba(20,18,30,0.85)',
+                                border: img.isDefault ? '2px solid #ffd36b' : '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: '8px',
+                                overflow: 'hidden',
+                                display: 'flex',
+                                flexDirection: 'column'
+                              }}
+                            >
+                              <div style={{ position: 'relative', height: '110px' }}>
+                                <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                {img.isDefault && (
+                                  <span style={{ position: 'absolute', top: 4, left: 4, background: '#ffd36b', color: '#000', fontSize: '0.65rem', fontWeight: '800', padding: '1px 5px', borderRadius: '4px' }}>
+                                    Principal
+                                  </span>
+                                )}
+                                <div style={{ position: 'absolute', top: 4, right: 4, display: 'flex', gap: '3px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAutoTagSingleImage(img)}
+                                    disabled={taggingImageId === img.id}
+                                    title="Auto-etiquetar esta foto con IA"
+                                    style={{
+                                      background: taggingImageId === img.id ? 'rgba(168, 85, 247, 0.95)' : 'rgba(168, 85, 247, 0.85)',
+                                      border: 'none',
+                                      color: '#fff',
+                                      borderRadius: '4px',
+                                      width: '22px',
+                                      height: '22px',
+                                      cursor: taggingImageId === img.id ? 'wait' : 'pointer',
+                                      fontSize: '0.7rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center'
+                                    }}
+                                  >
+                                    <FontAwesomeIcon icon={faTag} spin={taggingImageId === img.id} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCropModalImage(img)}
+                                    title="Recortar y reencuadrar imagen"
+                                    style={{ background: 'rgba(255, 211, 107, 0.9)', border: 'none', color: '#000', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                  >
+                                    <FontAwesomeIcon icon={faCrop} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditImageModal(img)}
+                                    title="Modificar esta imagen con IA (img2img)"
+                                    style={{ background: 'rgba(99, 102, 241, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                  >
+                                    <FontAwesomeIcon icon={faEdit} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveCharacterImage(img.id)}
+                                    title="Eliminar expresión"
+                                    style={{ background: 'rgba(239, 68, 68, 0.85)', border: 'none', color: '#fff', borderRadius: '4px', width: '22px', height: '22px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                  >
+                                    <FontAwesomeIcon icon={faTimes} />
+                                  </button>
+                                </div>
+                              </div>
+                              <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <input
+                                  type="text"
+                                  value={img.label || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setCharacterImages(prev => prev.map(item => item.id === img.id ? { ...item, label: val } : item));
+                                    setIsDirty(true);
+                                  }}
+                                  placeholder="Nombre / Variante"
+                                  title="Nombre de la imagen"
+                                  style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.72rem', width: '100%', outline: 'none', fontWeight: '600' }}
+                                />
+                                <input
+                                  type="text"
+                                  value={img.tags || ''}
+                                  onChange={(e) => handleUpdateCharacterImageTags(img.id, e.target.value)}
+                                  placeholder="Tags IA (ej. school uniform, smiling)"
+                                  title="Etiquetas visuales en inglés para activación de expresiones en el chat"
+                                  style={{
+                                    background: 'rgba(0, 0, 0, 0.4)',
+                                    border: '1px solid rgba(168, 85, 247, 0.25)',
+                                    borderRadius: '4px',
+                                    color: '#d8b4fe',
+                                    fontSize: '0.66rem',
+                                    padding: '3px 6px',
+                                    width: '100%',
+                                    outline: 'none'
+                                  }}
+                                />
+                                {!img.isDefault && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetDefaultCharacterImage(img.id)}
+                                    style={{ background: 'rgba(255,211,107,0.1)', border: '1px solid rgba(255,211,107,0.2)', color: '#ffd36b', fontSize: '0.68rem', borderRadius: '4px', padding: '2px', cursor: 'pointer', marginTop: '2px' }}
+                                  >
+                                    Hacer Principal
+                                  </button>
+                                )}
                               </div>
                             </div>
-                            <div style={{ padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <input
-                                type="text"
-                                value={img.label || ''}
-                                onChange={(e) => handleUpdateCharacterImageTags(img.id, e.target.value)}
-                                placeholder="Etiqueta / Expresión"
-                                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.72rem', width: '100%', outline: 'none' }}
-                              />
-                              {!img.isDefault && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSetDefaultCharacterImage(img.id)}
-                                  style={{ background: 'rgba(255,211,107,0.1)', border: '1px solid rgba(255,211,107,0.2)', color: '#ffd36b', fontSize: '0.68rem', borderRadius: '4px', padding: '2px', cursor: 'pointer' }}
-                                >
-                                  Hacer Principal
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

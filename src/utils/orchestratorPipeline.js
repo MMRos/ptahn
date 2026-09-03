@@ -217,6 +217,13 @@ export async function executeInboundOrchestration({
     const wasAlreadyTarget = previousSceneState?.primaryTarget && 
       previousSceneState.primaryTarget.toLowerCase() === cName;
     const isMentionedInRecent = cName && recentText.toLowerCase().includes(cName);
+    const isSummonOrCreationAction = /\b(summon|invoc(?:ar|o|as|a|amos|an)|crear|fabricar|materializar|buscar|ir a por|llamar a)\b/i.test(recentText);
+
+    // Si el jugador está ejecutando una invocación o creación y el personaje no estaba ya en la sala,
+    // aún no es un objetivo corpóreamente presente en la escena física
+    if (!wasAlreadyTarget && isMentionedInRecent && isSummonOrCreationAction) {
+      return false;
+    }
 
     if (wasAlreadyTarget || isMentionedInRecent) return true;
 

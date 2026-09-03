@@ -217,5 +217,31 @@ describe('orchestratorPipeline utility', () => {
       // Location must still be Llanura, NOT Mazmorras errantes
       expect(result.sceneContext.activeLocation).toBe('Llanura');
     });
+
+    test('Summoning action: does not prematurely anchor an absent character as primaryTarget in the room', async () => {
+      const scenario = {
+        title: 'The Forge',
+        presentation: 'WELCOME TO THE FORGE. 1. TUTORIAL 2. SUMMON A CHARACTER...'
+      };
+      const cards = [
+        { id: 'c-mari', title: 'Mari Setogaya', type: 'Personaje', intro: 'Súcubo vampiro' },
+        { id: 'c-forge', title: 'La Forja', type: 'Lugar', intro: 'Vasto espacio retro-tecnológico' }
+      ];
+
+      const result = await executeInboundOrchestration({
+        userMessage: '2 Summon Mari Setogaya de Itadaki Seieki',
+        cards,
+        recentMessages: [
+          { from: 'narrator', text: 'WELCOME TO THE FORGE. 1. TUTORIAL 2. SUMMON A CHARACTER 3. SUMMON OBJECT' }
+        ],
+        scenario,
+        currentTurn: 1
+      });
+
+      // Mari Setogaya is being summoned; she is NOT already physically present in the room
+      expect(result.sceneContext.primaryTarget).toBeNull();
+      // Location remains The Forge / La Forja
+      expect(result.sceneContext.activeLocation).toMatch(/The Forge|La Forja/);
+    });
   });
 });
