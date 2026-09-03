@@ -96,7 +96,40 @@ export function findMatchingEntity(query, appDataOrCards) {
  */
 export function sanitizeTypography(text) {
   if (!text || typeof text !== 'string') return '';
-  return text
+
+  // 1. Desarmar comillas erróneas que envuelven párrafos completos de narración/entorno:
+  const cleanedLines = text.split('\n').map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+
+    // Caso A: El párrafo empieza con comilla de bloque pero no se cierra y es claramente narración en 3ra persona
+    // ej: "El lobo gris se detiene a unos pasos...
+    if (trimmed.startsWith('"') && !trimmed.slice(1).includes('"')) {
+      const inner = trimmed.slice(1).trim();
+      const isDescriptiveNarrative = /^(el|la|los|las|un|una|unos|unas|tu|tus|su|sus|con|sin|al|mientras|de pronto|de repente|oyes|sientes|ves|estás|un pájaro|el lobo|el viento|la noche|el día|en el|en la)\b/i.test(inner);
+      if (isDescriptiveNarrative && inner.length > 25) {
+        return line.replace(/^(\s*)"/, '$1');
+      }
+    }
+
+    // Caso B: El párrafo completo está envuelto en comillas de bloque: ^"(.*)"$
+    // pero describe al entorno o acciones narrativas (no es una línea de diálogo hablada)
+    // ej: "El viento sopla fuerte en el claro, y las hojas susurran..."
+    const fullQuoteMatch = trimmed.match(/^"([^"]+)"$/);
+    if (fullQuoteMatch) {
+      const inner = fullQuoteMatch[1].trim();
+      const isDescriptiveNarrative = /^(el|la|los|las|un|una|unos|unas|tu|tus|su|sus|con|sin|al|mientras|de pronto|de repente|oyes|sientes|ves|estás|un pájaro|el lobo|el viento|la noche|el día|en el|en la)\b/i.test(inner);
+      if (isDescriptiveNarrative && inner.length > 35) {
+        return line.replace(/^(\s*)"([^"]+)"(\s*)$/, '$1$2$3');
+      }
+    }
+
+    return line;
+  });
+
+  const narrativeCleaned = cleanedLines.join('\n');
+
+  return narrativeCleaned
     // 1. Corregir comillas envueltas en asteriscos: *"Hola"* -> "Hola"
     .replace(/\*+"([^"\n]+)"\*+/g, '"$1"')
     // 2. Corregir asteriscos dentro de comillas: "*Hola*" -> "Hola"

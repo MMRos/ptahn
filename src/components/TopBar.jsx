@@ -238,6 +238,7 @@ export default function TopBar({
   const preferredModel = chatSettings.preferredModel || 'Precog-Magnum-31B.i1-Q3_K_S.gguf';
   const preferredLanguage = chatSettings.preferredLanguage || 'auto';
   const responseLength = chatSettings.responseLength || 1000;
+  const currentTemperature = typeof chatSettings.temperature === 'number' ? chatSettings.temperature : 0.70;
 
   return (
     <header className="top-bar">
@@ -922,6 +923,98 @@ export default function TopBar({
                     <option value={1000}>Medio (1000 caracteres)</option>
                     <option value={2500}>Largo (2500 caracteres)</option>
                   </select>
+                </div>
+
+                {/* Calor Creativo / Temperatura de Muestreo */}
+                <div className="settings-group" style={{ background: 'rgba(255, 211, 107, 0.04)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255, 211, 107, 0.18)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ margin: 0, fontSize: '0.78rem', color: '#ffd36b', fontWeight: 'bold' }}>
+                      🔥 Calor Creativo (Temperatura):
+                    </label>
+                    <span style={{ 
+                      fontSize: '0.82rem', 
+                      fontWeight: 'bold', 
+                      color: currentTemperature > 0.95 ? '#f87171' : (currentTemperature < 0.65 ? '#6ee7b7' : '#ffd36b'),
+                      background: 'rgba(0,0,0,0.35)',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid rgba(255,255,255,0.1)'
+                    }}>
+                      {Number(currentTemperature).toFixed(2)}
+                    </span>
+                  </div>
+
+                  <input 
+                    type="range" 
+                    min="0.20" 
+                    max="1.30" 
+                    step="0.05"
+                    value={currentTemperature}
+                    onChange={(e) => onUpdateChatSettings({ ...chatSettings, temperature: parseFloat(e.target.value) })}
+                    style={{ width: '100%', cursor: 'pointer', accentColor: '#ffd36b' }}
+                  />
+
+                  {/* Indicador Descriptivo del Modo */}
+                  <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.75)', marginTop: '4px', lineHeight: 1.3 }}>
+                    {currentTemperature < 0.60 && '🛡️ Táctico y Metódico: Mínimo desvío, combate lógico y reglas estrictas.'}
+                    {currentTemperature >= 0.60 && currentTemperature <= 0.85 && '⚖️ Rol Equilibrado (0.70 recomendado): Coherencia narrativa con expresividad.'}
+                    {currentTemperature > 0.85 && '🎭 Creativo y Dramático: Mayor plasticidad, prosa metafórica y giros imprevistos.'}
+                  </div>
+
+                  {/* Presets Rápidos */}
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateChatSettings({ ...chatSettings, temperature: 0.50 })}
+                      style={{
+                        flex: 1,
+                        padding: '3px 4px',
+                        background: currentTemperature === 0.5 ? '#6ee7b7' : 'rgba(255,255,255,0.06)',
+                        color: currentTemperature === 0.5 ? '#000' : 'rgba(255,255,255,0.8)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '4px',
+                        fontSize: '0.68rem',
+                        fontWeight: currentTemperature === 0.5 ? 'bold' : 'normal',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Táctico (0.50)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateChatSettings({ ...chatSettings, temperature: 0.70 })}
+                      style={{
+                        flex: 1,
+                        padding: '3px 4px',
+                        background: currentTemperature === 0.70 ? '#ffd36b' : 'rgba(255,255,255,0.06)',
+                        color: currentTemperature === 0.70 ? '#000' : 'rgba(255,255,255,0.8)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '4px',
+                        fontSize: '0.68rem',
+                        fontWeight: currentTemperature === 0.70 ? 'bold' : 'normal',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Equilibrado (0.70)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateChatSettings({ ...chatSettings, temperature: 1.10 })}
+                      style={{
+                        flex: 1,
+                        padding: '3px 4px',
+                        background: currentTemperature === 1.1 ? '#f87171' : 'rgba(255,255,255,0.06)',
+                        color: currentTemperature === 1.1 ? '#000' : 'rgba(255,255,255,0.8)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '4px',
+                        fontSize: '0.68rem',
+                        fontWeight: currentTemperature === 1.1 ? 'bold' : 'normal',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Dramático (1.10)
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

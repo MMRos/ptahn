@@ -26,6 +26,7 @@ describe('Storage Module Tests', () => {
     expect(settings.showCharacterSidebar).toBe(true);
     expect(settings.chatBackgroundOpacity).toBe(0.85);
     expect(settings.preferredImageModel).toBe('malaAnimeMixNSFW_v70WithoutVAE.safetensors');
+    expect(settings.temperature).toBe(0.70);
   });
 
   test('saveChatSettings correctly writes to localStorage and loadChatSettings retrieves it', () => {
@@ -34,7 +35,8 @@ describe('Storage Module Tests', () => {
       preferredLanguage: 'Français',
       lmStudioUrl: 'http://127.0.0.1:9999',
       sendOnShiftEnter: false,
-      preferredImageModel: 'v6.safetensors'
+      preferredImageModel: 'v6.safetensors',
+      temperature: 0.5
     };
     saveChatSettings(custom);
 
@@ -43,6 +45,7 @@ describe('Storage Module Tests', () => {
     expect(loaded.lmStudioUrl).toBe('http://127.0.0.1:9999');
     expect(loaded.sendOnShiftEnter).toBe(false);
     expect(loaded.preferredImageModel).toBe('v6.safetensors');
+    expect(loaded.temperature).toBe(0.5);
   });
 
   test('loadChatSettings safely recovers from corrupted JSON in localStorage', () => {

@@ -220,10 +220,12 @@ export function buildStorytellerSystemPrompt({
 
   let scenarioDetails = `Scenario: ${chat.scenario || 'Freeplay'}.`;
   if (scenario) {
+    const openingScene = scenario.presentation || (Array.isArray(scenario.initialMessages) && scenario.initialMessages[0]?.text) || '';
     scenarioDetails = `
 [ACTIVE PLAYABLE SCENARIO]:
 - Scenario Title: ${scenario.title}
 ${scenario.intro ? `- Introduction: ${scenario.intro}` : ''}
+${openingScene ? `- Opening Scene / Initial Situation: ${openingScene}` : ''}
 ${scenario.baseContext ? `- Base Lore / World Context: ${scenario.baseContext}` : ''}
 ${scenario.aiInstructions ? `- Game Master Custom Directives (Extra Context): ${scenario.aiInstructions}` : ''}
 `.trim();
@@ -309,9 +311,45 @@ ${episodicMemories ? `${episodicMemories}\n\n` : ''}${sceneAnchorDirective ? `${
    - Maintain strict consistency with scenario lore, inventory, and accumulated memories.
 
 7. STRICT TYPOGRAPHICAL FORMATTING, DELIMITERS & ENTITY HIGHLIGHTS:
-   - SPOKEN NPC DIALOGUE (ALOUD): MUST be wrapped EXCLUSIVELY in double quotes without internal asterisks: "Hello, traveler."
+   - GENERAL NARRATIVE PROSE & ENVIRONMENT (NO QUOTES): Environmental descriptions, actions, combat, physical deeds, and animal/beast behavior MUST be written in normal paragraphs WITHOUT ANY QUOTATION MARKS. NEVER wrap entire paragraphs, descriptions, or outputs in quotation marks.
+   - SPOKEN NPC DIALOGUE (ALOUD) ONLY: Double quotes ("...") are STRICTLY AND EXCLUSIVELY RESERVED for words spoken aloud by speaking humanoid/sentient NPCs: "Hello, traveler." Non-sapient beasts (wolves, monsters, creatures) do NOT speak; their snarls, growls, or physical deeds are ACTIONS/PROSE and must NEVER be in quotation marks.
    - SILENT INTERNAL THOUGHTS (UNSPOKEN): If silent internal thoughts (unspoken) are narrated and originate from a sapient entity capable of speech, thoughts MUST be wrapped EXCLUSIVELY in tildes: ~What a strange presence this newcomer has...~ Non-sapient beasts, creatures, and wild animals act on physical instinct and DO NOT have verbalized internal monologues.
-   - GENERAL NARRATIVE PROSE & ACTIONS: Write standard clean literary paragraphs for descriptions. Asterisks (*...*) are reserved ONLY for short, specific inline actions or gestures (e.g. *sonríe con picardía*).
+   - INLINE ACTIONS: Asterisks (*...*) are reserved ONLY for short inline gestures (e.g. *sonríe con picardía*).
    - MANDATORY ENTITY HIGHLIGHTS (==...==): You MUST wrap ALL key proper names, locations, towns, characters, factions, and notable items in double equal signs (e.g. ==NombrePersonaje==, ==NombreLugar==, ==NombreFaccion==, ==NombreItem==).
 `.trim();
 }
+
+/**
+ * Builds an attention-recency guidance hook to append at the exact tail of the context window,
+ * countering the "Lost in the Middle" phenomenon (ISEKAI ZERO / FictionLab pattern).
+ * 
+ * @param {Object} params
+ * @param {Object} [params.sceneContext]
+ * @param {Object} [params.userChar]
+ * @param {string} [params.oocDirective]
+ * @returns {string}
+ */
+export function buildRecencyGuidanceHook({ sceneContext = null, userChar = null, oocDirective = '' } = {}) {
+  const userName = userChar?.name || userChar?.title || 'the Player';
+  const parts = [];
+
+  parts.push('[IMMEDIATE RECENCY GUIDANCE - TURN EXECUTION RULES]:');
+  parts.push(`1. ABSOLUTE PLAYER AGENCY: You are the Game Master. NEVER speak, act, decide, or narrate internal thoughts for {{user}} (${userName}). Describe ONLY the immediate external world and NPC reactions in third-person, then STOP.`);
+
+  if (sceneContext?.primaryTarget) {
+    parts.push(`2. ACTIVE SCENE FOCUS: The immediate action is strictly focused on "${sceneContext.primaryTarget}". Do NOT swap, transform, or divert attention away from this entity.`);
+  }
+
+  if (sceneContext?.activeLocation) {
+    parts.push(`3. IMMEDIATE SURROUNDINGS: Current location is "${sceneContext.activeLocation}"${sceneContext.timeOfDay ? ` (${sceneContext.timeOfDay})` : ''}. Maintain spatial continuity.`);
+  }
+
+  if (oocDirective && oocDirective.trim()) {
+    parts.push(`4. SCENE DIRECTOR META-INSTRUCTION (OOC): ${oocDirective.trim()}`);
+  }
+
+  parts.push('5. TYPOGRAPHY: Write narrative descriptions, actions, and beast behavior in clean paragraphs WITHOUT quotation marks. Double quotes ("...") are STRICTLY AND EXCLUSIVELY for spoken words by humanoid characters. NEVER put entire paragraphs, environment, or animal growls in quotes.');
+
+  return parts.join('\n');
+}
+

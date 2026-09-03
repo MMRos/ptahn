@@ -9,6 +9,7 @@
 import { filterAndSortRelevantCards } from './weightCalculator';
 import { requestRerank, getServerBaseUrl } from './serverApi';
 import { resolveSceneState } from './sceneStateTracker';
+import { sanitizeTypography } from './textFormatter';
 
 /**
  * Parses JSON block from raw LLM/SLM response with resilient fallback.
@@ -290,9 +291,10 @@ export async function executeOutboundOrchestration({
   chatSettings = {},
   baseUrl
 }) {
-  // Formateo limpio nativo instantáneo (0ms) sin demoras de GPU
+  // Formateo y saneamiento limpio nativo instantáneo (0ms) sin demoras de GPU
+  const formattedText = sanitizeTypography(rawNarrative || '');
   return {
-    formattedText: rawNarrative || '',
+    formattedText,
     areaA_expression: null,
     areaB_location: null,
     discoveredEntities: [],

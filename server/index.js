@@ -40,6 +40,16 @@ function createApp() {
     }
   });
 
+  // Initialize DocumentEngine and safely migrate legacy data if present (Zero-Touch compliant)
+  try {
+    const { initDocumentEngine } = require('./storage/documentEngine');
+    const { runMigrationIfNeeded } = require('./storage/migrationService');
+    initDocumentEngine();
+    runMigrationIfNeeded();
+  } catch (err) {
+    console.error('[DocumentEngine Init/Migration Error]:', err);
+  }
+
   // API Routes
   app.use('/api/ai', aiRouter);
   app.use('/api/models', modelsRouter);

@@ -14,119 +14,31 @@ import {
   faLanguage,
   faSpinner,
   } from '@fortawesome/free-solid-svg-icons';
-import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generateLocationWallpaper, generateAudioLocal, sendContextSummarizationTask, sendExtractCardsTask, translateChatMessage } from '../utils/localAIStudio';
+import { sendChatMessage, generateImageLocal, generateCharacterPortrait, generateLocationWallpaper, generateAudioLocal, translateChatMessage } from '../utils/localAIStudio';
 import { resolveTargetLanguage } from '../utils/language';
-import { autoCompleteEntityWithAI } from '../utils/aiEnhancer';
-import { buildStorytellerSystemPrompt } from '../utils/promptBuilder';
-import { isEntityEligibleForAutoCard } from '../utils/cardGatekeeper';
+import { buildStorytellerSystemPrompt, buildRecencyGuidanceHook } from '../utils/promptBuilder';
 import { normalizeMessageTurns, resolveSceneState } from '../utils/sceneStateTracker';
 import ActiveEntityModal from './chat/ActiveEntityModal';
 import ChatInputDock from './chat/ChatInputDock';
 
 import { saveChatToFolder, saveAppDataToFolder } from '../utils/storage';
 import { speakBrowserUtterance, cancelBrowserSpeech } from '../utils/speechTTS';
-import { FormattedMessageText, findMatchingEntity, normalizeEntityName } from '../utils/textFormatter';
+import { FormattedMessageText, findMatchingEntity } from '../utils/textFormatter';
 import { detectActiveCharacter, matchCharacterExpression, resolveLocationWallpaper } from '../utils/characterMatcher';
 
 import { executeInboundOrchestration, executeOutboundOrchestration } from '../utils/orchestratorPipeline';
 import { addChat } from '../utils/db';
-import { getActiveInitialMessageText } from '../utils/scenarioScoping';
+import { getActiveInitialMessageText, resolveUserCharacter, getScenarioCards } from '../utils/scenarioScoping';
 
 
 import StagingModal from './StagingModal';
 import CharacterPopup from './CharacterPopup';
 import CharacterSidebar from './CharacterSidebar';
 import ConfirmModal from './ConfirmModal';
+import { useChatBackgroundTasks } from '../hooks/useChatBackgroundTasks';
 import './chats.css';
 
-export function resolveUserCharacter(chat, appData) {
-  if (!chat || !appData?.cards) return null;
-  const targetId = chat.userCharacterId || chat.characterId || chat.character;
-  const targetName = (chat.userCharacterName || chat.character || chat.characterId || '').trim().toLowerCase();
-
-  return (appData.cards || []).find(c => {
-    if (c.type !== 'Personaje' && c.type !== 'User') return false;
-    const cTitle = (c.title || c.name || '').trim().toLowerCase();
-    return c.id === targetId ||
-           (targetName && cTitle === targetName) ||
-           (chat.userCharacterId && c.id === chat.userCharacterId) ||
-           (chat.characterId && (c.id === chat.characterId || cTitle === chat.characterId.trim().toLowerCase())) ||
-           (chat.character && (c.id === chat.character || cTitle === chat.character.trim().toLowerCase())) ||
-           (chat.userCharacterName && cTitle === chat.userCharacterName.trim().toLowerCase());
-  }) || findMatchingEntity(targetName, appData.cards) || null;
-}
-
-export function getScenarioCards(scenario, chat, appData, userChar) {
-  const allCards = appData?.cards || [];
-  const scenarioCardsArray = Array.isArray(scenario?.cards) ? scenario.cards : [];
-  const chatCharactersArray = Array.isArray(chat?.characters) ? chat.characters : [];
-  const activeScenarioId = scenario?.id || chat?.scenarioId;
-  const activeScenarioTitle = scenario?.title || chat?.scenario;
-
-  // Incluir objetos embebidos directos si existen en scenario.cards
-  const embeddedScenarioCards = scenarioCardsArray.filter(item => item && typeof item === 'object');
-  const combinedPool = [...allCards, ...embeddedScenarioCards];
-  const seen = new Set();
-  const uniquePool = [];
-  for (const c of combinedPool) {
-    const key = c.id || c.title || c.name;
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      uniquePool.push(c);
-    }
-  }
-
-  return uniquePool.filter(c => {
-    if (!c) return false;
-    if (userChar && (c.id === userChar.id || c.title === userChar.title)) return false;
-    if (c.type === 'Inventario' || c.type === 'Memoria') return false;
-
-    // 1. Vinculación directa en scenario.cards (por id o título)
-    const isDirectlyInScenario = scenarioCardsArray.some(ref => {
-      if (!ref) return false;
-      const refId = typeof ref === 'string' ? ref : ref.id;
-      const refTitle = typeof ref === 'string' ? ref : (ref.title || ref.name);
-      return (
-        (refId && (c.id === refId || normalizeEntityName(c.id) === normalizeEntityName(refId))) ||
-        (refTitle && (c.title === refTitle || normalizeEntityName(c.title) === normalizeEntityName(refTitle)))
-      );
-    });
-    if (isDirectlyInScenario) return true;
-
-    // 2. Vinculación directa en chat.characters
-    const isDirectlyInChat = chatCharactersArray.some(ref => {
-      if (!ref) return false;
-      const refId = typeof ref === 'string' ? ref : ref.id;
-      const refTitle = typeof ref === 'string' ? ref : (ref.title || ref.name);
-      return (
-        (refId && (c.id === refId || normalizeEntityName(c.id) === normalizeEntityName(refId))) ||
-        (refTitle && (c.title === refTitle || normalizeEntityName(c.title) === normalizeEntityName(refTitle)))
-      );
-    });
-    if (isDirectlyInChat) return true;
-
-    // 3. Tarjeta creada o vinculada explícitamente a este escenario
-    if (c.linkedScenario) {
-      if (activeScenarioId && (c.linkedScenario === activeScenarioId || normalizeEntityName(c.linkedScenario) === normalizeEntityName(activeScenarioId))) return true;
-      if (activeScenarioTitle && (c.linkedScenario === activeScenarioTitle || normalizeEntityName(c.linkedScenario) === normalizeEntityName(activeScenarioTitle))) return true;
-    }
-
-    // 4. Tarjetas conectadas explícitamente a este escenario
-    if (Array.isArray(c.connectedCards) && c.connectedCards.length > 0) {
-      const isConnected = c.connectedCards.some(cc => {
-        if (!cc || typeof cc !== 'string') return false;
-        return (
-          (activeScenarioId && (cc === activeScenarioId || normalizeEntityName(cc) === normalizeEntityName(activeScenarioId))) ||
-          (activeScenarioTitle && (cc === activeScenarioTitle || normalizeEntityName(cc) === normalizeEntityName(activeScenarioTitle)))
-        );
-      });
-      if (isConnected) return true;
-    }
-
-    // AISLAMIENTO TOTAL: No existen tarjetas globales. Toda entidad fuera del escenario queda excluida.
-    return false;
-  });
-}
+export { resolveUserCharacter, getScenarioCards };
 
 export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, onDeleteChat, folderHandle, appData, onUpdateAppData, chatSettings = {}, onUpdateChatSettings = () => {}, onOpenCreateModal }) {
   const [messages, setMessages] = useState(chat?.messages || []);
@@ -156,6 +68,16 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, onD
   useEffect(() => {
     activeChatIdRef.current = chat?.id;
   }, [chat?.id]);
+
+  // Personaje del jugador
+  const userChar = resolveUserCharacter(chat, appData);
+
+  // Escenario activo
+  const scenario = (appData?.scenarios || []).find(s => 
+    s.id === chat?.scenarioId || s.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
+  ) || (appData?.cards || []).find(c => 
+    c.id === chat?.scenarioId || c.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
+  ) || findMatchingEntity(chat?.scenario, appData);
 
   // Sincronizar apertura de la Zona B si el usuario la activa desde el menú de Ajustes
   useEffect(() => {
@@ -620,200 +542,18 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       sceneContext
     });
   };
-  const runBackgroundSummarization = (finalMsgs, targetChatSnapshot = chat) => {
-    // Generar recuerdos fácticos cada 4 turnos narrativos
-    if (!finalMsgs || finalMsgs.length < 4 || finalMsgs.length % 4 !== 0) return;
-
-    setTimeout(async () => {
-      try {
-        const targetChat = targetChatSnapshot || chat;
-        const targetChatId = targetChat?.id;
-        if (!targetChatId) return;
-
-        // Tomar exactamente el bloque de los últimos 4 mensajes
-        const blockMessages = finalMsgs.slice(-4);
-
-        const newSummary = await sendContextSummarizationTask({
-          messages: blockMessages,
-          currentMemory: (targetChat.memoryCards || []).map(m => typeof m === 'string' ? m : (m.summary || m.text || '')),
-          modelId: chatSettings?.orchestratorModel || chatSettings?.preferredModel,
-          preferredLanguage: chatSettings?.preferredLanguage || 'auto',
-          baseUrl: chatSettings?.lmStudioUrl
-        });
-
-        if (newSummary && typeof newSummary === 'string' && newSummary.trim()) {
-          console.log('[Context Summary Task]: Nueva memoria episódica generada:', newSummary);
-
-          // Detectar qué tarjetas del escenario estaban activas/mencionadas en este bloque de 4 mensajes
-          const blockText = blockMessages.map(m => m.text || '').join(' ').toLowerCase();
-          const activeScenario = scenario || (appData?.scenarios || []).find(s => s.id === targetChat?.scenarioId);
-          const activeScenarioCards = getScenarioCards(activeScenario, targetChat, appData, userChar);
-          const connectedCards = activeScenarioCards.filter(c => {
-            const name = (c.title || c.name || '').toLowerCase();
-            return name && name.length > 2 && blockText.includes(name);
-          }).map(c => c.id || c.title);
-
-          const newMemoryEntry = {
-            id: `mem-${Date.now()}`,
-            type: 'Memoria',
-            turnRange: `${Math.max(0, finalMsgs.length - 4)}-${finalMsgs.length - 1}`,
-            summary: newSummary.trim(),
-            connectedCards,
-            createdAt: new Date().toISOString()
-          };
-
-          const nextMemory = [...(targetChat.memoryCards || []), newMemoryEntry];
-          targetChat.memoryCards = nextMemory;
-          
-          const updatedChat = { ...targetChat, messages: finalMsgs, memoryCards: nextMemory };
-          const { addChat } = await import('../utils/db');
-          await addChat(updatedChat);
-          if (folderHandle) {
-            try { await saveChatToFolder(updatedChat, folderHandle); } catch (e) {}
-          }
-          
-          if (activeChatIdRef.current === targetChatId) {
-            setMessages(finalMsgs);
-          }
-        }
-      } catch (sumErr) {
-        console.warn('[Context Summary Task]: Fallo en la tarea de resumen:', sumErr);
-      }
-    }, 1000);
-  };
-
-  // Función asíncrona en segundo plano para extraer entidades y generar tarjetas automáticas con imágenes.
-  const runBackgroundCardGeneration = (finalMsgs, targetChatSnapshot = chat) => {
-    if (!autoGenCards) return;
-    setTimeout(async () => {
-      try {
-        const targetChat = targetChatSnapshot || chat;
-        const scenario = (appData?.scenarios || []).find(s => s.id === targetChat?.scenarioId || s.title?.toLowerCase() === (targetChat?.scenario || '').toLowerCase()) ||
-                         (appData?.cards || []).find(c => c.id === targetChat?.scenarioId || c.title?.toLowerCase() === (targetChat?.scenario || '').toLowerCase());
-        const userChar = resolveUserCharacter(targetChat, appData);
-        
-        // Aislamiento estricto: solo tarjetas del escenario activo, no las 33 globales
-        const activeScenarioCards = getScenarioCards(scenario, targetChat, appData, userChar);
-        const allKnownCards = [...activeScenarioCards, ...(targetChat?.cards || []), ...(scenario ? [scenario] : [])];
-
-        const extractedEntities = await sendExtractCardsTask({
-          messages: finalMsgs.slice(-10),
-          existingCards: activeScenarioCards,
-          existingScenarios: scenario ? [scenario] : [],
-          activeScenario: scenario,
-          userChar: userChar,
-          modelId: chatSettings?.orchestratorModel || chatSettings?.preferredModel,
-          preferredLanguage: chatSettings?.preferredLanguage || 'auto',
-          baseUrl: chatSettings?.lmStudioUrl
-        });
-
-        if (Array.isArray(extractedEntities) && extractedEntities.length > 0) {
-          // Filtro de cuatro capas: Recurrencia, Significancia, Deduplicación y Protección del Protagonista (F047)
-          const eligibleEntities = extractedEntities.filter(entity => {
-            const isEligible = isEntityEligibleForAutoCard(entity, finalMsgs, {
-              minRecurrence: 3,
-              existingCards: allKnownCards,
-              userChar
-            });
-            if (!isEligible) {
-              console.log(`[Auto-Card Gatekeeper]: Descartado por duplicado, persona del jugador, animal incidental o no alcanzar recurrencia >= 3 turnos: "${entity.title}"`);
-            }
-            return isEligible;
-          });
-
-          if (eligibleEntities.length === 0) {
-            return;
-          }
-
-          console.log(`[Auto-Card Task]: ${eligibleEntities.length} entidades aprobadas por el gatekeeper:`, eligibleEntities);
-          const newCardObjects = [];
-          const recentStoryContext = finalMsgs.slice(-6).map(m => `${m.from === 'user' ? 'Jugador' : 'Narrador'}: ${m.text}`).join('\n\n');
-
-          for (const entity of eligibleEntities) {
-            let workingEntity = { ...entity };
-
-            // Rellenado inteligente obligatorio con IA si los campos vienen vacíos o escuetos (< 40 caracteres)
-            if (!workingEntity.text || workingEntity.text.trim().length < 40 || !workingEntity.intro || workingEntity.intro.trim().length < 15 || !workingEntity.traits || workingEntity.traits.length === 0) {
-              try {
-                const autoCompleted = await autoCompleteEntityWithAI({
-                  name: workingEntity.title,
-                  type: workingEntity.type || 'Personaje',
-                  existingData: workingEntity,
-                  context: recentStoryContext,
-                  language: chatSettings?.preferredLanguage || 'es'
-                });
-                if (autoCompleted) {
-                  workingEntity.intro = workingEntity.intro || autoCompleted.intro || '';
-                  workingEntity.text = (workingEntity.text && workingEntity.text.length >= 40) ? workingEntity.text : (autoCompleted.text || '');
-                  if (!workingEntity.traits || workingEntity.traits.length === 0) {
-                    workingEntity.traits = autoCompleted.traits || [];
-                  }
-                  if (!workingEntity.tags || workingEntity.tags.length === 0) {
-                    workingEntity.tags = autoCompleted.tags || [];
-                  }
-                  if (!workingEntity.imagePrompt && autoCompleted.imagePrompt) {
-                    workingEntity.imagePrompt = autoCompleted.imagePrompt;
-                  }
-                }
-              } catch (enrichErr) {
-                console.warn(`[Auto-Card Lore Enrichment]: No se pudo autocompletar ${workingEntity.title}:`, enrichErr);
-              }
-            }
-
-            // Generar ilustración/imagen local para la nueva entidad
-            let coverUrl = '';
-            try {
-              if (workingEntity.type === 'Lugar') {
-                coverUrl = await generateLocationWallpaper(workingEntity.title, workingEntity.intro, workingEntity.text, chatSettings?.preferredImageModel);
-              } else if (workingEntity.type === 'Personaje') {
-                coverUrl = await generateCharacterPortrait(workingEntity.title, workingEntity.traits || [], workingEntity.intro || workingEntity.text, chatSettings?.preferredImageModel);
-              } else {
-                const promptForImg = workingEntity.imagePrompt || `${workingEntity.title}, ${workingEntity.type}, ${workingEntity.intro || workingEntity.text}`;
-                coverUrl = await generateImageLocal(promptForImg, 'Fantasía Oscura / Entornos', chatSettings?.imageServerUrl);
-              }
-            } catch (imgErr) {
-              console.warn(`[Auto-Card Image]: Error al generar imagen para ${workingEntity.title}:`, imgErr);
-            }
-
-            const cardId = `card-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-            const isChar = workingEntity.type === 'Personaje';
-
-            const cardObj = {
-              id: cardId,
-              type: workingEntity.type || 'Personaje',
-              characterRole: isChar ? 'npc' : undefined,
-              title: workingEntity.title,
-              linkedScenario: targetChat?.scenarioId || scenario?.id || scenario?.title || undefined,
-              intro: workingEntity.intro || (workingEntity.text ? workingEntity.text.substring(0, 100) + '...' : ''),
-              text: workingEntity.text || '',
-              cover: coverUrl || '',
-              characterImages: (isChar && coverUrl) ? [{ id: 'img-1', url: coverUrl, label: 'Principal', isDefault: true }] : [],
-              tags: Array.isArray(workingEntity.tags) ? workingEntity.tags : [],
-              traits: Array.isArray(workingEntity.traits) ? workingEntity.traits : [],
-              connectedCards: [],
-              nsfw: false,
-              public: false,
-              createdAt: new Date().toISOString()
-            };
-
-            newCardObjects.push(cardObj);
-          }
-
-          if (newCardObjects.length > 0 && appData && onUpdateAppData) {
-            const nextCards = [...newCardObjects, ...(appData.cards || [])];
-            const nextData = { ...appData, cards: nextCards };
-            onUpdateAppData(nextData);
-            if (folderHandle) {
-              try { await saveAppDataToFolder(nextData, folderHandle); } catch (e) {}
-            }
-            console.log(`[Auto-Card Task]: ${newCardObjects.length} tarjetas añadidas y 100% rellenadas al compendio.`);
-          }
-        }
-      } catch (cardErr) {
-        console.warn('[Auto-Card Task]: Fallo en la extracción automática:', cardErr);
-      }
-    }, 1500);
-  };
+  const { runBackgroundSummarization, runBackgroundCardGeneration } = useChatBackgroundTasks({
+    chat,
+    activeChatIdRef,
+    appData,
+    onUpdateAppData,
+    folderHandle,
+    chatSettings,
+    autoGenCards,
+    setMessages,
+    userChar,
+    scenario
+  });
 
   const handleDeleteMessage = (idxToDelete) => {
     setConfirmDialog({
@@ -1020,6 +760,19 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       : -1;
     const userTurn = lastTurn + 1;
 
+    // Detección de comandos de dirección fuera de personaje (/ooc <instrucción>)
+    let oocDirective = '';
+    const rawTrimmed = textToSend.trim();
+    const oocMatch = rawTrimmed.match(/^\/ooc\s+(.+)$/i);
+    if (oocMatch) {
+      oocDirective = oocMatch[1].trim();
+    } else {
+      const inlineOoc = rawTrimmed.match(/(.*?)\s*\/ooc\s+(.+)$/i);
+      if (inlineOoc) {
+        oocDirective = inlineOoc[2].trim();
+      }
+    }
+
     const newMsg = {
       from: 'user',
       text: textToSend.trim() || '...',
@@ -1070,14 +823,21 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         setCurrentSceneState(inbound.sceneState);
       }
 
-      // 2. Generación Principal con Storyteller
+      // 2. Generación Principal con Storyteller y Arnés de Recencia Atencional
       const systemPrompt = buildSystemPrompt(inbound.filteredCards, inbound.sceneContext, targetChatSnapshot);
+      const recencyGuidance = buildRecencyGuidanceHook({
+        sceneContext: inbound.sceneContext || currentSceneState,
+        userChar: activeUserChar,
+        oocDirective: oocDirective
+      });
 
       const res = await sendChatMessage({
         messages: nextMsgs.slice(-10),
         systemInstruction: systemPrompt,
         contextDocuments: (inbound.filteredCards && inbound.filteredCards.length > 0) ? inbound.filteredCards : (targetChatSnapshot.contextDocuments || []),
         modelId: chatSettings?.preferredModel,
+        temperature: chatSettings?.temperature,
+        guidanceHook: recencyGuidance,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
           if (activeChatIdRef.current === executionChatId) {
@@ -1207,11 +967,19 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       const basePrompt = buildSystemPrompt(null, null, targetChatSnapshot);
       const systemPrompt = `${basePrompt}\n\n[ÓRDENE EXTRA DE INMEDIATA]: Continúa la narración desde el punto exacto donde quedó.`;
 
+      const recencyGuidance = buildRecencyGuidanceHook({
+        sceneContext: currentSceneState,
+        userChar: activeUserChar,
+        oocDirective: 'Continue the environmental narration and NPC dialogue smoothly. STRICT PLAYER SOVEREIGNTY: NEVER speak or act for {{user}}.'
+      });
+
       const res = await sendChatMessage({
         messages: messages.slice(-10),
         systemInstruction: systemPrompt,
         contextDocuments: (activeScenarioCards && activeScenarioCards.length > 0) ? activeScenarioCards : (targetChatSnapshot.contextDocuments || []),
         modelId: chatSettings?.preferredModel,
+        temperature: chatSettings?.temperature,
+        guidanceHook: recencyGuidance,
         baseUrl: chatSettings?.lmStudioUrl,
         onChunk: (accumulated) => {
           if (activeChatIdRef.current === executionChatId) {
@@ -1293,16 +1061,6 @@ Respond directly with the descriptive lore text without introductory fluff or pr
     large: '1.22rem',
     xlarge: '1.38rem'
   };
-
-  // Personaje del jugador
-  const userChar = resolveUserCharacter(chat, appData);
-
-  // Escenario activo
-  const scenario = (appData?.scenarios || []).find(s => 
-    s.id === chat?.scenarioId || s.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
-  ) || (appData?.cards || []).find(c => 
-    c.id === chat?.scenarioId || c.title?.toLowerCase() === (chat?.scenario || '').toLowerCase()
-  ) || findMatchingEntity(chat?.scenario, appData);
 
   // Personajes y entidades del compendio asociados estrictamente a este escenario
   const scenarioCards = getScenarioCards(scenario, chat, appData, userChar);

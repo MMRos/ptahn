@@ -11,12 +11,14 @@ import {
   faEdit,
   faRedo,
   faFolderOpen,
-  faPlus,
-  faSuitcase,
-  faTrashAlt
+  faPlus
 } from '@fortawesome/free-solid-svg-icons';
 import NarratorForm from './NarratorForm';
 import ToolWorkshopForm from './ToolWorkshopForm';
+import CharacterFormSection from './create/forms/CharacterFormSection';
+import ScenarioEditorSection from './create/forms/ScenarioEditorSection';
+import InventoryFormSection from './create/forms/InventoryFormSection';
+import MemoryFormSection from './create/forms/MemoryFormSection';
 import { generateImageLocal, editImageWithAI } from '../utils/localAIStudio';
 import { enhanceFieldWithAI, autoCompleteEntityWithAI } from '../utils/aiEnhancer';
 import '../pages/create.css';
@@ -1701,444 +1703,77 @@ export default function CreateModal({
                 </div>
               )}
 
-              {/* RASGOS DE PERSONALIDAD (TRAITS) PARA PERSONAJE */}
+              {/* RASGOS DE PERSONALIDAD (TRAITS) Y MOCHILA PARA PERSONAJE */}
               {itemType === 'Personaje' && (
-                <div className="field-group">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                      Rasgos de Personalidad ({selectedTraits.length})
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => handleEnhanceField('traits')}
-                      disabled={isEnhancingField === 'traits'}
-                      style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
-                    >
-                      <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'traits'} /> Sugerir Rasgos
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
-                    {selectedTraits.map(t => (
-                      <span
-                        key={t}
-                        style={{
-                          background: 'rgba(255, 211, 107, 0.1)',
-                          border: '1px solid rgba(255, 211, 107, 0.25)',
-                          borderRadius: '12px',
-                          padding: '2px 8px',
-                          fontSize: '0.75rem',
-                          color: '#ffd36b',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '5px'
-                        }}
-                      >
-                        {t}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedTraits(prev => prev.filter(x => x !== t));
-                            setIsDirty(true);
-                          }}
-                          style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', padding: 0, fontSize: '0.75rem' }}
-                        >
-                          ✕
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                  <input
-                    type="text"
-                    value={traitQuery}
-                    onChange={(e) => setTraitQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && traitQuery.trim()) {
-                        e.preventDefault();
-                        if (!selectedTraits.includes(traitQuery.trim())) {
-                          setSelectedTraits(prev => [...prev, traitQuery.trim()]);
-                          setTraitQuery('');
-                          setIsDirty(true);
-                        }
-                      }
-                    }}
-                    placeholder="Escribe un rasgo y presiona Enter..."
-                    style={{
-                      width: '100%',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: '6px',
-                      padding: '6px 10px',
-                      color: '#fff',
-                      fontSize: '0.8rem'
-                    }}
-                  />
-
-                  {/* Mochila / Inventario Vinculado */}
-                  <div style={{ marginTop: '12px', background: 'rgba(255, 211, 107, 0.04)', border: '1px solid rgba(255, 211, 107, 0.2)', borderRadius: '8px', padding: '10px 12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <FontAwesomeIcon icon={faSuitcase} /> Mochila / Inventario del Personaje
-                      </span>
-                      {(() => {
-                        const existingInv = (appData?.cards || []).find(c => c && c.type === 'Inventario' && (c.linkedCharacterId === editItem?.id || (editItem?.title && c.linkedCharacterId === editItem.title)));
-                        if (existingInv) {
-                          return (
-                            <span style={{ fontSize: '0.74rem', color: '#6ee7b7', fontWeight: '600' }}>
-                              ✓ Vinculado ({Array.isArray(existingInv.items) ? existingInv.items.length : 0} objetos)
-                            </span>
-                          );
-                        }
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setItemType('Inventario');
-                              setTitle(`Inventario de ${title || editItem?.title || 'Personaje'}`);
-                              setInventoryOwnerCharId(editItem?.id || '');
-                              setIsDirty(true);
-                            }}
-                            style={{ background: 'rgba(255, 211, 107, 0.15)', border: '1px solid rgba(255, 211, 107, 0.35)', color: '#ffd36b', padding: '4px 10px', borderRadius: '5px', fontSize: '0.72rem', cursor: 'pointer', fontWeight: '700' }}
-                          >
-                            <FontAwesomeIcon icon={faPlus} /> Crear Mochila
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </div>
+                <CharacterFormSection
+                  selectedTraits={selectedTraits}
+                  setSelectedTraits={setSelectedTraits}
+                  traitQuery={traitQuery}
+                  setTraitQuery={setTraitQuery}
+                  isEnhancingField={isEnhancingField}
+                  handleEnhanceField={handleEnhanceField}
+                  appData={appData}
+                  editItem={editItem}
+                  title={title}
+                  setTitle={setTitle}
+                  setItemType={setItemType}
+                  setInventoryOwnerCharId={setInventoryOwnerCharId}
+                  setIsDirty={setIsDirty}
+                />
               )}
 
               {/* CAMPOS ADICIONALES DE ESCENARIO */}
               {itemType === 'Escenario' && (
-                <>
-                  <div className="field-group" style={{ marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
-                      <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>Mensaje Inicial</span>
-                        <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.45)', fontWeight: '400' }}>
-                          ({initialMessages.length} {initialMessages.length === 1 ? 'inicio' : 'inicios'})
-                        </span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleEnhanceField('scenario_presentation')}
-                        disabled={isEnhancingField === 'scenario_presentation'}
-                        style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
-                      >
-                        <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'scenario_presentation'} /> Generar con IA
-                      </button>
-                    </div>
+                <ScenarioEditorSection
+                  initialMessages={initialMessages}
+                  activeInitialMessageId={activeInitialMessageId}
+                  handleSelectInitialMessageTab={handleSelectInitialMessageTab}
+                  handleRemoveInitialMessageTab={handleRemoveInitialMessageTab}
+                  handleAddInitialMessageTab={handleAddInitialMessageTab}
+                  handleRenameInitialMessageTab={handleRenameInitialMessageTab}
+                  presentation={presentation}
+                  handleInitialMessageTextChange={handleInitialMessageTextChange}
+                  baseContext={baseContext}
+                  setBaseContext={setBaseContext}
+                  aiInstructions={aiInstructions}
+                  setAiInstructions={setAiInstructions}
+                  scenarioNarrator={scenarioNarrator}
+                  setScenarioNarrator={setScenarioNarrator}
+                  appData={appData}
+                  isEnhancingField={isEnhancingField}
+                  handleEnhanceField={handleEnhanceField}
+                  handleFieldChange={handleFieldChange}
+                />
+              )}
 
-                    {/* Barra de pestañas de Inicios */}
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
-                      {initialMessages.map((tab) => {
-                        const isActive = tab.id === activeInitialMessageId;
-                        return (
-                          <div
-                            key={tab.id}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              background: isActive ? 'rgba(255, 211, 107, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                              border: isActive ? '1px solid #ffd36b' : '1px solid rgba(255, 255, 255, 0.12)',
-                              borderRadius: '6px',
-                              padding: '3px 8px',
-                              gap: '6px'
-                            }}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleSelectInitialMessageTab(tab.id)}
-                              style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: isActive ? '#ffd36b' : 'rgba(255, 255, 255, 0.7)',
-                                fontWeight: isActive ? '700' : '500',
-                                fontSize: '0.78rem',
-                                cursor: 'pointer',
-                                padding: 0
-                              }}
-                            >
-                              {tab.title}
-                            </button>
-                            {initialMessages.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={(e) => handleRemoveInitialMessageTab(tab.id, e)}
-                                title="Eliminar este inicio"
-                                aria-label={`Eliminar ${tab.title}`}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: 'rgba(255, 255, 255, 0.4)',
-                                  fontSize: '0.72rem',
-                                  cursor: 'pointer',
-                                  padding: '0 2px',
-                                  lineHeight: 1
-                                }}
-                              >
-                                <FontAwesomeIcon icon={faTimes} />
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {initialMessages.length < 10 && (
-                        <button
-                          type="button"
-                          onClick={handleAddInitialMessageTab}
-                          style={{
-                            background: 'rgba(255, 255, 255, 0.06)',
-                            border: '1px dashed rgba(255, 211, 107, 0.4)',
-                            color: '#ffd36b',
-                            borderRadius: '6px',
-                            padding: '4px 10px',
-                            fontSize: '0.76rem',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                          }}
-                        >
-                          <FontAwesomeIcon icon={faPlus} /> Agregar inicio
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Renombrar pestaña activa */}
-                    {(() => {
-                      const activeTab = initialMessages.find(m => m.id === activeInitialMessageId) || initialMessages[0];
-                      return (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.5)' }}>Nombre del inicio:</span>
-                          <input
-                            type="text"
-                            value={activeTab?.title || ''}
-                            onChange={(e) => handleRenameInitialMessageTab(activeInitialMessageId, e.target.value)}
-                            placeholder="Nombre del inicio..."
-                            style={{
-                              flex: 1,
-                              maxWidth: '260px',
-                              background: 'rgba(255, 255, 255, 0.05)',
-                              border: '1px solid rgba(255, 255, 255, 0.12)',
-                              borderRadius: '4px',
-                              padding: '4px 8px',
-                              color: '#fff',
-                              fontSize: '0.78rem'
-                            }}
-                          />
-                        </div>
-                      );
-                    })()}
-
-                    <textarea
-                      value={presentation}
-                      onChange={(e) => handleInitialMessageTextChange(e.target.value)}
-                      placeholder="El texto de bienvenida que verá el jugador al comenzar la partida con este inicio..."
-                      rows={5}
-                      style={{ width: '100%', minHeight: '120px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', padding: '10px 12px', color: '#fff', fontSize: '0.85rem', boxSizing: 'border-box', resize: 'vertical' }}
-                    />
-                  </div>
-
-                  <div className="field-group">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                        Contexto en Detalle
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleEnhanceField('scenario_context')}
-                        disabled={isEnhancingField === 'scenario_context'}
-                        style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
-                      >
-                        <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'scenario_context'} /> Desarrollar con IA
-                      </button>
-                    </div>
-                    <textarea
-                      value={baseContext}
-                      onChange={(e) => handleFieldChange(setBaseContext, e.target.value)}
-                      placeholder="Geografía, política, historia, leyes mágicas y lore del escenario..."
-                      rows={8}
-                      style={{ width: '100%', minHeight: '180px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', padding: '10px 12px', color: '#fff', fontSize: '0.85rem', boxSizing: 'border-box', resize: 'vertical' }}
-                    />
-                  </div>
-
-                  <div className="field-group">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700' }}>
-                        Instrucciones del Brain del GM / IA
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleEnhanceField('scenario_instructions')}
-                        disabled={isEnhancingField === 'scenario_instructions'}
-                        style={{ background: 'transparent', border: 'none', color: '#ffd36b', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600' }}
-                      >
-                        <FontAwesomeIcon icon={faMagic} spin={isEnhancingField === 'scenario_instructions'} /> Formular con IA
-                      </button>
-                    </div>
-                    <textarea
-                      value={aiInstructions}
-                      onChange={(e) => handleFieldChange(setAiInstructions, e.target.value)}
-                      placeholder="Directivas narrativas, tono, secretos y directrices para el Narrador..."
-                      rows={5}
-                      style={{ width: '100%', minHeight: '120px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', padding: '10px 12px', color: '#fff', fontSize: '0.85rem', boxSizing: 'border-box', resize: 'vertical' }}
-                    />
-                  </div>
-                </>
+              {/* CAMPOS ESPECIALIZADOS DE MEMORIA */}
+              {itemType === 'Memoria' && (
+                <MemoryFormSection
+                  memorySummary={memorySummary}
+                  setMemorySummary={setMemorySummary}
+                  memoryImpact={memoryImpact}
+                  setMemoryImpact={setMemoryImpact}
+                  memoryTimeline={memoryTimeline}
+                  setMemoryTimeline={setMemoryTimeline}
+                  memoryCharacters={memoryCharacters}
+                  setMemoryCharacters={setMemoryCharacters}
+                  appData={appData}
+                  onFieldChange={handleFieldChange}
+                />
               )}
 
               {/* CAMPOS ESPECIALIZADOS DE INVENTARIO */}
               {itemType === 'Inventario' && (
-                <div style={{
-                  background: 'rgba(255, 211, 107, 0.04)',
-                  border: '1px solid rgba(255, 211, 107, 0.25)',
-                  borderRadius: '10px',
-                  padding: '16px',
-                  marginBottom: '16px'
-                }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                    <div>
-                      <label style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '6px' }}>
-                        👤 Personaje Propietario
-                      </label>
-                      <select
-                        value={inventoryOwnerCharId}
-                        onChange={(e) => handleFieldChange(setInventoryOwnerCharId, e.target.value)}
-                        style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }}
-                      >
-                        <option value="">(Inventario General / Sin Asignar)</option>
-                        {(appData?.cards || []).filter(c => c && (c.type === 'Personaje' || c.type === 'PJ')).map(char => (
-                          <option key={char.id} value={char.id}>{char.title || char.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.8rem', color: '#ffd36b', fontWeight: '700', display: 'block', marginBottom: '6px' }}>
-                        ⚖️ Capacidad / Límite de Carga
-                      </label>
-                      <input
-                        value={inventoryCapacity}
-                        onChange={(e) => handleFieldChange(setInventoryCapacity, e.target.value)}
-                        placeholder="Ej. 20 kg / 10 slots"
-                        style={{ width: '100%', padding: '8px 10px', background: '#1e1e2c', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Gestor interactivo de ítems */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <label style={{ fontSize: '0.82rem', color: '#ffd36b', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
-                        <FontAwesomeIcon icon={faSuitcase} /> Objetos en el Inventario ({inventoryItems.length})
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newItem = {
-                            id: `item-${Date.now()}`,
-                            name: 'Nuevo Objeto',
-                            qty: 1,
-                            rarity: 'Común',
-                            equipped: false,
-                            weight: '1 kg',
-                            desc: 'Descripción del objeto...'
-                          };
-                          handleFieldChange(setInventoryItems, [...inventoryItems, newItem]);
-                        }}
-                        style={{ background: 'linear-gradient(90deg, #ffd36b, #ff9f6b)', color: '#0d0e16', border: 'none', padding: '5px 12px', borderRadius: '6px', fontSize: '0.76rem', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                      >
-                        <FontAwesomeIcon icon={faPlus} /> Añadir Objeto
-                      </button>
-                    </div>
-
-                    {inventoryItems.length === 0 ? (
-                      <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>
-                        No hay objetos en esta mochila. Pulsa "+ Añadir Objeto" para registrar equipamiento o pertenencias.
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {inventoryItems.map((item, idx) => (
-                          <div key={item.id || idx} style={{ background: '#181824', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '10px', display: 'grid', gridTemplateColumns: 'minmax(140px, 2fr) 65px 110px 100px minmax(140px, 2fr) auto', gap: '8px', alignItems: 'center' }}>
-                            <input
-                              value={item.name || ''}
-                              onChange={(e) => {
-                                const updated = [...inventoryItems];
-                                updated[idx] = { ...updated[idx], name: e.target.value };
-                                handleFieldChange(setInventoryItems, updated);
-                              }}
-                              placeholder="Nombre del objeto"
-                              style={{ padding: '6px 8px', background: '#12121c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.78rem' }}
-                            />
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.qty || 1}
-                              onChange={(e) => {
-                                const updated = [...inventoryItems];
-                                updated[idx] = { ...updated[idx], qty: Math.max(1, Number(e.target.value) || 1) };
-                                handleFieldChange(setInventoryItems, updated);
-                              }}
-                              placeholder="Cant."
-                              title="Cantidad"
-                              style={{ padding: '6px 4px', background: '#12121c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#fff', fontSize: '0.78rem', textAlign: 'center' }}
-                            />
-                            <select
-                              value={item.rarity || 'Común'}
-                              onChange={(e) => {
-                                const updated = [...inventoryItems];
-                                updated[idx] = { ...updated[idx], rarity: e.target.value };
-                                handleFieldChange(setInventoryItems, updated);
-                              }}
-                              style={{ padding: '6px 4px', background: '#12121c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px', color: '#ffd36b', fontSize: '0.74rem' }}
-                            >
-                              <option value="Común">Común</option>
-                              <option value="Poco común">Poco común</option>
-                              <option value="Raro">Raro</option>
-                              <option value="Épico">Épico</option>
-                              <option value="Legendario">Legendario</option>
-                            </select>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.74rem', color: item.equipped ? '#6ee7b7' : 'rgba(255,255,255,0.6)', cursor: 'pointer', userSelect: 'none' }}>
-                              <input
-                                type="checkbox"
-                                checked={!!item.equipped}
-                                onChange={(e) => {
-                                  const updated = [...inventoryItems];
-                                  updated[idx] = { ...updated[idx], equipped: e.target.checked };
-                                  handleFieldChange(setInventoryItems, updated);
-                                }}
-                                style={{ accentColor: '#6ee7b7', cursor: 'pointer' }}
-                              />
-                              <span>{item.equipped ? '⚔️ Equipado' : '🎒 En bolsa'}</span>
-                            </label>
-                            <input
-                              value={item.desc || ''}
-                              onChange={(e) => {
-                                const updated = [...inventoryItems];
-                                updated[idx] = { ...updated[idx], desc: e.target.value };
-                                handleFieldChange(setInventoryItems, updated);
-                              }}
-                              placeholder="Efectos, peso o notas..."
-                              style={{ padding: '6px 8px', background: '#12121c', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px', color: 'rgba(255,255,255,0.85)', fontSize: '0.74rem' }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = inventoryItems.filter((_, i) => i !== idx);
-                                handleFieldChange(setInventoryItems, updated);
-                              }}
-                              style={{ background: 'transparent', border: 'none', color: '#eb5757', cursor: 'pointer', padding: '6px' }}
-                              title="Eliminar objeto"
-                            >
-                              <FontAwesomeIcon icon={faTrashAlt} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <InventoryFormSection
+                  inventoryOwnerCharId={inventoryOwnerCharId}
+                  setInventoryOwnerCharId={setInventoryOwnerCharId}
+                  inventoryCapacity={inventoryCapacity}
+                  setInventoryCapacity={setInventoryCapacity}
+                  inventoryItems={inventoryItems}
+                  setInventoryItems={setInventoryItems}
+                  appData={appData}
+                  onFieldChange={handleFieldChange}
+                />
               )}
 
               {/* ETIQUETAS (TAGS) (Solo para tarjetas estándar, en Escenario está en ScenarioMediaHeader) */}

@@ -5,7 +5,8 @@ import {
   formatPlayerDossier,
   formatPlayerInventory,
   formatScenarioEntities,
-  buildStorytellerSystemPrompt
+  buildStorytellerSystemPrompt,
+  buildRecencyGuidanceHook
 } from './promptBuilder';
 
 describe('promptBuilder Utilities', () => {
@@ -130,6 +131,40 @@ describe('promptBuilder Utilities', () => {
     // Asserts strict 3rd person narrative rule
     expect(prompt).toContain('STRICT THIRD-PERSON');
     expect(prompt).toContain('FORBIDDEN to use invasive second-person style');
+  });
+
+  test('buildStorytellerSystemPrompt anchors opening scene / initial presentation in scenario details', () => {
+    const prompt = buildStorytellerSystemPrompt({
+      scenario: {
+        title: 'Rising an Empire',
+        presentation: 'El viento sopla sobre el claro. Un gran lobo gris acecha detrás de ti.',
+        initialMessages: [{ text: 'El viento sopla sobre el claro. Un gran lobo gris acecha detrás de ti.' }]
+      },
+      userChar: { title: 'Lucius Lukerna' },
+      messages: [{ from: 'user', text: 'Desenfundo el sable.' }]
+    });
+
+    expect(prompt).toContain('[ACTIVE PLAYABLE SCENARIO]');
+    expect(prompt).toContain('- Scenario Title: Rising an Empire');
+    expect(prompt).toContain('- Opening Scene / Initial Situation: El viento sopla sobre el claro. Un gran lobo gris acecha detrás de ti.');
+  });
+
+  test('buildRecencyGuidanceHook generates recency tail with player agency, scene focus and OOC', () => {
+    const hook = buildRecencyGuidanceHook({
+      sceneContext: {
+        primaryTarget: 'Lobo Alfa',
+        activeLocation: 'Claro del bosque',
+        timeOfDay: 'Amanecer'
+      },
+      userChar: { name: 'Lucius' },
+      oocDirective: 'Haz que el lobo retroceda asustado si desenvaino la espada.'
+    });
+
+    expect(hook).toContain('[IMMEDIATE RECENCY GUIDANCE - TURN EXECUTION RULES]');
+    expect(hook).toContain('1. ABSOLUTE PLAYER AGENCY: You are the Game Master. NEVER speak, act, decide, or narrate internal thoughts for {{user}} (Lucius).');
+    expect(hook).toContain('2. ACTIVE SCENE FOCUS: The immediate action is strictly focused on "Lobo Alfa".');
+    expect(hook).toContain('3. IMMEDIATE SURROUNDINGS: Current location is "Claro del bosque" (Amanecer).');
+    expect(hook).toContain('4. SCENE DIRECTOR META-INSTRUCTION (OOC): Haz que el lobo retroceda asustado si desenvaino la espada.');
   });
 });
 

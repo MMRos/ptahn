@@ -197,4 +197,17 @@ describe('Text Formatter Tests', () => {
     expect(thoughts.length).toBe(1);
     expect(thoughts[0].textContent).toContain('Ahhh... secreto');
   });
+
+  test('unwraps narrative paragraphs with spurious opening or block quotes as standard prose, not dialogue', () => {
+    const raw = '"El lobo gris se detiene a unos pasos de ti, sus ojos fijos en el sable.\n\n"El viento sopla fuerte en el claro, y las hojas de los árboles susurran suavemente."';
+    const { container } = render(<FormattedMessageText text={raw} />);
+
+    // Neither paragraph should be styled as spoken dialogue
+    const dialogues = container.querySelectorAll('.msg-dialogue');
+    expect(dialogues.length).toBe(0);
+
+    // Text should be rendered cleanly as standard prose paragraphs
+    expect(container.textContent).toContain('El lobo gris se detiene a unos pasos de ti');
+    expect(container.textContent).toContain('El viento sopla fuerte en el claro');
+  });
 });

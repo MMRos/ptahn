@@ -305,7 +305,8 @@ export const DEFAULT_CHAT_SETTINGS = {
   preferredImageModel: 'malaAnimeMixNSFW_v70WithoutVAE.safetensors',
   orchestratorModel: 'mistral-nemo-instruct-2407-gguf-Q4-K-M.gguf', // Lightweight GGUF SLM assistant / intermediary
   autoCardCreation: 'auto', // 'auto' | 'manual' | 'off'
-  autoImageDiffusion: 'manual' // 'auto' | 'manual' | 'off'
+  autoImageDiffusion: 'manual', // 'auto' | 'manual' | 'off'
+  temperature: 0.70
 };
 
 export function loadChatSettings() {
@@ -324,6 +325,7 @@ export function loadChatSettings() {
       autoImageDiffusion: parsed.autoImageDiffusion || DEFAULT_CHAT_SETTINGS.autoImageDiffusion,
       preferredLanguage: parsed.preferredLanguage || DEFAULT_CHAT_SETTINGS.preferredLanguage,
       responseLength: parsed.responseLength || DEFAULT_CHAT_SETTINGS.responseLength,
+      temperature: typeof parsed.temperature === 'number' ? parsed.temperature : DEFAULT_CHAT_SETTINGS.temperature,
       llmServerUrl: rawServerUrl,
       lmStudioUrl: rawServerUrl,
       imageServerUrl: parsed.imageServerUrl || DEFAULT_CHAT_SETTINGS.imageServerUrl,

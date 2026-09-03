@@ -300,4 +300,95 @@ export async function requestRerank(query, candidates = [], baseUrl = getServerB
   }
 }
 
+// --- F038 Campaign & DocumentEngine Client API ---
+
+export async function fetchCampaigns(baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/campaigns`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data.campaigns || [];
+  } catch (error) {
+    console.warn('[serverApi]: fetchCampaigns failed:', error);
+    return [];
+  }
+}
+
+export async function createCampaignServer(campaignData, baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/campaigns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(campaignData)
+    });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function branchCampaignServer(campaignId, branchData, baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/campaigns/${campaignId}/branch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(branchData)
+    });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchCampaignChat(campaignId, { limit = 50, offset = 0, tail } = {}, baseUrl = getServerBaseUrl()) {
+  try {
+    const params = new URLSearchParams();
+    if (tail) params.set('tail', tail);
+    else {
+      params.set('limit', limit);
+      params.set('offset', offset);
+    }
+    const res = await fetch(`${baseUrl}/api/storage/campaigns/${campaignId}/chat?${params.toString()}`);
+    return await res.json();
+  } catch (error) {
+    return { success: false, messages: [], error: error.message };
+  }
+}
+
+export async function appendCampaignMessage(campaignId, message, baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/campaigns/${campaignId}/chat/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchCampaignMemories(campaignId, baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/campaigns/${campaignId}/memories`);
+    const data = await res.json();
+    return data.memories || [];
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function saveCampaignMemoryServer(campaignId, memory, baseUrl = getServerBaseUrl()) {
+  try {
+    const res = await fetch(`${baseUrl}/api/storage/campaigns/${campaignId}/memories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memory })
+    });
+    return await res.json();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 

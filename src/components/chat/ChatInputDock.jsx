@@ -284,7 +284,7 @@ export default function ChatInputDock({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder='Escribe tu acción o diálogo... Usa "para hablar" o *para acciones*'
+          placeholder='Escribe tu acción o diálogo... ("diálogo", *acción*, o /ooc para dirigir al narrador)'
           className="chat-textarea"
           rows={1}
           disabled={isSending}

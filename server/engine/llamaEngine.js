@@ -174,6 +174,9 @@ class LlamaEngineManager {
    * @param {function} onToken
    */
   async generateCompletion(messages = [], options = {}, onToken = null) {
+    if (!messages || !Array.isArray(messages)) {
+      throw new Error('messages array is required');
+    }
     return (this._executionMutex = this._executionMutex.then(async () => {
       // 1. If no model is active, load requested model or first available
       if (!this.activeModelName || !this.model || this.model.disposed) {
@@ -224,6 +227,12 @@ class LlamaEngineManager {
         const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
         const lastUserMsg = lastMessage ? lastMessage.content : 'Continuar narración.';
 
+        // Si el primer mensaje del historial es del narrador (mensaje #0 de apertura),
+        // insertar un turno canónico inicial de usuario para preservar la alternancia estándar
+        if (historyItems.length > 0 && historyItems[0].role === 'assistant') {
+          chatHistory.push({ type: 'user', text: 'Comienza la historia e introduce la escena de partida del escenario.' });
+        }
+
         for (const item of historyItems) {
           if (item.role === 'user') {
             chatHistory.push({ type: 'user', text: item.content });
@@ -237,11 +246,14 @@ class LlamaEngineManager {
           contextSequence: sequence,
           autoDisposeSequence: true,
           systemPrompt: systemMsg || undefined,
-          chatHistory: chatHistory.length > 0 ? chatHistory : undefined,
           contextShift: {
             strategy: 'eraseBeginning'
           }
         });
+
+        if (chatHistory.length > 0) {
+          session.setChatHistory(chatHistory);
+        }
 
         try {
           const response = await session.prompt(lastUserMsg, {

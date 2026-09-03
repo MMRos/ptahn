@@ -795,7 +795,8 @@ export async function sendChatMessage({
   systemInstruction = '',
   contextDocuments = [],
   modelId = 'Precog-Magnum-31B.i1-Q3_K_S.gguf',
-  temperature = 0.85,
+  temperature,
+  guidanceHook = '',
   baseUrl,
   onChunk = null,
   callerType = 'STORYTELLER_LLM'
@@ -845,6 +846,16 @@ export async function sendChatMessage({
       }
     });
 
+    // Si el primer mensaje de la conversación es del narrador (mensaje #0),
+    // insertar un turno canónico de inicio para cumplir la alternancia estándar de plantillas de chat
+    const firstNonSysIdx = formattedMessages.findIndex(m => m.role !== 'system');
+    if (firstNonSysIdx !== -1 && formattedMessages[firstNonSysIdx].role === 'assistant') {
+      formattedMessages.splice(firstNonSysIdx, 0, {
+        role: 'user',
+        content: 'Comienza la historia e introduce la escena de partida del escenario.'
+      });
+    }
+
     if (formattedMessages.length === 0 || (formattedMessages.length === 1 && formattedMessages[0].role === 'system')) {
       formattedMessages.push({ role: 'user', content: 'Begin the scenario narration and describe the immediate environment from your Game Master role.' });
     } else if (formattedMessages[formattedMessages.length - 1].role === 'assistant') {
@@ -852,6 +863,16 @@ export async function sendChatMessage({
         role: 'user', 
         content: '[The player waits]. Continue the environmental narration, events, and NPC dialogue in strict third-person from your external Game Master perspective.' 
       });
+    }
+
+    // Inyección de máxima recencia (Guidance Hook): Anexar reglas críticas y OOC al final exacto del contexto
+    if (guidanceHook && guidanceHook.trim()) {
+      const lastIdx = formattedMessages.length - 1;
+      if (lastIdx >= 0 && formattedMessages[lastIdx].role === 'user') {
+        formattedMessages[lastIdx].content = `${formattedMessages[lastIdx].content}\n\n${guidanceHook.trim()}`;
+      } else {
+        formattedMessages.push({ role: 'system', content: guidanceHook.trim() });
+      }
     }
 
     const narrationId = (await resolveModelId(modelId, finalBaseUrl)) || modelId;
@@ -883,11 +904,12 @@ export async function sendChatMessage({
 
     const chatSettings = loadChatSettings();
     const maxTokensLimit = chatSettings?.responseLength ? Math.min(Math.max(250, chatSettings.responseLength), 850) : 650;
+    const effectiveTemp = typeof temperature === 'number' ? temperature : (typeof chatSettings?.temperature === 'number' ? chatSettings.temperature : 0.70);
 
     const requestBody = JSON.stringify({
       model: narrationId,
       messages: formattedMessages,
-      temperature: temperature,
+      temperature: effectiveTemp,
       max_tokens: maxTokensLimit,
       stop: stopWords,
       stream: isStream
@@ -907,7 +929,7 @@ export async function sendChatMessage({
         const fallbackBody = JSON.stringify({
           model: currentlyLoaded,
           messages: formattedMessages,
-          temperature: temperature,
+          temperature: effectiveTemp,
           max_tokens: maxTokensLimit,
           stop: stopWords,
           stream: isStream

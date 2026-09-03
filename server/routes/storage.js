@@ -154,16 +154,32 @@ router.get('/images/:filename', (req, res) => {
 });
 
 const { writeAtomicJson, readJsonSafe, cloneCardEntity, cloneScenarioEntity } = require('../storage/atomicStorage');
+const {
+  assembleVirtualAppData,
+  saveVirtualAppData,
+  saveLibraryEntity,
+  listCampaigns,
+  createCampaign,
+  branchCampaign,
+  saveCampaignMemory,
+  getCampaignMemories,
+  mergeTemplateUpdates,
+  listLibraryEntities,
+  getLibraryEntity
+} = require('../storage/documentEngine');
 
-// GET /api/storage/app-data
+// GET /api/storage/app-data (Virtual Aggregator desde library/)
 router.get('/app-data', (req, res) => {
   ensureDataDir();
-  const filePath = path.join(DATA_DIR, 'appData.json');
-  const data = readJsonSafe(filePath, { scenarios: [], cards: [], narrators: [], tools: [] });
-  res.json({ success: true, data });
+  try {
+    const data = assembleVirtualAppData();
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
-// POST /api/storage/app-data
+// POST /api/storage/app-data (Persistencia Modular Atómica en library/)
 router.post('/app-data', (req, res) => {
   ensureDataDir();
   const { data } = req.body;
@@ -172,11 +188,7 @@ router.post('/app-data', (req, res) => {
   }
   try {
     const sanitizedData = sanitizeAndPersistAssets(data);
-    const filePath = path.join(DATA_DIR, 'appData.json');
-    const written = writeAtomicJson(filePath, sanitizedData, { createBackup: true });
-    if (!written) {
-      return res.status(500).json({ success: false, error: 'Failed to write appData atomically' });
-    }
+    saveVirtualAppData(sanitizedData);
     res.json({ success: true, data: sanitizedData });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -190,18 +202,22 @@ router.post('/cards/:id/clone', (req, res) => {
   const { creatorId, creatorName } = req.body;
 
   try {
-    const filePath = path.join(DATA_DIR, 'appData.json');
-    const appData = readJsonSafe(filePath, { scenarios: [], cards: [], narrators: [], tools: [] });
-    const card = (appData.cards || []).find(c => c && c.id === id);
+    const virtualData = assembleVirtualAppData();
+    const card = (virtualData.cards || []).find(c => c && c.id === id);
 
     if (!card) {
       return res.status(404).json({ success: false, error: 'Card not found' });
     }
 
     const clonedCard = cloneCardEntity(card, { creatorId, creatorName });
-    appData.cards.push(clonedCard);
-
-    writeAtomicJson(filePath, appData, { createBackup: true });
+    const type = (clonedCard.type || '').toLowerCase();
+    if (type === 'personaje' || clonedCard.characterRole) {
+      saveLibraryEntity('characters', clonedCard);
+    } else if (type === 'objeto' || type === 'item' || type === 'inventario') {
+      saveLibraryEntity('items', clonedCard);
+    } else {
+      saveLibraryEntity('lore', clonedCard);
+    }
     res.json({ success: true, card: clonedCard });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -215,18 +231,15 @@ router.post('/scenarios/:id/clone', (req, res) => {
   const { creatorId, creatorName } = req.body;
 
   try {
-    const filePath = path.join(DATA_DIR, 'appData.json');
-    const appData = readJsonSafe(filePath, { scenarios: [], cards: [], narrators: [], tools: [] });
-    const scenario = (appData.scenarios || []).find(s => s && s.id === id);
+    const virtualData = assembleVirtualAppData();
+    const scenario = (virtualData.scenarios || []).find(s => s && s.id === id);
 
     if (!scenario) {
       return res.status(404).json({ success: false, error: 'Scenario not found' });
     }
 
     const clonedScenario = cloneScenarioEntity(scenario, { creatorId, creatorName });
-    appData.scenarios.push(clonedScenario);
-
-    writeAtomicJson(filePath, appData, { createBackup: true });
+    saveLibraryEntity('scenarios', clonedScenario);
     res.json({ success: true, scenario: clonedScenario });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -280,6 +293,142 @@ router.post('/settings', (req, res) => {
       return res.status(500).json({ success: false, error: 'Failed to write settings atomically' });
     }
     res.json({ success: true, settings: payload });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+const { appendJsonlLine, readJsonlPaginated, readJsonlTail } = require('../storage/jsonlStorage');
+
+// --- DocumentEngine Library & Campaigns Endpoints ---
+
+// GET /api/storage/campaigns - List all campaigns
+router.get('/campaigns', (req, res) => {
+  try {
+    const campaigns = listCampaigns();
+    res.json({ success: true, campaigns });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/campaigns - Create a new isolated campaign
+router.post('/campaigns', (req, res) => {
+  try {
+    const { scenarioId, title, activeEntities } = req.body;
+    const campaign = createCampaign({ scenarioId, title, activeEntities });
+    res.json({ success: true, campaign });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/campaigns/:id/branch - Branch a campaign at message K
+router.post('/campaigns/:id/branch', (req, res) => {
+  try {
+    const { branchTurn, newTitle } = req.body;
+    const branched = branchCampaign({
+      sourceCampaignId: req.params.id,
+      branchTurn: parseInt(branchTurn, 10) || 0,
+      newTitle
+    });
+    if (!branched) {
+      return res.status(404).json({ success: false, error: 'Source campaign not found' });
+    }
+    res.json({ success: true, campaign: branched });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/storage/campaigns/:id/chat - Read paginated chat messages from JSONL
+router.get('/campaigns/:id/chat', (req, res) => {
+  try {
+    const { limit = 50, offset = 0, tail } = req.query;
+    const chatFile = path.join(DATA_DIR, 'campaigns', req.params.id, 'chats', 'main.jsonl');
+    if (tail) {
+      const messages = readJsonlTail(chatFile, parseInt(tail, 10) || 10);
+      return res.json({ success: true, messages });
+    }
+    const result = readJsonlPaginated(chatFile, {
+      limit: parseInt(limit, 10) || 50,
+      offset: parseInt(offset, 10) || 0
+    });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/campaigns/:id/chat/message - Append-only atomic message turn
+router.post('/campaigns/:id/chat/message', (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ success: false, error: 'Message payload required' });
+    }
+    const chatFile = path.join(DATA_DIR, 'campaigns', req.params.id, 'chats', 'main.jsonl');
+    const written = appendJsonlLine(chatFile, message);
+    if (!written) {
+      return res.status(500).json({ success: false, error: 'Failed to append message turn' });
+    }
+    res.json({ success: true, message });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/storage/campaigns/:id/memories - Get campaign episodic memories
+router.get('/campaigns/:id/memories', (req, res) => {
+  try {
+    const memories = getCampaignMemories(req.params.id);
+    res.json({ success: true, memories });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/campaigns/:id/memories - Save or update memory with source context
+router.post('/campaigns/:id/memories', (req, res) => {
+  try {
+    const { memory } = req.body;
+    if (!memory || !memory.id) {
+      return res.status(400).json({ success: false, error: 'Memory with id is required' });
+    }
+    const saved = saveCampaignMemory(req.params.id, memory);
+    res.json({ success: saved });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/campaigns/:id/sync-template - Git-Merge template update
+router.post('/campaigns/:id/sync-template', (req, res) => {
+  try {
+    const { entityId } = req.body;
+    const result = mergeTemplateUpdates(req.params.id, entityId);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/storage/library/:category - List entities in library
+router.get('/library/:category', (req, res) => {
+  try {
+    const entities = listLibraryEntities(req.params.category);
+    res.json({ success: true, entities });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/storage/library/:category - Save entity to library
+router.post('/library/:category', (req, res) => {
+  try {
+    const { entity } = req.body;
+    const saved = saveLibraryEntity(req.params.category, entity);
+    res.json({ success: saved });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
