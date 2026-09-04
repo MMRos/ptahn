@@ -87,84 +87,100 @@ class LlamaEngineManager {
   }
 
   /**
+   * Resets execution mutex to clear any stalled state
+   */
+  resetMutex() {
+    this._executionMutex = Promise.resolve();
+  }
+
+  /**
+   * Internal model loader (assumes mutex is already acquired or called by loadModel)
+   * @param {string} modelFilename 
+   */
+  async _loadModelInternal(modelFilename) {
+    this.isLoading = true;
+    this.lastError = null;
+
+    try {
+      const fullPath = this.resolveModelPath(modelFilename);
+      if (!fullPath || !fs.existsSync(fullPath)) {
+        throw new Error(`Model file not found for '${modelFilename}' at: ${MODELS_DIR}`);
+      }
+
+      const targetBaseName = path.basename(fullPath);
+
+      // If already active and healthy, reuse without re-allocating VRAM
+      if (this.activeModelName === targetBaseName && this.model && !this.model.disposed && this.context && !this.context.disposed) {
+        this.isLoading = false;
+        return { success: true, model: this.activeModelName, native: this.isNativeLoaded };
+      }
+
+      await this.initRuntime();
+
+      if (this.isNativeLoaded && this.llama) {
+        // Free previous model and context first to release GPU VRAM
+        await this._disposeCurrent();
+
+        // Tiered context allocation to guarantee loading into GPU VRAM
+        const contextTiers = [8192, 4096, 2048];
+        let loaded = false;
+
+        for (const ctxSize of contextTiers) {
+          try {
+            await this._disposeCurrent();
+            this.model = await this.llama.loadModel({
+              modelPath: fullPath,
+              gpuLayers: 99
+            });
+            this.context = await this.model.createContext({
+              contextSize: ctxSize,
+              sequences: 1
+            });
+            this.allocatedContextSize = ctxSize;
+            loaded = true;
+            console.log(`[LlamaEngine]: Loaded model ${targetBaseName} into GPU VRAM with context ${ctxSize} successfully.`);
+            break;
+          } catch (tierErr) {
+            console.warn(`[LlamaEngine]: Context ${ctxSize} tier failed for ${targetBaseName} (${tierErr.message}), trying next tier...`);
+          }
+        }
+
+        if (!loaded) {
+          // CPU fallback as last resort
+          await this._disposeCurrent();
+          this.model = await this.llama.loadModel({
+            modelPath: fullPath,
+            gpuLayers: 0
+          });
+          this.context = await this.model.createContext({
+            contextSize: 2048,
+            sequences: 1
+          });
+          this.allocatedContextSize = 2048;
+          console.log(`[LlamaEngine]: Loaded model ${targetBaseName} on CPU fallback successfully.`);
+        }
+      }
+
+      this.activeModelName = targetBaseName;
+      this.isLoading = false;
+      return { success: true, model: this.activeModelName, native: this.isNativeLoaded };
+    } catch (error) {
+      this.isLoading = false;
+      this.lastError = error.message;
+      console.error('[LlamaEngine]: Failed to load model:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Loads a specific GGUF model into memory/VRAM (Serialized via Mutex)
    * @param {string} modelFilename 
    */
   async loadModel(modelFilename) {
-    return (this._executionMutex = this._executionMutex.then(async () => {
-      this.isLoading = true;
-      this.lastError = null;
-
-      try {
-        const fullPath = this.resolveModelPath(modelFilename);
-        if (!fullPath || !fs.existsSync(fullPath)) {
-          throw new Error(`Model file not found for '${modelFilename}' at: ${MODELS_DIR}`);
-        }
-
-        const targetBaseName = path.basename(fullPath);
-
-        // If already active and healthy, reuse without re-allocating VRAM
-        if (this.activeModelName === targetBaseName && this.model && !this.model.disposed && this.context && !this.context.disposed) {
-          this.isLoading = false;
-          return { success: true, model: this.activeModelName, native: this.isNativeLoaded };
-        }
-
-        await this.initRuntime();
-
-        if (this.isNativeLoaded && this.llama) {
-          // Free previous model and context first to release GPU VRAM
-          await this._disposeCurrent();
-
-          // Tiered context allocation to guarantee loading into GPU VRAM
-          const contextTiers = [8192, 4096, 2048];
-          let loaded = false;
-
-          for (const ctxSize of contextTiers) {
-            try {
-              await this._disposeCurrent();
-              this.model = await this.llama.loadModel({
-                modelPath: fullPath,
-                gpuLayers: 99
-              });
-              this.context = await this.model.createContext({
-                contextSize: ctxSize,
-                sequences: 1
-              });
-              this.allocatedContextSize = ctxSize;
-              loaded = true;
-              console.log(`[LlamaEngine]: Loaded model ${targetBaseName} into GPU VRAM with context ${ctxSize} successfully.`);
-              break;
-            } catch (tierErr) {
-              console.warn(`[LlamaEngine]: Context ${ctxSize} tier failed for ${targetBaseName} (${tierErr.message}), trying next tier...`);
-            }
-          }
-
-          if (!loaded) {
-            // CPU fallback as last resort
-            await this._disposeCurrent();
-            this.model = await this.llama.loadModel({
-              modelPath: fullPath,
-              gpuLayers: 0
-            });
-            this.context = await this.model.createContext({
-              contextSize: 2048,
-              sequences: 1
-            });
-            this.allocatedContextSize = 2048;
-            console.log(`[LlamaEngine]: Loaded model ${targetBaseName} on CPU fallback successfully.`);
-          }
-        }
-
-        this.activeModelName = targetBaseName;
-        this.isLoading = false;
-        return { success: true, model: this.activeModelName, native: this.isNativeLoaded };
-      } catch (error) {
-        this.isLoading = false;
-        this.lastError = error.message;
-        console.error('[LlamaEngine]: Failed to load model:', error);
-        throw error;
-      }
-    }));
+    const action = () => this._loadModelInternal(modelFilename);
+    const execution = this._executionMutex.catch(() => {}).then(action);
+    this._executionMutex = execution.catch(() => {});
+    return execution;
   }
 
   /**
@@ -177,17 +193,18 @@ class LlamaEngineManager {
     if (!messages || !Array.isArray(messages)) {
       throw new Error('messages array is required');
     }
-    return (this._executionMutex = this._executionMutex.then(async () => {
+
+    const action = async () => {
       // 1. If no model is active, load requested model or first available
       if (!this.activeModelName || !this.model || this.model.disposed) {
         const target = options.model || null;
         const resolved = this.resolveModelPath(target);
         if (resolved) {
-          await this.loadModel(resolved);
+          await this._loadModelInternal(resolved);
         } else {
           const available = scanModelsDirectory(MODELS_DIR).filter(m => m.type === 'llm');
           if (available.length > 0) {
-            await this.loadModel(available[0].filename);
+            await this._loadModelInternal(available[0].filename);
           } else {
             throw new Error('No se encontraron modelos .gguf en la carpeta ./models/. Coloca un archivo .gguf para activar la inferencia nativa.');
           }
@@ -196,7 +213,7 @@ class LlamaEngineManager {
         const resolved = this.resolveModelPath(options.model);
         if (resolved && path.basename(resolved) !== this.activeModelName) {
           console.log(`[LlamaEngine]: Dynamic model switch requested: ${this.activeModelName} -> ${path.basename(resolved)}`);
-          await this.loadModel(resolved);
+          await this._loadModelInternal(resolved);
         }
       }
 
@@ -215,7 +232,17 @@ class LlamaEngineManager {
         }
 
         const systemMsg = messages.find(m => m.role === 'system')?.content || '';
-        const nonSystemMessages = messages.filter(m => m.role !== 'system');
+        const rawNonSystemMessages = messages.filter(m => m.role !== 'system');
+
+        // Merge any consecutive messages from the same role to prevent chat template issues
+        const nonSystemMessages = [];
+        for (const msg of rawNonSystemMessages) {
+          if (nonSystemMessages.length > 0 && nonSystemMessages[nonSystemMessages.length - 1].role === msg.role) {
+            nonSystemMessages[nonSystemMessages.length - 1].content += '\n\n' + (msg.content || '');
+          } else {
+            nonSystemMessages.push({ ...msg });
+          }
+        }
         
         // Build full conversational history for node-llama-cpp
         const chatHistory = [];
@@ -260,6 +287,7 @@ class LlamaEngineManager {
             maxTokens: options.maxTokens || options.max_tokens || 1024,
             temperature: options.temperature !== undefined ? options.temperature : 0.7,
             topP: options.topP !== undefined ? options.topP : (options.top_p !== undefined ? options.top_p : 0.95),
+            signal: options.signal,
             onToken: (tokens) => {
               if (onToken && this.model && !this.model.disposed) {
                 const text = this.model.detokenize(tokens);
@@ -276,7 +304,11 @@ class LlamaEngineManager {
       }
 
       throw new Error(`[LlamaEngine]: El motor nativo no pudo inicializar el modelo '${this.activeModelName}'. Comprueba que el archivo .gguf es válido.`);
-    }));
+    };
+
+    const execution = this._executionMutex.catch(() => {}).then(action);
+    this._executionMutex = execution.catch(() => {});
+    return execution;
   }
 
   /**

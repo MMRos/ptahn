@@ -29,6 +29,7 @@ import ModalCloseButton from './common/ModalCloseButton';
 import ImageCropperModal from './ImageCropperModal';
 import ConnectionSelector from './ConnectionSelector';
 import ScenarioMediaHeader from './create/ScenarioMediaHeader';
+import ScenarioLoreCategoryRow from './create/ScenarioLoreCategoryRow';
 import { normalizeInitialMessages } from '../utils/scenarioScoping';
 
 const CARD_TYPES = ['Personaje', 'Historia', 'Inventario', 'Memoria', 'Raza', 'Facción', 'Regla', 'Criatura', 'Objeto', 'Lugar', 'Otros'];
@@ -366,10 +367,18 @@ export default function CreateModal({
 
     setIsGeneratingAiImage(true);
     try {
-      const promptToUse = rawPrompt.trim() || `${title}. ${intro || ''}`;
+      let promptToUse = rawPrompt.trim();
+      if (!promptToUse) {
+        const metaParts = [];
+        if (title) metaParts.push(title);
+        if (category) metaParts.push(`Categoría: ${category}`);
+        if (selectedTags && selectedTags.length > 0) metaParts.push(`Etiquetas: ${selectedTags.join(', ')}`);
+        if (intro) metaParts.push(intro);
+        promptToUse = metaParts.join('. ');
+      }
       const styleToUse = style || coverAiStyle;
-      const width = 768;
-      const height = 512;
+      const width = 1024;
+      const height = 640;
 
       setLastGenParams({
         prompt: promptToUse,
@@ -767,10 +776,19 @@ export default function CreateModal({
       // Gather reference images selected by user
       const guideImages = characterImages.filter(img => selectedGuideIds.includes(img.id)).map(img => img.url);
 
-      const promptToUse = rawPrompt.trim() || `${title}. ${intro || ''}`;
+      let promptToUse = rawPrompt.trim();
+      if (!promptToUse) {
+        const metaParts = [];
+        if (title) metaParts.push(title);
+        if (characterRole) metaParts.push(`Rol: ${characterRole}`);
+        if (selectedTraits && selectedTraits.length > 0) metaParts.push(`Rasgos: ${selectedTraits.join(', ')}`);
+        if (selectedTags && selectedTags.length > 0) metaParts.push(`Etiquetas: ${selectedTags.join(', ')}`);
+        if (intro) metaParts.push(intro);
+        promptToUse = metaParts.join('. ');
+      }
       const isPortrait = itemType === 'Personaje' || target === 'char';
-      const width = isPortrait ? 512 : 768;
-      const height = isPortrait ? 768 : 512;
+      const width = isPortrait ? 640 : 1024;
+      const height = isPortrait ? 1024 : 640;
 
       setLastGenParams({
         prompt: promptToUse,
@@ -2138,182 +2156,81 @@ export default function CreateModal({
                     />
                   </div>
 
-                  {/* Cuadrículas agrupadas por tipo con diseño elegante y botón de añadir */}
-                  {['Personaje', 'Lugar', 'Facción', 'Raza', 'Criatura', 'Objeto', 'Memoria', 'Inventario', 'Regla', 'Otros'].map(type => {
+                  {/* Cuadrículas agrupadas por tipo desplegables y reordenables por Drag and Drop */}
+                  {(() => {
                     const allCardsPool = [...(appData.cards || [])];
                     selectedCards.forEach(sc => {
                       if (typeof sc === 'object' && sc !== null && sc.id && !allCardsPool.some(x => x.id === sc.id)) {
                         allCardsPool.push(sc);
                       }
                     });
-                    const linkedCardsOfType = allCardsPool.filter(c => {
-                      const isSelected = selectedCards.some(sc => (typeof sc === 'object' ? sc.id : sc) === c.id);
-                      if (!isSelected) return false;
-                      if (c.type === type) return true;
-                      if (type === 'Otros' && !['Personaje', 'Lugar', 'Facción', 'Raza', 'Criatura', 'Objeto', 'Memoria', 'Inventario', 'Regla'].includes(c.type)) return true;
-                      return false;
+
+                    const handleReorderCategoryCards = (catType, reorderedCards) => {
+                      const reorderedIds = new Set(reorderedCards.map(c => c.id));
+
+                      // Preservar la representación original (string ID u objeto) de cada tarjeta
+                      const originalRepMap = new Map();
+                      selectedCards.forEach(sc => {
+                        const id = typeof sc === 'object' && sc !== null ? sc.id : sc;
+                        if (id && !originalRepMap.has(id)) {
+                          originalRepMap.set(id, sc);
+                        }
+                      });
+
+                      // Formatear los elementos reordenados manteniendo el tipo original (ID u objeto)
+                      const formattedReordered = reorderedCards.map(c => originalRepMap.get(c.id) || c);
+
+                      // Reemplazar orden en el lugar que ocupaban en selectedCards
+                      let reorderIdx = 0;
+                      const nextSelectedCards = selectedCards.map(sc => {
+                        const id = typeof sc === 'object' && sc !== null ? sc.id : sc;
+                        if (reorderedIds.has(id)) {
+                          const item = formattedReordered[reorderIdx];
+                          reorderIdx++;
+                          return item;
+                        }
+                        return sc;
+                      });
+
+                      if (reorderIdx < formattedReordered.length) {
+                        nextSelectedCards.push(...formattedReordered.slice(reorderIdx));
+                      }
+
+                      handleFieldChange(setSelectedCards, nextSelectedCards);
+                    };
+
+                    return ['Personaje', 'Lugar', 'Facción', 'Raza', 'Criatura', 'Objeto', 'Memoria', 'Inventario', 'Regla', 'Otros'].map(type => {
+                      const linkedCardsOfType = selectedCards
+                        .map(sc => {
+                          const scId = typeof sc === 'object' && sc !== null ? sc.id : sc;
+                          const found = allCardsPool.find(c => c.id === scId);
+                          if (found) return found;
+                          if (typeof sc === 'object' && sc !== null) return sc;
+                          return null;
+                        })
+                        .filter(c => {
+                          if (!c) return false;
+                          if (c.type === type) return true;
+                          if (type === 'Otros' && !['Personaje', 'Lugar', 'Facción', 'Raza', 'Criatura', 'Objeto', 'Memoria', 'Inventario', 'Regla'].includes(c.type)) return true;
+                          return false;
+                        });
+
+                      const typeLabel = type === 'Personaje' ? 'Personajes' : type === 'Lugar' ? 'Lugares' : type === 'Facción' ? 'Facciones' : type === 'Raza' ? 'Razas' : type === 'Criatura' ? 'Criaturas' : type === 'Objeto' ? 'Objetos' : type === 'Memoria' ? 'Memorias' : type === 'Inventario' ? 'Inventarios' : type === 'Regla' ? 'Reglas / Leyes' : 'Otros / Personalizados';
+
+                      return (
+                        <ScenarioLoreCategoryRow
+                          key={type}
+                          type={type}
+                          typeLabel={typeLabel}
+                          cards={linkedCardsOfType}
+                          onOpenNewCardModal={(newType) => setNestedCardModalState({ isOpen: true, type: newType, editItem: null })}
+                          onOpenEditCardModal={(card) => setNestedCardModalState({ isOpen: true, type: card.type || 'Personaje', editItem: card })}
+                          onUnlinkCard={(card) => handleFieldChange(setSelectedCards, selectedCards.filter(sc => (typeof sc === 'object' ? sc.id : sc) !== card.id))}
+                          onReorderCategoryCards={handleReorderCategoryCards}
+                        />
+                      );
                     });
-                    const typeLabel = type === 'Personaje' ? 'Personajes' : type === 'Lugar' ? 'Lugares' : type === 'Facción' ? 'Facciones' : type === 'Raza' ? 'Razas' : type === 'Criatura' ? 'Criaturas' : type === 'Objeto' ? 'Objetos' : type === 'Memoria' ? 'Memorias' : type === 'Inventario' ? 'Inventarios' : type === 'Regla' ? 'Reglas / Leyes' : 'Otros / Personalizados';
-
-                    return (
-                      <div key={type} style={{ marginBottom: '24px' }}>
-                        <h5 style={{ margin: '0 0 10px 0', color: '#ffffff', fontSize: '0.88rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{typeLabel} ({linkedCardsOfType.length})</span>
-                          <button
-                            type="button"
-                            onClick={() => setNestedCardModalState({ isOpen: true, type, editItem: null })}
-                            style={{ background: 'transparent', border: 'none', color: '#ffd36b', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            + Crear nuevo {type}
-                          </button>
-                        </h5>
-
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                          gap: '12px'
-                        }}>
-                          {/* Tarjetas conectadas de este tipo */}
-                          {linkedCardsOfType.map(card => {
-                            return (
-                              <div
-                                key={card.id}
-                                onClick={() => setNestedCardModalState({ isOpen: true, type: card.type || 'Personaje', editItem: card })}
-                                style={{
-                                  background: 'rgba(255, 255, 255, 0.02)',
-                                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                                  borderRadius: '10px',
-                                  overflow: 'hidden',
-                                  position: 'relative',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  height: '175px',
-                                  transition: 'all 0.2s',
-                                  cursor: 'pointer'
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.borderColor = 'rgba(255, 211, 107, 0.4)';
-                                  e.currentTarget.style.transform = 'translateY(-2px)';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                                  e.currentTarget.style.transform = 'none';
-                                }}
-                                title={`Clic para editar "${card.title}"`}
-                              >
-                                {/* Botones de Acción (Editar y Desenlazar) */}
-                                <div style={{ position: 'absolute', top: '6px', right: '6px', display: 'flex', gap: '4px', zIndex: 5 }}>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setNestedCardModalState({ isOpen: true, type: card.type || 'Personaje', editItem: card });
-                                    }}
-                                    style={{
-                                      background: 'rgba(0, 0, 0, 0.7)',
-                                      border: '1px solid rgba(255, 211, 107, 0.4)',
-                                      color: '#ffd36b',
-                                      width: '22px',
-                                      height: '22px',
-                                      borderRadius: '50%',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '0.7rem'
-                                    }}
-                                    title="Editar tarjeta completa"
-                                  >
-                                    <FontAwesomeIcon icon={faEdit} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleFieldChange(setSelectedCards, selectedCards.filter(sc => (typeof sc === 'object' ? sc.id : sc) !== card.id));
-                                    }}
-                                    style={{
-                                      background: 'rgba(0, 0, 0, 0.7)',
-                                      border: '1px solid rgba(255, 107, 107, 0.4)',
-                                      color: '#ff6b6b',
-                                      width: '22px',
-                                      height: '22px',
-                                      borderRadius: '50%',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '0.8rem',
-                                      fontWeight: 'bold'
-                                    }}
-                                    title="Desenlazar del escenario"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-
-                                {/* Portada */}
-                                <div style={{
-                                  height: '85px',
-                                  backgroundSize: 'cover',
-                                  backgroundPosition: 'center',
-                                  backgroundImage: `url(${card.cover || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=300&q=80'})`,
-                                  backgroundColor: '#1a1a24'
-                                }} />
-
-                                {/* Info */}
-                                <div style={{ padding: '8px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                                  <div style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={card.title}>
-                                    {card.title}
-                                  </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                                      {card.type}
-                                    </span>
-                                    <span style={{ fontSize: '0.68rem', color: '#ffd36b', fontWeight: '600' }}>
-                                      ✏️ Editar
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-
-                          {/* Ranura Dotted "Crear Nuevo" */}
-                          <div
-                            onClick={() => setNestedCardModalState({ isOpen: true, type, editItem: null })}
-                            style={{
-                              border: '2px dashed rgba(255, 211, 107, 0.3)',
-                              borderRadius: '10px',
-                              height: '170px',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: 'pointer',
-                              color: '#ffd36b',
-                              fontSize: '0.78rem',
-                              fontWeight: '600',
-                              gap: '6px',
-                              transition: 'all 0.2s',
-                              background: 'rgba(255,211,107,0.01)'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.border = '2px dashed rgba(255, 211, 107, 0.6)';
-                              e.currentTarget.style.background = 'rgba(255,211,107,0.04)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.border = '2px dashed rgba(255, 211, 107, 0.3)';
-                              e.currentTarget.style.background = 'rgba(255,211,107,0.01)';
-                            }}
-                          >
-                            <FontAwesomeIcon icon={faPlus} style={{ fontSize: '1rem' }} />
-                            <span>+ Añadir {type}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  })()}
                 </div>
               )}
 

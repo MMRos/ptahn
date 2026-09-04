@@ -124,6 +124,11 @@ export function filterCreationsCards(cardsOrOptions = [], maybeOptions = {}) {
   }
 
   // 5. Sorting
+  if (sortBy === 'custom') {
+    // Orden manual personalizado definido por el usuario (mantiene el orden del array)
+    return list;
+  }
+
   list.sort((a, b) => {
     if (sortBy === 'name_asc') return (a.title || a.name || '').localeCompare(b.title || b.name || '');
     if (sortBy === 'name_desc') return (b.title || b.name || '').localeCompare(a.title || a.name || '');

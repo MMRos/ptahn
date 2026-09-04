@@ -247,6 +247,62 @@ describe('CreateModal Component', () => {
       })
     );
   });
+
+  test('correctly reorders category cards and preserves custom order when saving scenario', () => {
+    const handleSave = jest.fn();
+    const appData = {
+      cards: [
+        { id: 'rule-1', title: 'World Generation', type: 'Regla' },
+        { id: 'rule-2', title: 'Resource Extraction', type: 'Regla' },
+        { id: 'char-1', title: 'Protagonista', type: 'Personaje' }
+      ]
+    };
+
+    const editScenario = {
+      id: 'scenario-test',
+      title: '0 to Civilization',
+      cards: ['rule-1', 'rule-2', 'char-1']
+    };
+
+    render(
+      <CreateModal
+        isOpen={true}
+        initialType="Escenario"
+        editItem={editScenario}
+        appData={appData}
+        onClose={jest.fn()}
+        onSaveItem={handleSave}
+      />
+    );
+
+    // Initial check: World Generation and Resource Extraction rendered
+    expect(screen.getAllByText('World Generation').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Resource Extraction').length).toBeGreaterThan(0);
+
+    const rule1Card = document.querySelector('[data-drag-area="scenario-lore-Regla"][data-drag-index="0"]');
+    const rule2Card = document.querySelector('[data-drag-area="scenario-lore-Regla"][data-drag-index="1"]');
+
+    expect(rule1Card).toBeInTheDocument();
+    expect(rule2Card).toBeInTheDocument();
+
+    // Simulate drag and drop: drag rule-1 (index 0) to rule-2 (index 1)
+    fireEvent.dragStart(rule1Card);
+    fireEvent.dragOver(rule2Card);
+    fireEvent.drop(rule2Card);
+
+    // Save scenario
+    const saveButton = screen.getByRole('button', { name: /guardar/i });
+    fireEvent.click(saveButton);
+
+    expect(handleSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'scenario',
+        data: expect.objectContaining({
+          cards: ['rule-2', 'rule-1', 'char-1']
+        })
+      })
+    );
+  });
 });
 
 

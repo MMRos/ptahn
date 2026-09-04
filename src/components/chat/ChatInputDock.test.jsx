@@ -113,4 +113,86 @@ describe('ChatInputDock - Icon-Only Tool Buttons with Hover Tooltips', () => {
     fireEvent.click(screen.getByRole('button', { name: /ramificar/i }));
     expect(onBranchMock).toHaveBeenCalledTimes(1);
   });
+
+  test('send button toggles to interactive stop button when isSending is true and triggers onStop', () => {
+    const onStopMock = jest.fn();
+    const { rerender } = render(
+      <ChatInputDock
+        {...defaultProps}
+        isSending={false}
+        input="Hola mundo"
+        onStop={onStopMock}
+      />
+    );
+
+    const sendBtn = screen.getByRole('button', { name: /enviar mensaje/i });
+    expect(sendBtn).not.toBeDisabled();
+    expect(sendBtn).toHaveAttribute('type', 'submit');
+
+    // Rerender en modo isSending = true
+    rerender(
+      <ChatInputDock
+        {...defaultProps}
+        isSending={true}
+        input="Hola mundo"
+        onStop={onStopMock}
+      />
+    );
+
+    const stopBtn = screen.getByRole('button', { name: /detener respuesta/i });
+    expect(stopBtn).not.toBeDisabled();
+    expect(stopBtn).toHaveClass('is-stopping');
+
+    fireEvent.click(stopBtn);
+    expect(onStopMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('dynamically adjusts textarea height based on content to grow with text', () => {
+    const textareaRef = { current: null };
+    const { rerender } = render(
+      <ChatInputDock
+        {...defaultProps}
+        input=""
+        textareaRef={textareaRef}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/escribe tu acción o diálogo/i);
+    expect(textarea).toBeInTheDocument();
+    expect(textarea.style.height).toBe('44px');
+
+    // Simulate multi-line content
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      value: 96
+    });
+
+    rerender(
+      <ChatInputDock
+        {...defaultProps}
+        input="Línea 1\nLínea 2\nLínea 3"
+        textareaRef={textareaRef}
+      />
+    );
+
+    expect(textarea.style.height).toBe('96px');
+    expect(textarea.style.overflowY).toBe('hidden');
+
+    // Simulate very long text exceeding max height
+    Object.defineProperty(textarea, 'scrollHeight', {
+      configurable: true,
+      value: 300
+    });
+
+    rerender(
+      <ChatInputDock
+        {...defaultProps}
+        input={"Mucho texto...\n".repeat(15)}
+        textareaRef={textareaRef}
+      />
+    );
+
+    expect(textarea.style.height).toBe('220px');
+    expect(textarea.style.overflowY).toBe('auto');
+  });
 });

@@ -141,6 +141,40 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
     if (onUpdateAppData) onUpdateAppData(nextData);
   };
 
+  const handleReorderCards = (reorderedSubset) => {
+    if (!Array.isArray(reorderedSubset) || reorderedSubset.length === 0) return;
+    const reorderedIds = new Set(reorderedSubset.map(item => item.id));
+
+    // Si los items son escenarios
+    const hasScenarios = reorderedSubset.some(item => item.isScenario || item.type === 'Escenario' || item.type === 'Historia');
+    const hasNarrators = reorderedSubset.some(item => item.type === 'Narrador');
+    const hasTools = reorderedSubset.some(item => item.type === 'Herramienta');
+
+    let nextData = { ...data };
+
+    if (hasScenarios && Array.isArray(data.scenarios)) {
+      const remainingScenarios = (data.scenarios || []).filter(s => !reorderedIds.has(s.id));
+      nextData.scenarios = [...reorderedSubset.filter(s => s.isScenario || s.type === 'Escenario' || s.type === 'Historia'), ...remainingScenarios];
+    } else if (hasNarrators && Array.isArray(data.narrators)) {
+      const remainingNarrators = (data.narrators || []).filter(n => !reorderedIds.has(n.id));
+      nextData.narrators = [...reorderedSubset.filter(n => n.type === 'Narrador'), ...remainingNarrators];
+    } else if (hasTools && (data.narratorTools || data.tools)) {
+      const toolKey = data.narratorTools ? 'narratorTools' : 'tools';
+      const remainingTools = (data[toolKey] || []).filter(t => !reorderedIds.has(t.id));
+      nextData[toolKey] = [...reorderedSubset.filter(t => t.type === 'Herramienta'), ...remainingTools];
+    } else {
+      const currentCards = Array.isArray(data.cards) ? data.cards : [];
+      const reorderedCards = reorderedSubset.filter(c => !c.isScenario && c.type !== 'Narrador' && c.type !== 'Herramienta');
+      const cardIds = new Set(reorderedCards.map(c => c.id));
+      const remainingCards = currentCards.filter(c => !cardIds.has(c.id));
+      nextData.cards = [...reorderedCards, ...remainingCards];
+    }
+
+    setData(nextData);
+    setSortBy('custom');
+    if (onUpdateAppData) onUpdateAppData(nextData);
+  };
+
   const handleCopyCard = async (card) => {
     if (!card) return;
     const { cloneCard } = await import('../utils/cloning');
@@ -329,6 +363,7 @@ export default function Create({ appData, onUpdateAppData, onOpenScenario, onOpe
             if (onOpenScenario) onOpenScenario(card);
           }}
           onCopyCard={handleCopyCard}
+          onReorderCards={handleReorderCards}
           onDeleteCardRequest={(card) => {
             setConfirmModal({
               title: 'Eliminar Ficha',

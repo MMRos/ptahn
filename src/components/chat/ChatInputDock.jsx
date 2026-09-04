@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faCommentDots, 
@@ -9,8 +9,8 @@ import {
   faPlay, 
   faCodeBranch, 
   faMicrophone, 
-  faSpinner, 
   faPaperPlane,
+  faStop,
   faEye,
   faImage,
   faUserCircle
@@ -43,12 +43,33 @@ export default function ChatInputDock({
   isSidebarVisible,
   isCharacterSidebarClosed,
   activeCharacter,
-  onOpenSidebar
+  onOpenSidebar,
+  onStop
 }) {
+  const localTextareaRef = useRef(null);
+  const actualTextareaRef = textareaRef || localTextareaRef;
+
+  // Auto-ajustar altura del textarea para contener el texto conforme el usuario escribe
+  useEffect(() => {
+    const textarea = actualTextareaRef.current;
+    if (!textarea) return;
+
+    // Reiniciar temporalmente para medir scrollHeight exacto al borrar texto
+    textarea.style.height = 'auto';
+
+    const minHeight = 44;
+    const maxHeight = 220;
+    const scrollHeight = textarea.scrollHeight;
+    const targetHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
+
+    textarea.style.height = `${targetHeight}px`;
+    textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [input, actualTextareaRef]);
+
   const insertFormattingToken = (prefix, suffix = prefix) => {
-    if (!textareaRef.current) return;
-    const start = textareaRef.current.selectionStart;
-    const end = textareaRef.current.selectionEnd;
+    if (!actualTextareaRef.current) return;
+    const start = actualTextareaRef.current.selectionStart;
+    const end = actualTextareaRef.current.selectionEnd;
     const currentVal = input || '';
     const selected = currentVal.substring(start, end);
 
@@ -280,7 +301,7 @@ export default function ChatInputDock({
       {/* 2. Área de Entrada de Mensaje con Textarea expansible y botones laterales */}
       <form className="chat-input-area" onSubmit={onSendMessage}>
         <textarea
-          ref={textareaRef}
+          ref={actualTextareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -296,8 +317,8 @@ export default function ChatInputDock({
           onClick={onToggleAudioRecording}
           disabled={isSending}
           style={{
-            width: '42px',
-            height: '42px',
+            width: '44px',
+            height: '44px',
             borderRadius: '10px',
             background: isRecordingAudio ? 'rgba(235, 87, 87, 0.2)' : 'rgba(255, 255, 255, 0.05)',
             border: isRecordingAudio ? '1px solid #eb5757' : '1px solid rgba(255, 255, 255, 0.12)',
@@ -315,15 +336,17 @@ export default function ChatInputDock({
           <FontAwesomeIcon icon={faMicrophone} />
         </button>
 
-        {/* Botón de Enviar Mensaje */}
+        {/* Botón de Enviar Mensaje / Detener Generación (Stop) */}
         <button 
-          type="submit" 
-          className="chat-send-btn"
-          disabled={isSending || (!input.trim() && !isRecordingAudio)}
-          title={chatSettings?.sendOnShiftEnter !== false ? "Enviar (Shift + Enter)" : "Enviar (Enter)"} 
+          type={isSending ? "button" : "submit"} 
+          className={`chat-send-btn ${isSending ? 'is-stopping' : ''}`}
+          disabled={!isSending && (!input.trim() && !isRecordingAudio)}
+          onClick={isSending ? (e) => { e.preventDefault(); if (onStop) onStop(); } : undefined}
+          title={isSending ? "Detener respuesta (Stop)" : (chatSettings?.sendOnShiftEnter !== false ? "Enviar (Shift + Enter)" : "Enviar (Enter)")} 
+          aria-label={isSending ? "Detener respuesta" : "Enviar mensaje"}
         >
           {isSending ? (
-            <FontAwesomeIcon icon={faSpinner} className="fa-spin" />
+            <FontAwesomeIcon icon={faStop} />
           ) : (
             <FontAwesomeIcon icon={faPaperPlane} />
           )}

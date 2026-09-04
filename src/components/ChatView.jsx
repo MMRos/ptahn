@@ -64,6 +64,7 @@ export default function ChatView({ chat, onBack, onBranchChat, onUpdateChat, onD
   const chatRef = useRef(null);
   const messagesEndRef = useRef(null);
   const activeChatIdRef = useRef(chat?.id);
+  const abortControllerRef = useRef(null);
 
   useEffect(() => {
     activeChatIdRef.current = chat?.id;
@@ -644,6 +645,10 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Evaluando intención y filtrando lore...' });
     }
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const currentSignal = controller.signal;
+
     try {
       const activeScenario = scenario || (appData?.scenarios || []).find(s => 
         s.id === targetChatSnapshot?.scenarioId || s.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
@@ -680,6 +685,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         contextDocuments: (inbound.filteredCards && inbound.filteredCards.length > 0) ? inbound.filteredCards : (targetChatSnapshot.contextDocuments || []),
         modelId: chatSettings?.preferredModel,
         baseUrl: chatSettings?.lmStudioUrl,
+        signal: currentSignal,
         onChunk: (accumulated) => {
           if (activeChatIdRef.current === executionChatId) {
             const targetLen = chatSettings?.responseLength || 1000;
@@ -698,6 +704,31 @@ Respond directly with the descriptive lore text without introductory fluff or pr
           }
         }
       });
+
+      if (res.aborted || currentSignal.aborted) {
+        if (res.text && res.text.trim()) {
+          const finalSceneState = resolveSceneState({
+            previousState: inbound.sceneState,
+            currentText: res.text.trim(),
+            scenario: activeScenario,
+            currentTurn: redoTurn
+          });
+          setCurrentSceneState(finalSceneState);
+          const stoppedAiMsg = {
+            from: aiRole,
+            text: res.text.trim(),
+            turn: redoTurn,
+            timestamp: new Date().toISOString(),
+            sceneState: finalSceneState
+          };
+          const stoppedMsgs = [...historyBefore, stoppedAiMsg];
+          await persistChatMessages(executionChatId, targetChatSnapshot, stoppedMsgs, finalSceneState);
+        } else {
+          await persistChatMessages(executionChatId, targetChatSnapshot, historyBefore);
+          setMessages(historyBefore);
+        }
+        return;
+      }
 
       // 2. Orquestación Outbound (Post-Vuelo con ámbito de escenario)
       const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
@@ -734,6 +765,10 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       runBackgroundCardGeneration(finalMsgs, targetChatSnapshot);
 
     } catch (err) {
+      if (err.name === 'AbortError' || currentSignal?.aborted) {
+        console.log('[Chat]: Generación cancelada por el usuario (Stop).');
+        return;
+      }
       console.error("Error al rehacer respuesta:", err);
       const errorMsg = {
         from: 'ai',
@@ -742,11 +777,21 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       };
       await persistChatMessages(executionChatId, targetChatSnapshot, [...historyBefore, errorMsg]);
     } finally {
+      abortControllerRef.current = null;
       if (activeChatIdRef.current === executionChatId) {
         setIsSending(false);
         setGenerationProgress({ percent: 100, status: 'Completado' });
       }
     }
+  };
+
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsSending(false);
+    setGenerationProgress({ percent: 100, status: 'Detenido' });
   };
 
   const handleSend = async (overrideText = null) => {
@@ -796,6 +841,10 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       setGenerationProgress({ percent: 15, status: '🧠 Orquestador: Analizando intención y relevancia de lore...' });
     }
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const currentSignal = controller.signal;
+
     try {
       const activeScenario = scenario || (appData?.scenarios || []).find(s => 
         s.id === targetChatSnapshot?.scenarioId || s.title?.toLowerCase() === (targetChatSnapshot?.scenario || '').toLowerCase()
@@ -840,6 +889,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         temperature: chatSettings?.temperature,
         guidanceHook: recencyGuidance,
         baseUrl: chatSettings?.lmStudioUrl,
+        signal: currentSignal,
         onChunk: (accumulated) => {
           if (activeChatIdRef.current === executionChatId) {
             const targetLen = chatSettings?.responseLength || 1000;
@@ -858,6 +908,32 @@ Respond directly with the descriptive lore text without introductory fluff or pr
           }
         }
       });
+
+      if (res.aborted || currentSignal.aborted) {
+        if (res.text && res.text.trim()) {
+          const aiTurn = userTurn + 1;
+          const finalSceneState = resolveSceneState({
+            previousState: inbound.sceneState || currentSceneState,
+            currentText: res.text.trim(),
+            scenario: activeScenario,
+            currentTurn: aiTurn
+          });
+          setCurrentSceneState(finalSceneState);
+          const stoppedAiMsg = {
+            from: 'ai',
+            text: res.text.trim(),
+            turn: aiTurn,
+            timestamp: new Date().toISOString(),
+            sceneState: finalSceneState
+          };
+          const stoppedMsgs = [...nextMsgs, stoppedAiMsg];
+          await persistChatMessages(executionChatId, targetChatSnapshot, stoppedMsgs, finalSceneState);
+        } else {
+          await persistChatMessages(executionChatId, targetChatSnapshot, nextMsgs, currentSceneState);
+          setMessages(nextMsgs);
+        }
+        return;
+      }
 
       // 3. Orquestación Outbound (Post-Vuelo con ámbito de escenario)
       const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
@@ -926,6 +1002,15 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       runBackgroundCardGeneration(finalMsgs, targetChatSnapshot);
 
     } catch (err) {
+      const isAborted =
+        err.name === 'AbortError' ||
+        currentSignal?.aborted ||
+        (err?.message && String(err.message).toLowerCase().includes('aborted'));
+
+      if (isAborted) {
+        console.log('[Chat]: Generación cancelada por el usuario (Stop).');
+        return;
+      }
       console.error("Error al enviar mensaje:", err);
       const errorMsg = {
         from: 'ai',
@@ -934,6 +1019,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       };
       await persistChatMessages(executionChatId, targetChatSnapshot, [...nextMsgs, errorMsg]);
     } finally {
+      abortControllerRef.current = null;
       if (activeChatIdRef.current === executionChatId) {
         setIsSending(false);
         setGenerationProgress({ percent: 100, status: 'Completado' });
@@ -954,6 +1040,10 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       setIsSending(true);
       setGenerationProgress({ percent: 15, status: '🧠 Evaluando continuación...' });
     }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const currentSignal = controller.signal;
 
     try {
       const activeScenario = scenario || (appData?.scenarios || []).find(s => 
@@ -982,6 +1072,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         temperature: chatSettings?.temperature,
         guidanceHook: recencyGuidance,
         baseUrl: chatSettings?.lmStudioUrl,
+        signal: currentSignal,
         onChunk: (accumulated) => {
           if (activeChatIdRef.current === executionChatId) {
             const targetLen = chatSettings?.responseLength || 1000;
@@ -1000,6 +1091,18 @@ Respond directly with the descriptive lore text without introductory fluff or pr
           }
         }
       });
+
+      if (res.aborted || currentSignal.aborted) {
+        if (res.text && res.text.trim()) {
+          const stoppedAiMsg = { from: 'ai', text: res.text.trim(), timestamp: new Date().toISOString() };
+          const stoppedMsgs = [...messages, stoppedAiMsg];
+          await persistChatMessages(executionChatId, targetChatSnapshot, stoppedMsgs);
+        } else {
+          await persistChatMessages(executionChatId, targetChatSnapshot, messages);
+          setMessages(messages);
+        }
+        return;
+      }
 
       const targetLang = resolveTargetLanguage(chatSettings?.preferredLanguage, messages);
       const targetLangCode = typeof targetLang === 'object' ? (targetLang.code || 'es') : targetLang;
@@ -1024,10 +1127,20 @@ Respond directly with the descriptive lore text without introductory fluff or pr
       runBackgroundCardGeneration(finalMsgs, targetChatSnapshot);
 
     } catch (err) {
+      const isAborted =
+        err.name === 'AbortError' ||
+        currentSignal?.aborted ||
+        (err?.message && String(err.message).toLowerCase().includes('aborted'));
+
+      if (isAborted) {
+        console.log('[Chat]: Generación cancelada por el usuario (Stop).');
+        return;
+      }
       console.error("Error al continuar chat:", err);
       const errorMsg = { from: 'ai', text: `[Error de conexión con IA]: ${err.message || 'Servidor de IA no accesible.'}`, timestamp: new Date().toISOString() };
       await persistChatMessages(executionChatId, targetChatSnapshot, [...messages, errorMsg]);
     } finally {
+      abortControllerRef.current = null;
       if (activeChatIdRef.current === executionChatId) {
         setIsSending(false);
         setGenerationProgress({ percent: 100, status: 'Completado' });
@@ -1368,6 +1481,7 @@ Respond directly with the descriptive lore text without introductory fluff or pr
         isCharacterSidebarClosed={isCharacterSidebarClosed}
         activeCharacter={activeCharacter}
         onOpenSidebar={() => setIsCharacterSidebarClosed(false)}
+        onStop={handleStopGeneration}
       />
       </div>
 

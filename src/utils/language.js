@@ -211,11 +211,14 @@ export const STYLE_PROMPT_PRESETS = {
   'Fantasía Oscura': 'dark fantasy aesthetic, atmospheric volumetric lighting, cinematic chiaroscuro, high dynamic range, rim lighting, detailed environment, rich textures, moody ambiance, visible clear illumination, masterpiece',
   'Paisaje Épico / Naturaleza': 'epic fantasy landscape, grand vistas, majestic natural lighting, golden hour rays, atmospheric haze, ultra detailed, sweeping panoramic view, pristine nature, 8k resolution',
   'Cyberpunk / Sci-Fi Futurista': 'cyberpunk sci-fi metropolis, vibrant neon lighting, volumetric night fog, rainy reflections, chromatic accents, sharp architectural details, high-tech dystopian atmosphere',
+  'Cyberpunk / Neón': 'cyberpunk sci-fi metropolis, vibrant neon lighting, volumetric night fog, rainy reflections, chromatic accents, sharp architectural details, high-tech dystopian atmosphere',
   'Grimdark / Gótico y Niebla': 'grimdark gothic architecture, haunting mist, soft moonlight illumination, dramatic shadows, baroque stonework, eerie atmospheric glow, intricate details, legible depth',
   'Anime / Ilustración Estilizada 2.5D': 'stylized 2.5D anime concept art, vibrant cinematic illumination, crisp clean outlines, dynamic key lighting, colorful atmospheric background, high aesthetic quality',
   'Anime / Fantasía': 'anime fantasy illustration, crisp details, expressive lighting, soft rim light, vibrant fantasy world, detailed character portrait, high quality digital painting',
   'Pintura al Óleo / Arte Conceptual': 'classical oil painting texture, rich visible brushwork, dramatic chiaroscuro composition, fine art masterpiece, museum quality lighting, deep emotional tones',
-  'Terror Cósmico / Lovecraftiano': 'cosmic horror landscape, otherworldly luminescence, non-euclidean architecture, eerie ethereal lighting, ominous celestial glow, atmospheric tension, detailed art'
+  'Terror Cósmico / Lovecraftiano': 'cosmic horror landscape, otherworldly luminescence, non-euclidean architecture, eerie ethereal lighting, ominous celestial glow, atmospheric tension, detailed art',
+  'Fotorealista / Retrato': 'photorealistic, cinematic lighting, 8k resolution, raw photo, realistic textures, highly detailed, sharp focus, natural colors, award-winning photography',
+  'Fotorealista': 'photorealistic, cinematic lighting, 8k resolution, raw photo, realistic textures, highly detailed, sharp focus, natural colors, award-winning photography'
 };
 
 // Multilingual common scenery and subject translation dictionary for SDXL diffusion prompts
@@ -424,9 +427,9 @@ export function detectDiffusionArchitecture(modelName = '') {
 export function getNegativePromptForModel(modelName = '') {
   const arch = detectDiffusionArchitecture(modelName);
   if (arch === 'pony') {
-    return 'score_6, score_5, score_4, score_3, score_2, score_1, worst quality, low quality, bad anatomy, bad hands, text, watermark, signature, frame, border, multiple people, group photo';
+    return 'score_6, score_5, score_4, score_3, score_2, score_1, worst quality, low quality, bad anatomy, bad hands, text, watermark, signature, frame, border, abstract, geometric patterns, stained glass, graffiti, multiple people, group photo';
   }
-  return 'blurry, low quality, deformed, distorted, text, watermark, bad anatomy, bad hands';
+  return 'blurry, low quality, deformed, distorted, text, watermark, bad anatomy, bad hands, abstract, geometric patterns, stained glass, graffiti';
 }
 
 /**
@@ -479,18 +482,20 @@ export function adaptPromptForDiffusionArchitecture(prompt = '', modelName = '',
 export function createVisualPromptTranslationPrompt(text = '', style = '', targetModel = '') {
   const arch = detectDiffusionArchitecture(targetModel);
   const isPony = arch === 'pony';
+  const styleInstruction = style ? `Desired visual style / aesthetic: ${style}.` : '';
 
   return {
     system: `You are an expert AI image prompt engineer and synthesizer for Stable Diffusion SDXL and Pony Diffusion anime models.
 Your task is to analyze character lore, biography, creature descriptions, or location scenery and distill it EXCLUSIVELY into concise, comma-separated English visual tags (Danbooru tokens).
+${styleInstruction}
 
 CRITICAL RULES:
 1. Output ONLY English comma-separated visual tags (Danbooru / CLIP tokens).
 2. DISTILL VISUALS, IGNORE NARRATIVE PROSE:
    - For characters: convert lore into concrete visual traits (e.g. "1man, warrior, silver armor, scarred cheek, holding broadsword" or "1woman, sorceress, crimson robe, staff, glowing runes").
-   - For locations & scenery: focus on physical space, materials, and lighting (e.g. "cozy wooden tavern, stone fireplace, warm lanterns, dark fantasy interior, rustic tables").
+   - For locations, scenarios & landscapes: focus on physical terrain, architecture, materials, nature, weather, and lighting (e.g. "neolithic village, primitive thatched huts, stone tools, pristine valley, lush green mountains, dramatic natural light").
    - For creatures & beasts: focus on anatomy, fur, and pose (e.g. "dire wolf, thick grey fur, sharp fangs, glowing red eyes, menacing stance, forest background").
-   - Never output abstract concepts like "family", "society", "pressure", "immortality", "responsibility", "task", "destiny" or meta labels like "intro", "details", "title".
+   - Never output abstract concepts like "family", "society", "pressure", "immortality", "responsibility", "task", "destiny", "critic", "internet", or meta labels like "intro", "details", "title".
 3. ${isPony ? 'Structure for Pony Diffusion: Focus on subject appearance, outfit, pose, expression, and environment without filler words.' : 'Structure for SDXL: Include subject, detailed appearance, attire, lighting, and camera composition.'}
 4. Do NOT include conversational filler, notes, prefixes, or markdown. Output ONLY the comma-separated English tags.`,
     user: `Convert this character or scene narrative into clean English visual diffusion tags:\n${text}`

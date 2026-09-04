@@ -241,7 +241,7 @@
   padding: 12px 24px 16px 24px;
   display: flex;
   gap: 12px;
-  align-items: center;
+  align-items: flex-end;
   width: 100%;
   box-sizing: border-box;
 }
@@ -430,12 +430,14 @@
 }
 
 .chat-input-area {
-  padding: 16px 24px;
+  padding: 12px 24px 16px 24px;
   background: rgba(18, 18, 26, 0.9);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   gap: 12px;
-  align-items: center;
+  align-items: flex-end;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .chat-textarea {
@@ -443,11 +445,23 @@
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 11px 14px;
   color: #ffffff;
-  font-size: 0.9rem;
+  font-family: inherit;
+  font-size: 0.92rem;
+  line-height: 1.5;
   outline: none;
   resize: none;
+  min-height: 44px;
+  max-height: 220px;
+  box-sizing: border-box;
+  overflow-y: hidden;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.chat-textarea:focus {
+  border-color: rgba(255, 211, 107, 0.4);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .chat-send-btn {
@@ -462,6 +476,26 @@
   align-items: center;
   justify-content: center;
   font-size: 1.1rem;
+  transition: all 0.2s ease;
+}
+
+.chat-send-btn.is-stopping {
+  background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
+  cursor: pointer;
+  animation: pulse-stop 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse-stop {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 18px rgba(239, 68, 68, 0.75);
+  }
 }
 
 .msg-edit-box textarea {

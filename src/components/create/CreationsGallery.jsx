@@ -1,4 +1,6 @@
 import React, { useRef } from 'react';
+import { useHorizontalWheelScroll } from '../../hooks/useHorizontalWheelScroll';
+import { useDragDropReorder } from '../../hooks/useDragDropReorder';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faSearch, 
@@ -54,9 +56,21 @@ function CreationRowSection({
   onOpenCreateModal,
   onStartChatWithCard,
   onCopyCard,
+  onReorderCards,
   onDeleteCardRequest
 }) {
   const scrollRef = useRef(null);
+  useHorizontalWheelScroll(scrollRef);
+
+  const { draggedIndex, dragOverIndex, getItemProps } = useDragDropReorder({
+    items,
+    areaId: `creations-row-${def.id}`,
+    onReorder: (newItems) => {
+      if (typeof onReorderCards === 'function') {
+        onReorderCards(newItems);
+      }
+    }
+  });
 
   const scroll = (direction) => {
     if (!scrollRef.current) return;
@@ -161,53 +175,63 @@ function CreationRowSection({
       {/* Carrusel Horizontal de Tarjetas */}
       {items.length > 0 ? (
         <div
-          ref={scrollRef}
+          ref={scrollRef.callbackRef || scrollRef}
           style={{
             display: 'flex',
             gap: '14px',
             overflowX: 'auto',
             padding: '4px 2px 14px 2px',
-            scrollSnapType: 'x mandatory',
             scrollbarWidth: 'thin',
             WebkitOverflowScrolling: 'touch'
           }}
         >
-          {items.map((card) => {
+          {items.map((card, index) => {
             const typeStyle = getCardTypeStyle(card.type);
             const provenance = getCardProvenance(card);
             const isScenario = card.type === 'Historia' || card.type === 'Escenario' || card.isScenario;
+            const dragProps = getItemProps(index);
+            const isBeingDragged = draggedIndex === index;
+            const isDropTarget = dragOverIndex === index;
 
             return (
               <div
                 key={card.id}
+                {...dragProps}
                 onClick={() => onOpenCard(card)}
                 style={{
                   minWidth: '230px',
                   maxWidth: '230px',
                   height: '320px',
-                  scrollSnapAlign: 'start',
                   position: 'relative',
                   borderRadius: '14px',
                   overflow: 'hidden',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  cursor: 'grab',
+                  transition: 'transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.2s ease',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'flex-end',
-                  border: `1px solid ${typeStyle.borderColor || 'rgba(255,255,255,0.15)'}`,
-                  background: '#12131e',
+                  border: isDropTarget
+                    ? `2px dashed ${def.color || '#ffd36b'}`
+                    : `1px solid ${typeStyle.borderColor || 'rgba(255,255,255,0.15)'}`,
+                  background: isDropTarget ? 'rgba(255, 211, 107, 0.08)' : '#12131e',
+                  opacity: isBeingDragged ? 0.45 : 1,
+                  transform: isDropTarget ? 'scale(1.02)' : 'none',
                   flexShrink: 0,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.4)'
+                  boxShadow: isDropTarget ? `0 0 15px ${def.color || '#ffd36b'}60` : '0 4px 16px rgba(0,0,0,0.4)'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 12px 28px rgba(0,0,0,0.7)';
-                  e.currentTarget.style.borderColor = def.color;
+                  if (!isBeingDragged) {
+                    e.currentTarget.style.transform = isDropTarget ? 'scale(1.02)' : 'translateY(-4px)';
+                    e.currentTarget.style.boxShadow = '0 12px 28px rgba(0,0,0,0.7)';
+                    e.currentTarget.style.borderColor = def.color;
+                  }
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.4)';
-                  e.currentTarget.style.borderColor = typeStyle.borderColor || 'rgba(255,255,255,0.15)';
+                  if (!isBeingDragged) {
+                    e.currentTarget.style.transform = isDropTarget ? 'scale(1.02)' : 'translateY(0)';
+                    e.currentTarget.style.boxShadow = isDropTarget ? `0 0 15px ${def.color || '#ffd36b'}60` : '0 4px 16px rgba(0,0,0,0.4)';
+                    e.currentTarget.style.borderColor = isDropTarget ? `2px dashed ${def.color}` : (typeStyle.borderColor || 'rgba(255,255,255,0.15)');
+                  }
                 }}
               >
                 {/* Imagen de fondo completa con enfoque superior (sin decapitar cabezas/rostros) */}
@@ -459,6 +483,7 @@ export default function CreationsGallery({
   onOpenCreateModal,
   onStartChatWithCard,
   onCopyCard,
+  onReorderCards,
   onDeleteCardRequest
 }) {
   // Determinar si se muestra la vista multilínea categorizada o una sola categoría seleccionada
@@ -531,6 +556,7 @@ export default function CreationsGallery({
             onChange={(e) => setSortBy(e.target.value)}
             style={{ padding: '7px 10px', background: '#1c1f2e', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', color: '#fff', fontSize: '0.8rem', cursor: 'pointer' }}
           >
+            <option value="custom">Orden Personalizado (Manual)</option>
             <option value="recent">Más recientes</option>
             <option value="oldest">Más antiguos</option>
             <option value="name_asc">Nombre (A-Z)</option>
@@ -573,6 +599,7 @@ export default function CreationsGallery({
               onOpenCreateModal={onOpenCreateModal}
               onStartChatWithCard={onStartChatWithCard}
               onCopyCard={onCopyCard}
+              onReorderCards={onReorderCards}
               onDeleteCardRequest={onDeleteCardRequest}
             />
           );

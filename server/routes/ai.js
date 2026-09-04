@@ -22,13 +22,21 @@ async function handleChatCompletion(req, res) {
       return res.status(400).json({ success: false, error: 'messages array is required' });
     }
 
+    const abortController = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        abortController.abort();
+      }
+    });
+
     const mergedOptions = {
       ...req.body,
       ...(options || {}),
       model: req.body.model || options.model,
       maxTokens: req.body.max_tokens || req.body.maxTokens || options.maxTokens || options.max_tokens,
       temperature: req.body.temperature !== undefined ? req.body.temperature : options.temperature,
-      topP: req.body.top_p !== undefined ? req.body.top_p : options.topP
+      topP: req.body.top_p !== undefined ? req.body.top_p : options.topP,
+      signal: abortController.signal
     };
 
     const isStreaming = stream || options.stream || req.body.stream;
@@ -66,6 +74,19 @@ async function handleChatCompletion(req, res) {
       });
     }
   } catch (error) {
+    const isAbort =
+      error.name === 'AbortError' ||
+      abortController.signal.aborted ||
+      (error.message && error.message.toLowerCase().includes('aborted'));
+
+    if (isAbort) {
+      console.log('[AI Route]: Request cancelled by client (abort).');
+      if (!res.headersSent) {
+        return res.status(499).json({ success: false, error: 'This operation was aborted', aborted: true });
+      }
+      return res.end();
+    }
+
     console.error('[AI Route Error]:', error);
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: error.message });

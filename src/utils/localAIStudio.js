@@ -406,7 +406,7 @@ export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fa
           { role: 'user', content: user }
         ],
         temperature: 0.2,
-        max_tokens: 120,
+        max_tokens: 512,
         repetition_penalty: 1.2,
         frequency_penalty: 0.3,
         presence_penalty: 0.2,
@@ -416,11 +416,16 @@ export async function translateVisualPromptToEnglish(rawPrompt = '', style = 'Fa
 
     if (response && response.ok) {
       const data = await response.json();
-      let translated = data.choices?.[0]?.message?.content?.trim();
+      let translated = (data.choices?.[0]?.message?.content || data.reply || '').trim();
       if (translated) {
         // Strip think blocks and markdown code fences
-        translated = translated.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        if (translated.includes('</think>')) {
+          translated = translated.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        } else if (translated.includes('<think>')) {
+          translated = translated.replace(/<think>[\s\S]*/gi, '').trim();
+        }
         translated = translated.replace(/^```[a-z]*\s*/i, '').replace(/```$/i, '').trim();
+        translated = translated.replace(/^["']|["']$/g, '').trim();
 
         // Anti-repetition token deduplication and meta-words filtering (e.g. intro, details)
         const rawTokens = translated.split(/[,;\n]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
@@ -799,14 +804,17 @@ export async function sendChatMessage({
   guidanceHook = '',
   baseUrl,
   onChunk = null,
-  callerType = 'STORYTELLER_LLM'
+  callerType = 'STORYTELLER_LLM',
+  signal = null
 }) {
   const finalBaseUrl = getBaseUrl(baseUrl);
   const chatStartTime = Date.now();
+  let fullContent = '';
+  let weightedDocs = [];
   try {
     const recentText = messages.slice(-3).map(m => m.text).join(' ').toLowerCase();
     
-    const weightedDocs = (contextDocuments && contextDocuments.length > 0)
+    weightedDocs = (contextDocuments && contextDocuments.length > 0)
       ? contextDocuments.filter(doc => {
           if (!doc) return false;
           // Si el llamador ya seleccionó documentos específicos (inbound.filteredCards <= 10 docs o con peso calculado)
@@ -918,7 +926,8 @@ export async function sendChatMessage({
     let response = await apiFetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: requestBody
+      body: requestBody,
+      signal
     }, finalBaseUrl);
 
     if (!response.ok) {
@@ -937,17 +946,24 @@ export async function sendChatMessage({
         response = await apiFetch('/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: fallbackBody
+          body: fallbackBody,
+          signal
         }, finalBaseUrl);
       }
     }
 
     if (!response.ok) {
       const errText = await response.text().catch(() => response.statusText);
-      throw new Error(`LM Studio API Error: ${errText || response.statusText}`);
+      const isAborted = (signal && signal.aborted) ||
+        response.status === 499 ||
+        (errText && (errText.includes('aborted') || errText.includes('This operation was aborted')));
+      if (isAborted) {
+        return { text: fullContent || '', aborted: true };
+      }
+      throw new Error(`Ptahn Server Error: ${errText || response.statusText}`);
     }
 
-    let fullContent = '';
+    fullContent = '';
     let isReasoning = false;
 
     if (isStream && response.body && response.body.getReader) {
@@ -955,9 +971,17 @@ export async function sendChatMessage({
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
 
+      const onAbort = () => {
+        try { reader.cancel(); } catch (e) {}
+      };
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+
       while (true) {
+        if (signal && signal.aborted) break;
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || (signal && signal.aborted)) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
@@ -991,6 +1015,9 @@ export async function sendChatMessage({
           } catch (e) {}
         }
       }
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       if (isReasoning && !fullContent.includes('</think>')) {
         fullContent += '</think>';
       }
@@ -1019,9 +1046,17 @@ export async function sendChatMessage({
     
     return {
       text: fullContent,
+      aborted: Boolean(signal && signal.aborted),
       usedContextDocs: weightedDocs.map(d => d.title)
     };
   } catch (error) {
+    if (error.name === 'AbortError' || (signal && signal.aborted)) {
+      return {
+        text: fullContent || '',
+        aborted: true,
+        usedContextDocs: weightedDocs.map(d => d.title)
+      };
+    }
     console.error('[Local AI Studio Chat Error]:', error);
     emitAILog({
       from: 'STORYTELLER_LLM',

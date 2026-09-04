@@ -129,6 +129,7 @@ router.post('/restart', async (req, res) => {
       await llamaEngine.context.dispose().catch(() => {});
       llamaEngine.context = null;
     }
+    llamaEngine.resetMutex();
     await llamaEngine.initRuntime().catch(() => {});
     res.json({
       success: true,

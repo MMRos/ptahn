@@ -3,10 +3,12 @@ import sample from '../data/scenarios';
 import HeaderSlider from '../components/HeaderSlider';
 import SearchBar from '../components/SearchBar';
 import ScenarioCard from '../components/ScenarioCard';
+import useHorizontalWheelScroll from '../hooks/useHorizontalWheelScroll';
 import './home.css';
 
 function CategoryCarousel({ title, items, onOpen }) {
   const rowRef = useRef(null);
+  useHorizontalWheelScroll(rowRef);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
